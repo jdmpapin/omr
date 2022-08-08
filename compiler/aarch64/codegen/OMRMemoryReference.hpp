@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -37,6 +37,7 @@ namespace OMR { typedef OMR::ARM64::MemoryReference MemoryReferenceConnector; }
 
 #include <stddef.h>
 #include <stdint.h>
+#include "codegen/ARM64ShiftCode.hpp"
 #include "codegen/InstOpCode.hpp"
 #include "codegen/Register.hpp"
 #include "env/TRMemory.hpp"
@@ -44,6 +45,7 @@ namespace OMR { typedef OMR::ARM64::MemoryReference MemoryReferenceConnector; }
 
 namespace TR { class CodeGenerator; }
 namespace TR { class Instruction; }
+namespace TR { class MemoryReference; }
 namespace TR { class Node; }
 namespace TR { class UnresolvedDataSnippet; }
 
@@ -59,7 +61,8 @@ class OMR_EXTENSIBLE MemoryReference : public OMR::MemoryReference
    TR::Node *_baseNode;
    TR::Register *_indexRegister;
    TR::Node *_indexNode;
-   int32_t _offset;
+   intptr_t _offset;
+   uint32_t _length;
 
    TR::UnresolvedDataSnippet *_unresolvedSnippet;
    TR::SymbolReference *_symbolReference;
@@ -75,16 +78,7 @@ class OMR_EXTENSIBLE MemoryReference : public OMR::MemoryReference
    uint8_t _flag;
    uint8_t _scale;
 
-   public:
-
-   TR_ALLOC(TR_Memory::MemoryReference)
-
-   typedef enum
-      {
-      TR_ARM64MemoryReferenceControl_Base_Modifiable  = 0x01,
-      TR_ARM64MemoryReferenceControl_Index_Modifiable = 0x02,
-      /* To be added more if necessary */
-      } TR_ARM64MemoryReferenceControl;
+   protected:
 
    /**
     * @brief Constructor
@@ -124,7 +118,7 @@ class OMR_EXTENSIBLE MemoryReference : public OMR::MemoryReference
     */
    MemoryReference(
          TR::Register *br,
-         int32_t disp,
+         intptr_t disp,
          TR::CodeGenerator *cg);
 
    /**
@@ -141,6 +135,21 @@ class OMR_EXTENSIBLE MemoryReference : public OMR::MemoryReference
     * @param[in] cg : CodeGenerator object
     */
    MemoryReference(TR::Node *node, TR::SymbolReference *symRef, TR::CodeGenerator *cg);
+
+   public:
+
+   TR_ALLOC(TR_Memory::MemoryReference)
+
+   typedef enum
+      {
+      TR_ARM64MemoryReferenceControl_Base_Modifiable  = 0x01,
+      TR_ARM64MemoryReferenceControl_Index_Modifiable = 0x02,
+      TR_ARM64MemoryReferenceControl_Index_SignExtendedByte = 0x04,
+      TR_ARM64MemoryReferenceControl_Index_SignExtendedHalf = 0x08,
+      TR_ARM64MemoryReferenceControl_Index_SignExtendedWord = 0x10,
+      TR_ARM64MemoryReferenceControl_DelayedOffsetDone = 0x20
+      /* To be added more if necessary */
+      } TR_ARM64MemoryReferenceControl;
 
    /**
     * @brief Gets base register
@@ -234,10 +243,10 @@ class OMR_EXTENSIBLE MemoryReference : public OMR::MemoryReference
     * @param[in] withRegSym : add offset of register mapped symbol if true
     * @return offset
     */
-   int32_t getOffset(bool withRegSym = false)
+   intptr_t getOffset(bool withRegSym = false)
       {
-      int32_t displacement = _offset;
-      if (withRegSym &&
+      intptr_t displacement = _offset;
+      if (withRegSym && !isDelayedOffsetDone() &&
           _symbolReference->getSymbol() != NULL &&
           _symbolReference->getSymbol()->isRegisterMappedSymbol())
          displacement += _symbolReference->getSymbol()->getOffset();
@@ -249,7 +258,7 @@ class OMR_EXTENSIBLE MemoryReference : public OMR::MemoryReference
     * @param[in] o : offset
     * @return offset
     */
-   int32_t setOffset(int32_t o) {return _offset = o;}
+   intptr_t setOffset(intptr_t o) {return _offset = o;}
 
    /**
     * @brief Answers if MemoryReference refs specified register
@@ -336,6 +345,106 @@ class OMR_EXTENSIBLE MemoryReference : public OMR::MemoryReference
    void clearIndexModifiable() {_flag &= ~TR_ARM64MemoryReferenceControl_Index_Modifiable;}
 
    /**
+    * @brief Index register is sign extended or not
+    * @return true when index register is sign extended
+    */
+   bool isIndexSignExtended()
+      {
+      return (isIndexSignExtendedWord() || isIndexSignExtendedHalf() || isIndexSignExtendedByte());
+      }
+   /**
+    * @brief The extend code for the index register is SXTB or not
+    * @return true when the extend code for index register is SXTB
+    */
+   bool isIndexSignExtendedByte()
+      {
+      return ((_flag & TR_ARM64MemoryReferenceControl_Index_SignExtendedByte) != 0);
+      }
+   /**
+    * @brief The extend code for the index register is SXTH or not
+    * @return true when the extend code for index register is SXTH
+    */
+   bool isIndexSignExtendedHalf()
+      {
+      return ((_flag & TR_ARM64MemoryReferenceControl_Index_SignExtendedHalf) != 0);
+      }
+   /**
+    * @brief The extend code for the index register is SXTW or not
+    * @return true when the extend code for index register is SXTW
+    */
+   bool isIndexSignExtendedWord()
+      {
+      return ((_flag & TR_ARM64MemoryReferenceControl_Index_SignExtendedWord) != 0);
+      }
+   /**
+    * @brief Sets the IndexSignExtendedByte flag
+    */
+   void setIndexSignExtendedByte() {_flag |= TR_ARM64MemoryReferenceControl_Index_SignExtendedByte;}
+   /**
+    * @brief Sets the IndexSignExtendedHalf flag
+    */
+   void setIndexSignExtendedHalf() {_flag |= TR_ARM64MemoryReferenceControl_Index_SignExtendedHalf;}
+   /**
+    * @brief Sets the IndexSignExtendedWord flag
+    */
+   void setIndexSignExtendedWord() {_flag |= TR_ARM64MemoryReferenceControl_Index_SignExtendedWord;}
+   /**
+    * @brief Clears the IndexSignExtende flag
+    */
+   void clearIndexSignExtended() {_flag &= ~(TR_ARM64MemoryReferenceControl_Index_SignExtendedByte |
+                                            TR_ARM64MemoryReferenceControl_Index_SignExtendedHalf |
+                                            TR_ARM64MemoryReferenceControl_Index_SignExtendedWord);}
+
+   /**
+    * @brief Gets the flag indicating whether the delayed offset has already been applied.
+    *
+    * When this flag is set, the delayed offset of this MemoryReference from its register-mapped
+    * symbol has already been applied to this MemoryReference's internal offset and should not be
+    * applied again. When true, getOffset(false) and getOffset(true) are guaranteed to
+    * return the same value.
+    *
+    * @see setDelayedOffsetDone()
+    */
+   bool isDelayedOffsetDone()
+      {
+      return (_flag & TR_ARM64MemoryReferenceControl_DelayedOffsetDone) != 0;
+      }
+
+   /**
+    * @brief Sets the flag to indicate that the delayed offset has been applied.
+    *
+    * @see isDelayedOffsetDone()
+    */
+   void setDelayedOffsetDone()
+      {
+      _flag |= TR_ARM64MemoryReferenceControl_DelayedOffsetDone;
+      }
+
+   /**
+    * @brief Returns the extend code for the index register
+    * @returns the extend code for the index register
+    */
+   TR::ARM64ExtendCode getIndexExtendCode()
+      {
+      if (isIndexSignExtendedWord())
+         {
+         return TR::EXT_SXTW;
+         }
+      else if (isIndexSignExtendedHalf())
+         {
+         return TR::EXT_SXTH;
+         }
+      else if (isIndexSignExtendedByte())
+         {
+         return TR::EXT_SXTB;
+         }
+      else
+         {
+         return TR::EXT_UXTX;
+         }
+      }
+
+   /**
     * @brief Gets the unresolved data snippet
     * @return the unresolved data snippet
     */
@@ -385,12 +494,14 @@ class OMR_EXTENSIBLE MemoryReference : public OMR::MemoryReference
 
    /**
     * @brief Consolidates registers
-    * @param[in] srcReg : source register
-    * @param[in] srcTree : source tree node
-    * @param[in] srcModifiable : true if modifiable
+    * @details Consolidates registers to the a new base register.
+    *          Expects that _indexRegister is not NULL.
+    *          After consoliation, _indexRegister and _indexNode are set to NULL.
+    *
+    * @param[in] subTree : sub tree node
     * @param[in] cg : CodeGenerator
     */
-   void consolidateRegisters(TR::Register *srcReg, TR::Node *srcTree, bool srcModifiable, TR::CodeGenerator *cg);
+   void consolidateRegisters(TR::Node *subTree, TR::CodeGenerator *cg);
 
    /**
     * @brief Do bookkeeping of use counts of registers in the MemoryReference
@@ -398,6 +509,13 @@ class OMR_EXTENSIBLE MemoryReference : public OMR::MemoryReference
     * @param[in] cg : CodeGenerator
     */
    void bookKeepingRegisterUses(TR::Instruction *instr, TR::CodeGenerator *cg);
+
+   /**
+    * @brief Returns the appropriate opcode mnemonic for specified opcode mnemonic
+    * @param[in] mnemonic : mnemonic
+    * @return mnemonic
+    */
+   TR::InstOpCode::Mnemonic mapOpCode(TR::InstOpCode::Mnemonic op);
 
    /**
     * @brief Assigns registers
@@ -421,6 +539,40 @@ class OMR_EXTENSIBLE MemoryReference : public OMR::MemoryReference
     * @return instruction cursor after encoding
     */
    uint8_t *generateBinaryEncoding(TR::Instruction *ci, uint8_t *cursor, TR::CodeGenerator *cg);
+
+   /**
+    * @brief Returns the scale factor for node
+    * @param[in] node: node
+    * @param[in] cg: CodeGenerator
+    * @return scale factor for node
+    */
+   int32_t getScaleForNode(TR::Node *node, TR::CodeGenerator *cg);
+
+   /**
+    * @brief Expands the instruction which uses this memory reference into multiple instructions if necessary
+    *
+    * @param currentInstruction: current instruction
+    * @param cg : CodeGenerator
+    * @return the last instruction in the expansion or this instruction if no expansion was
+    *          performed.
+    */
+   TR::Instruction *expandInstruction(TR::Instruction *currentInstruction, TR::CodeGenerator *cg);
+
+   private:
+
+   /**
+    * @brief Moves index register and node to base register and node.
+    * @param[in] node: node
+    * @param[in] cg: CodeGenerator
+    */
+   void moveIndexToBase(TR::Node *node, TR::CodeGenerator *cg);
+
+   /**
+    * @brief Normalizes the memory reference so that it can be encoded into instruction.
+    * @param[in] node: node
+    * @param[in] cg: CodeGenerator
+    */
+   void normalize(TR::Node *node, TR::CodeGenerator *cg);
    };
 
 } // ARM64

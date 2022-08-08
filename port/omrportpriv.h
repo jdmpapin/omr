@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -823,6 +823,10 @@ omrstr_convert(struct OMRPortLibrary *portLibrary, int32_t fromCode, int32_t toC
 /* J9SourceJ9StrFTime*/
 extern J9_CFUNC uintptr_t
 omrstr_ftime(struct OMRPortLibrary *portLibrary, char *buf, uintptr_t bufLen, const char *format, int64_t timeMillis);
+extern J9_CFUNC uintptr_t
+omrstr_ftime_ex(struct OMRPortLibrary *portLibrary, char *buf, uintptr_t bufLen, const char *format, int64_t timeMillis, uint32_t flags);
+extern J9_CFUNC int32_t
+omrstr_current_time_zone(struct OMRPortLibrary *portLibrary, int32_t *secondsEast, char *zoneNameBuffer, size_t zoneNameBufferLen);
 
 /* J9SourceJ9Time*/
 extern J9_CFUNC uintptr_t
@@ -947,12 +951,12 @@ extern J9_CFUNC struct J9PlatformThread *
 omrintrospect_threads_startDo_with_signal(struct OMRPortLibrary *portLibrary, J9Heap *heap, J9ThreadWalkState *state, void *signal_info);
 extern J9_CFUNC struct J9PlatformThread *
 omrintrospect_threads_nextDo(J9ThreadWalkState *state);
-extern J9_CFUNC struct J9PlatformThread *
-omrintrospect_threads_nextDo(J9ThreadWalkState *state);
 extern J9_CFUNC uintptr_t
 omrintrospect_backtrace_thread(struct OMRPortLibrary *portLibrary, J9PlatformThread *threadInfo, J9Heap *heap, void *signalInfo);
 extern J9_CFUNC uintptr_t
 omrintrospect_backtrace_symbols(struct OMRPortLibrary *portLibrary, J9PlatformThread *threadInfo, J9Heap *heap);
+extern J9_CFUNC uintptr_t
+omrintrospect_backtrace_symbols_ex(struct OMRPortLibrary *portLibrary, J9PlatformThread *threadInfo, J9Heap *heap, uint32_t options);
 
 /* omrcuda */
 #if defined(OMR_OPT_CUDA)

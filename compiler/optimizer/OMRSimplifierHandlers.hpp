@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -206,18 +206,15 @@ TR::Node * endBlockSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier
 TR::Node * selectSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * a2iSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * a2lSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * v2vSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
+TR::Node * vcastSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * vsetelemSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * checkcastSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * checkcastAndNULLCHKSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * variableNewSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * caddSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * csubSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * imulhSimplifier(TR::Node * node, TR::Block *block, TR::Simplifier * s);
 TR::Node * lmulhSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * f2cSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * d2cSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * expSimplifier(TR::Node *node,TR::Block *block,TR::Simplifier *s);
 TR::Node * ibits2fSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * lbits2dSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * fbits2iSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
@@ -247,8 +244,6 @@ TR::Node * byteswapSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier
 TR::Node * computeCCSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * arraysetSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * bitOpMemSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * bitOpMemNDSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * arrayCmpWithPadSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * eaddSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * esubSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * enegSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
@@ -270,5 +265,24 @@ TR::Node * lowerTreeSimplifier(TR::Node * node, TR::Block * block, TR::Simplifie
 TR::Node * arrayLengthSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 
 TR::Node * removeArithmeticsUnderIntegralCompare(TR::Node* node,TR::Simplifier * s);
+
+typedef TR::Node *(* SimplifierPtr)(TR::Node *node, TR::Block *block, TR::Simplifier *s);
+
+class SimplifierPointerTable
+   {
+   private:
+   static const SimplifierPtr table[];
+
+   static void checkTableSize();
+
+   public:
+
+   SimplifierPointerTable() {}; // some compilers require a default constructor for this class
+
+   SimplifierPtr operator[] (TR::ILOpCode opcode) const
+      {
+      return table[opcode.getTableIndex()];
+      }
+   };
 
 #endif

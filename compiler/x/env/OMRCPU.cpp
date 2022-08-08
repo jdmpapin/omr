@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2018 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -34,13 +34,16 @@ OMR::X86::CPU::detect(OMRPortLibrary * const omrPortLib)
    {
    if (omrPortLib == NULL)
       return TR::CPU();
-   
+
    // Only enable the features that compiler currently uses
    uint32_t const enabledFeatures [] = {OMR_FEATURE_X86_FPU, OMR_FEATURE_X86_CX8, OMR_FEATURE_X86_CMOV,
                                         OMR_FEATURE_X86_MMX, OMR_FEATURE_X86_SSE, OMR_FEATURE_X86_SSE2,
                                         OMR_FEATURE_X86_SSSE3, OMR_FEATURE_X86_SSE4_1, OMR_FEATURE_X86_POPCNT,
                                         OMR_FEATURE_X86_AESNI, OMR_FEATURE_X86_OSXSAVE, OMR_FEATURE_X86_AVX,
-                                        OMR_FEATURE_X86_FMA, OMR_FEATURE_X86_HLE, OMR_FEATURE_X86_RTM};
+                                        OMR_FEATURE_X86_AVX2, OMR_FEATURE_X86_FMA, OMR_FEATURE_X86_HLE,
+                                        OMR_FEATURE_X86_RTM, OMR_FEATURE_X86_AVX512F, OMR_FEATURE_X86_AVX512VL,
+                                        OMR_FEATURE_X86_AVX512BW, OMR_FEATURE_X86_AVX512DQ
+                                        };
 
    OMRPORT_ACCESS_FROM_OMRPORT(omrPortLib);
    OMRProcessorDesc featureMasks;
@@ -59,7 +62,8 @@ OMR::X86::CPU::detect(OMRPortLibrary * const omrPortLib)
 
    if (TRUE == omrsysinfo_processor_has_feature(&processorDescription, OMR_FEATURE_X86_OSXSAVE))
       {
-      if (((6 & _xgetbv(0)) != 6) || feGetEnv("TR_DisableAVX")) // '6' = mask for XCR0[2:1]='11b' (XMM state and YMM state are enabled)
+      static const bool disableAVX = feGetEnv("TR_DisableAVX") != NULL;
+      if (((6 & _xgetbv(0)) != 6) || disableAVX) // '6' = mask for XCR0[2:1]='11b' (XMM state and YMM state are enabled)
          {
          // Unset OSXSAVE if not enabled via CR0
          omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_X86_OSXSAVE, FALSE);
@@ -69,44 +73,23 @@ OMR::X86::CPU::detect(OMRPortLibrary * const omrPortLib)
    return TR::CPU(processorDescription);
    }
 
+void
+OMR::X86::CPU::initializeTargetProcessorInfo()
+   {
+   OMR::X86::CodeGenerator::initializeX86TargetProcessorInfo();
+   }
+
 TR_X86CPUIDBuffer *
 OMR::X86::CPU::queryX86TargetCPUID()
    {
    static TR_X86CPUIDBuffer *buf = NULL;
-   auto jitConfig = TR::JitConfig::instance();
 
-   if (jitConfig && jitConfig->getProcessorInfo() == NULL)
+   if (!buf)
       {
-      buf = (TR_X86CPUIDBuffer *) malloc(sizeof(TR_X86CPUIDBuffer));
+      buf = reinterpret_cast<TR_X86CPUIDBuffer *>(malloc(sizeof(TR_X86CPUIDBuffer)));
       if (!buf)
-         return 0;
+         return NULL;
       jitGetCPUID(buf);
-      jitConfig->setProcessorInfo(buf);
-      }
-   else
-      {
-      if (!buf)
-         {
-         if (jitConfig && jitConfig->getProcessorInfo())
-            {
-            buf = (TR_X86CPUIDBuffer *)jitConfig->getProcessorInfo();
-            }
-         else
-            {
-            buf = (TR_X86CPUIDBuffer *) malloc(sizeof(TR_X86CPUIDBuffer));
-
-            if (!buf)
-               memcpy(buf->_vendorId, "Poughkeepsie", 12); // 12 character dummy string (NIL term not used)
-
-            buf->_processorSignature = 0;
-            buf->_brandIdEtc = 0;
-            buf->_featureFlags = 0x00000000;
-            buf->_cacheDescription.l1instr = 0;
-            buf->_cacheDescription.l1data  = 0;
-            buf->_cacheDescription.l2      = 0;
-            buf->_cacheDescription.l3      = 0;
-            }
-         }
       }
 
    return buf;
@@ -185,23 +168,14 @@ OMR::X86::CPU::isAuthenticAMD()
    {
    if (TR::Compiler->omrPortLib == NULL)
       return TR::CodeGenerator::getX86ProcessorInfo().isAuthenticAMD();
-   
+
    return self()->isAtLeast(OMR_PROCESSOR_X86_AMD_FIRST) && self()->isAtMost(OMR_PROCESSOR_X86_AMD_LAST);
    }
 
 bool
 OMR::X86::CPU::requiresLFence()
    {
-   return false;  /* Dummy for now, we may need LFENCE in future processors*/
-   }
-
-bool
-OMR::X86::CPU::supportsFCOMIInstructions()
-   {
-   if (TR::Compiler->omrPortLib == NULL)
-      return TR::CodeGenerator::getX86ProcessorInfo().supportsFCOMIInstructions();
-
-   return self()->supportsFeature(OMR_FEATURE_X86_FPU) || self()->supportsFeature(OMR_FEATURE_X86_CMOV);
+   return false;  /* Dummy for now, we may need TR::InstOpCode::LFENCE in future processors*/
    }
 
 bool
@@ -254,7 +228,10 @@ OMR::X86::CPU::is(OMRProcessorArchitecture p)
    {
    if (TR::Compiler->omrPortLib == NULL)
       return self()->is_old_api(p);
-   TR_ASSERT_FATAL(self()->is_test(p), "old api and new api did not match, processor %d", p);
+
+   static bool disableOldVersionCPUDetectionTest = feGetEnv("TR_DisableOldVersionCPUDetectionTest") != NULL;
+   if (!disableOldVersionCPUDetectionTest)
+      TR_ASSERT_FATAL(self()->is_test(p), "old api and new api did not match, processor %d", p);
 
    return _processorDescription.processor == p;
    }
@@ -264,7 +241,10 @@ OMR::X86::CPU::supportsFeature(uint32_t feature)
    {
    if (TR::Compiler->omrPortLib == NULL)
       return self()->supports_feature_old_api(feature);
-   TR_ASSERT_FATAL(self()->supports_feature_test(feature), "old api and new api did not match, feature %d", feature);
+
+   static bool disableOldVersionCPUDetectionTest = feGetEnv("TR_DisableOldVersionCPUDetectionTest") != NULL;
+   if (!disableOldVersionCPUDetectionTest)
+      TR_ASSERT_FATAL(self()->supports_feature_test(feature), "old api and new api did not match, feature %d", feature);
 
    OMRPORT_ACCESS_FROM_OMRPORT(TR::Compiler->omrPortLib);
    return TRUE == omrsysinfo_processor_has_feature(&_processorDescription, feature);
@@ -396,7 +376,17 @@ OMR::X86::CPU::supports_feature_test(uint32_t feature)
       case OMR_FEATURE_X86_TM:
          return TR::CodeGenerator::getX86ProcessorInfo().hasThermalMonitor() == ans;
       case OMR_FEATURE_X86_AVX:
-         return true;
+         return TR::CodeGenerator::getX86ProcessorInfo().supportsAVX() == ans;
+      case OMR_FEATURE_X86_AVX2:
+         return TR::CodeGenerator::getX86ProcessorInfo().supportsAVX2();
+      case OMR_FEATURE_X86_AVX512F:
+         return TR::CodeGenerator::getX86ProcessorInfo().supportsAVX512F();
+      case OMR_FEATURE_X86_AVX512VL:
+         return TR::CodeGenerator::getX86ProcessorInfo().supportsAVX512VL();
+      case OMR_FEATURE_X86_AVX512BW:
+         return TR::CodeGenerator::getX86ProcessorInfo().supportsAVX512BW();
+      case OMR_FEATURE_X86_AVX512DQ:
+         return TR::CodeGenerator::getX86ProcessorInfo().supportsAVX512DQ();
       default:
          return false;
       }
@@ -581,6 +571,24 @@ OMR::X86::CPU::supports_feature_old_api(uint32_t feature)
       case OMR_FEATURE_X86_TM:
          supported = TR::CodeGenerator::getX86ProcessorInfo().hasThermalMonitor();
          break;
+      case OMR_FEATURE_X86_AVX:
+          supported = TR::CodeGenerator::getX86ProcessorInfo().supportsAVX();
+          break;
+      case OMR_FEATURE_X86_AVX2:
+          supported = TR::CodeGenerator::getX86ProcessorInfo().supportsAVX2();
+          break;
+      case OMR_FEATURE_X86_AVX512F:
+         supported = TR::CodeGenerator::getX86ProcessorInfo().supportsAVX512F();
+         break;
+      case OMR_FEATURE_X86_AVX512VL:
+         supported = TR::CodeGenerator::getX86ProcessorInfo().supportsAVX512VL();
+         break;
+      case OMR_FEATURE_X86_AVX512BW:
+         supported = TR::CodeGenerator::getX86ProcessorInfo().supportsAVX512BW();
+         break;
+      case OMR_FEATURE_X86_AVX512DQ:
+         supported = TR::CodeGenerator::getX86ProcessorInfo().supportsAVX512DQ();
+         break;
       default:
          TR_ASSERT_FATAL(false, "Unknown feature %d", feature);
          break;
@@ -588,3 +596,83 @@ OMR::X86::CPU::supports_feature_old_api(uint32_t feature)
    return supported;
    }
 
+const char*
+OMR::X86::CPU::getProcessorName()
+   {
+   const char* returnString = "";
+   switch(_processorDescription.processor)
+      {
+      case OMR_PROCESSOR_X86_INTELPENTIUM:
+         returnString = "X86 Intel Pentium";
+         break;
+
+      case OMR_PROCESSOR_X86_INTELP6:
+         returnString = "X86 Intel P6";
+         break;
+
+      case OMR_PROCESSOR_X86_INTELPENTIUM4:
+         returnString = "X86 Intel Netburst Microarchitecture";
+         break;
+
+      case OMR_PROCESSOR_X86_INTELCORE2:
+         returnString = "X86 Intel Core2 Microarchitecture";
+         break;
+
+      case OMR_PROCESSOR_X86_INTELTULSA:
+         returnString = "X86 Intel Tulsa";
+         break;
+
+      case OMR_PROCESSOR_X86_INTELNEHALEM:
+         returnString = "X86 Intel Nehalem";
+         break;
+
+      case OMR_PROCESSOR_X86_INTELWESTMERE:
+         returnString = "X86 Intel Westmere";
+         break;
+
+      case OMR_PROCESSOR_X86_INTELSANDYBRIDGE:
+         returnString = "X86 Intel Sandy Bridge";
+         break;
+
+      case OMR_PROCESSOR_X86_INTELIVYBRIDGE:
+         returnString = "X86 Intel Ivy Bridge";
+         break;
+
+      case OMR_PROCESSOR_X86_INTELHASWELL:
+         returnString = "X86 Intel Haswell";
+         break;
+
+      case OMR_PROCESSOR_X86_INTELBROADWELL:
+         returnString = "X86 Intel Broadwell";
+         break;
+
+      case OMR_PROCESSOR_X86_INTELSKYLAKE:
+         returnString = "X86 Intel Skylake";
+         break;
+
+      case OMR_PROCESSOR_X86_AMDK5:
+         returnString = "X86 AMDK5";
+         break;
+
+      case OMR_PROCESSOR_X86_AMDK6:
+         returnString = "X86 AMDK6";
+         break;
+
+      case OMR_PROCESSOR_X86_AMDATHLONDURON:
+         returnString = "X86 AMD Athlon-Duron";
+         break;
+
+      case OMR_PROCESSOR_X86_AMDOPTERON:
+         returnString = "X86 AMD Opteron";
+         break;
+
+      case OMR_PROCESSOR_X86_AMDFAMILY15H:
+         returnString = "X86 AMD Family 15h";
+         break;
+
+      default:
+         returnString = "Unknown X86 Processor";
+         break;
+      }
+   return returnString;
+   }

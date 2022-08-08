@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -123,6 +123,8 @@
 #define HOTFIELD_SHOULD_ALIGN(descriptor) (0x1 == (0x1 & (descriptor)))
 #define HOTFIELD_ALIGNMENT_BIAS(descriptor, heapObjectAlignment) (((descriptor) >> 1) * (heapObjectAlignment))
 
+enum CopyVariant : bool { STW = false, CS = true };
+
 extern "C" {
 	uintptr_t allocateMemoryForSublistFragment(void *vmThreadRawPtr, J9VMGC_SublistFragment *fragmentPrimitive);
 #if defined(OMR_GC_MODRON_CONCURRENT_MARK)
@@ -223,7 +225,7 @@ MM_Scavenger::initialize(MM_EnvironmentBase *env)
 
 	/* initialize the global scavenger gcCount */
 	_extensions->scavengerStats._gcCount = 0;
-	
+
 	if (!_scavengeCacheFreeList.initialize(env, NULL)) {
 		return false;
 	}
@@ -262,7 +264,7 @@ MM_Scavenger::initialize(MM_EnvironmentBase *env)
 	}
 
 	/**
-	 *incrementNewSpaceSize = 
+	 *incrementNewSpaceSize =
 	 *  Xmnx <= 32MB		---> Xmnx
 	 *  32MB < Xmnx < 4GB	---> MAX(Xmnx/16, 32MB)
 	 *  Xmnx >= 4GB			---> 256MB
@@ -409,7 +411,7 @@ MM_Scavenger::mainSetupForGC(MM_EnvironmentStandard *env)
 	_evacuateMemorySubSpace = _activeSubSpace->getMemorySubSpaceAllocate();
 	_survivorMemorySubSpace = _activeSubSpace->getMemorySubSpaceSurvivor();
 	_tenureMemorySubSpace = _activeSubSpace->getTenureMemorySubSpace();
-	
+
 	/* Accumulate pre-scavenge allocation statistics */
 	MM_HeapStats heapStatsSemiSpace;
 	MM_HeapStats heapStatsTenureSpace;
@@ -434,7 +436,7 @@ MM_Scavenger::mainSetupForGC(MM_EnvironmentStandard *env)
 
 	/* Record the tenure mask */
 	_tenureMask = calculateTenureMask();
-	
+
 	_activeSubSpace->mainSetupForGC(env);
 
 	_activeSubSpace->cacheRanges(_evacuateMemorySubSpace, &_evacuateSpaceBase, &_evacuateSpaceTop);
@@ -448,7 +450,13 @@ MM_Scavenger::mainSetupForGC(MM_EnvironmentStandard *env)
 void
 MM_Scavenger::workerSetupForGC(MM_EnvironmentStandard *env)
 {
+	OMRPORT_ACCESS_FROM_OMRPORT(env->getPortLibrary());
+
 	clearThreadGCStats(env, true);
+
+	/* This thread just started the scavenge task, record the timestamp.
+	 * This must be done after clearThreadGCStats or else the timestamp will be cleared. */
+	env->_scavengerStats._startTime = omrtime_hires_clock();
 
 	/* Clear local language-specific stats */
 	_delegate.workerSetupForGC_clearEnvironmentLangStats(env);
@@ -479,6 +487,88 @@ MM_Scavenger::calculateMaxCacheCount(uintptr_t activeMemorySize)
 	return 5 * (activeMemorySize / (_extensions->scavengerScanCacheMaximumSize + _extensions->scavengerScanCacheMinimumSize));
 }
 
+void
+MM_Scavenger::calculateRecommendedWorkingThreads(MM_EnvironmentStandard *env)
+{
+	if (!_extensions->adaptiveThreadingEnabled() || _extensions->isConcurrentScavengerEnabled()) {
+		return;
+	}
+
+	Trc_MM_Scavenger_calculateRecommendedWorkingThreads_entry(env->getLanguageVMThread(), _extensions->scavengerStats._gcCount);
+
+	if (_isRememberedSetInOverflowAtTheBeginning || _extensions->scavengerStats._causedRememberedSetOverflow) {
+		/* Scavenge cycle ignored for recommending threads. Scavenger had overflows, this will skew the model,
+		 * as this is the not the normal case for stalling ("Irregular" stalling with SyncAndReleaseMain,
+		 * this is not the norm hence we don't have to adjust for it) */
+		Trc_MM_Scavenger_calculateRecommendedWorkingThreads_exitOverflow(env->getLanguageVMThread());
+		return;
+	}
+
+	OMRPORT_ACCESS_FROM_OMRPORT(env->getPortLibrary());
+
+	uintptr_t totalThreads = _dispatcher->activeThreadCount();
+
+	/* Calculate the average time it takes the worker threads to start collection and avgerage time workers are idle waiting for task cleanup
+	 * Calculated as (Sum_WorkerStartTime(t1 + t2 + ... + tn) - (n * collection_start)) / n  */
+	uint64_t avgTimeToStartCollection =  omrtime_hires_delta((_cycleTimes.cycleStart * totalThreads), _extensions->scavengerStats._startTime, OMRPORT_TIME_DELTA_IN_MICROSECONDS) / totalThreads;
+	uint64_t avgTimeIdleAfterCollection =  omrtime_hires_delta(_extensions->scavengerStats._endTime, (_cycleTimes.cycleEnd * totalThreads), OMRPORT_TIME_DELTA_IN_MICROSECONDS) / totalThreads;
+
+	/* Calculate average stall times */
+	uint64_t avgScanStallTime =  omrtime_hires_delta(0, (_extensions->scavengerStats._workStallTime + _extensions->scavengerStats._completeStallTime), OMRPORT_TIME_DELTA_IN_MICROSECONDS) / totalThreads;
+	uint64_t avgSyncStallTime = omrtime_hires_delta(0, (_extensions->scavengerStats._adjustedSyncStallTime), OMRPORT_TIME_DELTA_IN_MICROSECONDS) / totalThreads;
+	uint64_t avgNotifyStallTime = omrtime_hires_delta(0, (_extensions->scavengerStats._notifyStallTime), OMRPORT_TIME_DELTA_IN_MICROSECONDS) / totalThreads;
+
+	Trc_MM_Scavenger_calculateRecommendedWorkingThreads_averageStallBreakDown(env->getLanguageVMThread(), totalThreads, avgTimeToStartCollection, avgTimeIdleAfterCollection, avgScanStallTime, avgSyncStallTime, avgNotifyStallTime);
+
+	uint64_t totalStallTime =  avgTimeToStartCollection + avgTimeIdleAfterCollection + avgScanStallTime + avgSyncStallTime + avgNotifyStallTime;
+	uint64_t scavengeTotalTime = omrtime_hires_delta(_cycleTimes.cycleStart, _cycleTimes.cycleEnd, OMRPORT_TIME_DELTA_IN_MICROSECONDS);
+
+	/* This Adaptive Threading Model aims to determine the efficiency of a cycle and predict the optimal GC thread count based on current number of threads,
+	 * directly proportional to busy time and inversely proportional to idle times.
+	 *
+	 * The model can be expressed as a continues function, it's derived by finding a minimum of the folowing GC time function (used to project duration of GC for m threads,
+	 * with oberved buys/stall times while performing GC with n threads):
+	 *
+	 *          Time GC (m,n,b,s) = b * (n/m) + s * (m/n)^x
+	 * Where m = number of threads for which total GC time (duration) is projected
+	 *       n = number of utilized threads (number of worker threads started + main thread) for the GC cycle used to observe s and b
+	 *       s = stall time per thread = average observed collection stall time for n threads = SUM(Stall time of n threads) / n
+	 *       b = busy time per thread = average collection busy time for n threads
+	 *       X = Stall Overhead Sensitivity/Tolerance, a model constant used to help model non-linear dependency of stall times on GC thread count
+	 *
+	 *
+	 * Solving this function results in the model implementation expressed by expression 1 below. Expression 1 in combination with expression 2 gives up a complete implementation of the model
+	 *
+	 *  (1) Number of Optimal Threads = m(n,b,s) = n * (B/X*s)^(1/X+1)
+	 *  (2) floor(((m(n,b,s) + H) * (1 - W)) + (n * W))
+	 *
+	 * Where W and H are constants, W = Weighted average factor, H = Thread Booster
+	 *
+	 * Expression (1) can be simplified to be written in terms of % stall and working threads as follows:
+	 *
+	 *                    b/s = (1/%stall) - 1
+	 *
+	 *  ------------------------------------------------------------------
+	 *  | (1) m(n,b,s) = m(n,%stall) = n * ((1/x)*(1/%stall - 1)^(1/(x+1))|
+	 *  -------------------------------------------------------------------
+	 */
+	float percentStall = ((float) totalStallTime) / ((float) scavengeTotalTime);
+	float sensitivityFactor = _extensions->adaptiveThreadingSensitivityFactor;
+	float powerExponent = 1.0f / (sensitivityFactor + 1.0f);
+	float stallComponent = (1.0f / percentStall) - 1.0f;
+	float powerBase = (1.0f / sensitivityFactor) * stallComponent;
+
+	float idealThreads = totalThreads * powf(powerBase, powerExponent);
+	float adjustedAverage = MM_Math::weightedAverage((float)totalThreads, idealThreads, _extensions->adaptiveThreadingWeightActiveThreads);
+	_recommendedThreads = (uintptr_t)(adjustedAverage + _extensions->adaptiveThreadBooster);
+
+	if (_recommendedThreads < 2) {
+		_recommendedThreads = 2;
+	}
+
+	Trc_MM_Scavenger_calculateRecommendedWorkingThreads_setRecommendedThreads(env->getLanguageVMThread(), scavengeTotalTime, totalStallTime, (percentStall*100), totalThreads, idealThreads, adjustedAverage, (adjustedAverage +  _extensions->adaptiveThreadBooster), _recommendedThreads);
+}
+
 /**
  * Run a scavenge.
  */
@@ -486,7 +576,7 @@ void
 MM_Scavenger::scavenge(MM_EnvironmentBase *envBase)
 {
 	MM_EnvironmentStandard *env = MM_EnvironmentStandard::getEnvironment(envBase);
-	MM_ParallelScavengeTask scavengeTask(env, _dispatcher, this, env->_cycleState);
+	MM_ParallelScavengeTask scavengeTask(env, _dispatcher, this, env->_cycleState, _recommendedThreads);
 	_dispatcher->run(env, &scavengeTask);
 
 	/* remove all scan caches temporary allocated in Heap */
@@ -530,7 +620,9 @@ MM_Scavenger::reportScavengeEnd(MM_EnvironmentStandard *env, bool lastIncrement)
 		omrtime_hires_clock(),
 		J9HOOK_MM_PRIVATE_SCAVENGE_END,
 		env->_cycleState->_activeSubSpace,
-		lastIncrement
+		lastIncrement,
+		_cycleTimes.incrementStart,
+		_cycleTimes.incrementEnd
 	);
 }
 
@@ -639,7 +731,9 @@ MM_Scavenger::reportGCEnd(MM_EnvironmentStandard *env)
 		(_extensions->largeObjectArea ? _extensions->heap->getApproximateActiveFreeLOAMemorySize(MEMORY_TYPE_OLD) : 0),
 		(_extensions->largeObjectArea ? _extensions->heap->getActiveLOAMemorySize(MEMORY_TYPE_OLD) :0),
 		_extensions->incrementScavengerStats._tenureAge,
-		_extensions->heap->getMemorySize()
+		_extensions->heap->getMemorySize(),
+		_cycleTimes.incrementStart,
+		_cycleTimes.incrementEnd
 	);
 }
 
@@ -653,12 +747,18 @@ void
 MM_Scavenger::clearIncrementGCStats(MM_EnvironmentBase *env, bool firstIncrement)
 {
 	_extensions->incrementScavengerStats.clear(firstIncrement);
+
+	/* Increment start time doesn't need to be cleared, it was set prior to calling this method */
+	_cycleTimes.incrementEnd = 0;
 }
 
 void
 MM_Scavenger::clearCycleGCStats(MM_EnvironmentBase *env)
 {
 	_extensions->scavengerStats.clear(true);
+
+	/* Cycle start time doesn't need to be cleared, it was set prior to calling this method */
+	_cycleTimes.cycleEnd = 0;
 }
 
 void
@@ -741,6 +841,12 @@ MM_Scavenger::mergeGCStatsBase(MM_EnvironmentBase *env, MM_ScavengerStats *final
 	finalGCStats->_workStallCount += scavStats->_workStallCount;
 	finalGCStats->_completeStallCount += scavStats->_completeStallCount;
 	_extensions->scavengerStats._syncStallCount += scavStats->_syncStallCount;
+
+	/* Adaptive Threading Stats */
+	finalGCStats->_startTime += scavStats->_startTime;
+	finalGCStats->_endTime += scavStats->_endTime;
+	finalGCStats->_notifyStallTime += scavStats->_notifyStallTime;
+	finalGCStats->_adjustedSyncStallTime += scavStats->_adjustedSyncStallTime;
 }
 
 
@@ -754,10 +860,20 @@ MM_Scavenger::mergeThreadGCStats(MM_EnvironmentBase *env)
 
 	MM_ScavengerStats *scavStats = &env->_scavengerStats;
 
+	/* This thread is just about to complete the scavenge task, record the timestamp.
+	 * This must be done before mergeGCStatsBase or else the timestamp won't be mereged as needed by adaptive threading. */
+	env->_scavengerStats._endTime = omrtime_hires_clock();
 	mergeGCStatsBase(env, &_extensions->incrementScavengerStats, scavStats);
 
 	/* Merge language specific statistics. No known interesting data per increment - they are merged directly to aggregate cycle stats */
 	_delegate.mergeGCStats_mergeLangStats(env);
+
+	uint64_t timeToStartCollection =  omrtime_hires_delta(_cycleTimes.cycleStart, scavStats->_startTime, OMRPORT_TIME_DELTA_IN_MICROSECONDS);
+	uint64_t scanStall =  omrtime_hires_delta(0, (scavStats->_workStallTime + scavStats->_completeStallTime), OMRPORT_TIME_DELTA_IN_MICROSECONDS);
+	uint64_t syncStall = omrtime_hires_delta(0, (scavStats->_adjustedSyncStallTime), OMRPORT_TIME_DELTA_IN_MICROSECONDS);
+	uint64_t notifyStallTime = omrtime_hires_delta(0, (scavStats->_notifyStallTime), OMRPORT_TIME_DELTA_IN_MICROSECONDS);
+
+	Trc_MM_Scavenger_calculateRecommendedWorkingThreads_threadStallBreakDown(env->getLanguageVMThread(), env->getWorkerID(), timeToStartCollection, scanStall, syncStall, notifyStallTime);
 
 	omrthread_monitor_exit(_extensions->gcStatsMutex);
 
@@ -844,22 +960,22 @@ MM_Scavenger::calcGCStats(MM_EnvironmentStandard *env)
 		/* First collection  ? */
 		if (scavengerGCStats->_gcCount > 1 ) {
 			scavengerGCStats->_avgInitialFree = (uintptr_t)MM_Math::weightedAverage((float)scavengerGCStats->_avgInitialFree, (float)initialFree, INITIAL_FREE_HISTORY_WEIGHT);
-			
+
 #if defined(OMR_GC_LARGE_OBJECT_AREA)
-			tenureAggregateBytes = scavengerGCStats->_tenureAggregateBytes - scavengerGCStats->_tenureLOABytes;															
+			tenureAggregateBytes = scavengerGCStats->_tenureAggregateBytes - scavengerGCStats->_tenureLOABytes;
 			scavengerGCStats->_avgTenureLOABytes = (uintptr_t)MM_Math::weightedAverage((float)scavengerGCStats->_avgTenureLOABytes,
 																		(float)scavengerGCStats->_tenureLOABytes,
 																		TENURE_BYTES_HISTORY_WEIGHT);
 #else /* OMR_GC_LARGE_OBJECT_AREA */
 			tenureAggregateBytes = scavengerGCStats->_tenureAggregateBytes;
 #endif /* OMR_GC_LARGE_OBJECT_AREA */
-			scavengerGCStats->_avgTenureBytes = (uintptr_t)MM_Math::weightedAverage((float)scavengerGCStats->_avgTenureBytes, 
-																					(float)tenureAggregateBytes, 
+			scavengerGCStats->_avgTenureBytes = (uintptr_t)MM_Math::weightedAverage((float)scavengerGCStats->_avgTenureBytes,
+																					(float)tenureAggregateBytes,
 																					TENURE_BYTES_HISTORY_WEIGHT);
 			tenureBytesDeviation = (float)tenureAggregateBytes - scavengerGCStats->_avgTenureBytes;
-			scavengerGCStats->_avgTenureBytesDeviation = (uintptr_t)MM_Math::weightedAverage((float)scavengerGCStats->_avgTenureBytesDeviation, 
-																				MM_Math::abs(tenureBytesDeviation), 
-																				TENURE_BYTES_HISTORY_WEIGHT);																											
+			scavengerGCStats->_avgTenureBytesDeviation = (uintptr_t)MM_Math::weightedAverage((float)scavengerGCStats->_avgTenureBytesDeviation,
+																				MM_Math::abs(tenureBytesDeviation),
+																				TENURE_BYTES_HISTORY_WEIGHT);
 		} else {
 			scavengerGCStats->_avgInitialFree = initialFree;
 
@@ -872,10 +988,10 @@ MM_Scavenger::calcGCStats(MM_EnvironmentStandard *env)
             	omrtty_printf("Tenured bytes: %zu\navgTenureBytes: %zu\ntenureBytesDeviation: %f\navgTenureBytesDeviation: %zu\n",
 				tenureAggregateBytes,
 				scavengerGCStats->_avgTenureBytes,
-				tenureBytesDeviation, 
+				tenureBytesDeviation,
 				scavengerGCStats->_avgTenureBytesDeviation);
 			}
-#endif /* OMR_GC_MODRON_CONCURRENT_MARK */	
+#endif /* OMR_GC_MODRON_CONCURRENT_MARK */
 	}
 }
 
@@ -1404,17 +1520,78 @@ MM_Scavenger::copyObject(MM_EnvironmentStandard *env, MM_ForwardedHeader* forwar
 	return copy(env, forwardedHeader);
 }
 
-omrobjectptr_t
+void
+MM_Scavenger::forwardingFailed(MM_EnvironmentStandard *env, MM_ForwardedHeader* forwardedHeader, omrobjectptr_t destinationObjectPtr, MM_CopyScanCacheStandard *copyCache)
+{
+	/* We have not used the reserved space now, but we will for subsequent allocations. If this space was reserved for an individual object,
+	 * we might have created a TLH remainder from previous cache just before reserving this space. This space eventaully can create another remainder.
+	 * At that point, ideally (to recycle as much memory as possible) we could enqueue this remainder, but as a simple solution we will now abandon
+	 * the current remainder (we assert across the code, there is at most one at a give point of time).
+	 * If we see large amount of discards even with low discard threshold, we may reconsider enqueueing discarded TLHs.
+	 */
+	if (0 != (copyCache->flags & OMR_SCAVENGER_CACHE_TYPE_TENURESPACE)) {
+		abandonTenureTLHRemainder(env);
+	} else if (0 != (copyCache->flags & OMR_SCAVENGER_CACHE_TYPE_SEMISPACE)) {
+		abandonSurvivorTLHRemainder(env);
+	} else {
+		Assert_MM_unreachable();
+	}
+
+	/* Failed to forward (someone else did it). Re-fetch the forwarding info and (for Concurrent Scavenger only) ensure
+	 * it's fully copied before letting the caller expose this new version of the object */
+	MM_ForwardedHeader(forwardedHeader->getObject(), _extensions->compressObjectReferences()).copyOrWait(destinationObjectPtr);
+}
+
+MMINLINE void
+MM_Scavenger::forwardingSucceeded(MM_EnvironmentStandard *env, MM_CopyScanCacheStandard *copyCache, void *newCacheAlloc, uintptr_t oldObjectAge, uintptr_t objectCopySizeInBytes, uintptr_t objectReserveSizeInBytes)
+{
+	/* Move the cache allocate pointer to reflect the consumed memory */
+	copyCache->cacheAlloc = newCacheAlloc;
+
+	/* object has been copied so if scanning hierarchically set effectiveCopyCache to support aliasing check */
+	env->_effectiveCopyScanCache = copyCache;
+
+	/* Update the stats */
+	MM_ScavengerStats *scavStats = &env->_scavengerStats;
+	if (0 != (copyCache->flags & OMR_SCAVENGER_CACHE_TYPE_TENURESPACE)) {
+		scavStats->_tenureAggregateCount += 1;
+		scavStats->_tenureAggregateBytes += objectCopySizeInBytes;
+		scavStats->getFlipHistory(0)->_tenureBytes[oldObjectAge + 1] += objectReserveSizeInBytes;
+#if defined(OMR_GC_LARGE_OBJECT_AREA)
+		if (0 != (copyCache->flags & OMR_SCAVENGER_CACHE_TYPE_LOA)) {
+			scavStats->_tenureLOACount += 1;
+			scavStats->_tenureLOABytes += objectCopySizeInBytes;
+		}
+#endif /* OMR_GC_LARGE_OBJECT_AREA */
+	} else {
+		Assert_MM_true(0 != (copyCache->flags & OMR_SCAVENGER_CACHE_TYPE_SEMISPACE));
+		scavStats->_flipCount += 1;
+		scavStats->_flipBytes += objectCopySizeInBytes;
+		scavStats->getFlipHistory(0)->_flipBytes[oldObjectAge + 1] += objectReserveSizeInBytes;
+	}
+}
+
+MMINLINE omrobjectptr_t
 MM_Scavenger::copy(MM_EnvironmentStandard *env, MM_ForwardedHeader* forwardedHeader)
 {
-	omrobjectptr_t destinationObjectPtr;
+	omrobjectptr_t result = NULL;
+	if (IS_CONCURRENT_ENABLED) {
+		result = MM_Scavenger::copyForVariant<CS>(env, forwardedHeader);
+	} else {
+		result = MM_Scavenger::copyForVariant<STW>(env, forwardedHeader);
+	}
+	return result;
+}
+
+template <bool variant> omrobjectptr_t
+MM_Scavenger::copyForVariant(MM_EnvironmentStandard *env, MM_ForwardedHeader* forwardedHeader)
+{
 	uintptr_t objectCopySizeInBytes, objectReserveSizeInBytes;
 	uintptr_t hotFieldsDescriptor = 0;
 	uintptr_t hotFieldsAlignment = 0;
 	uintptr_t* hotFieldPadBase = NULL;
 	uintptr_t hotFieldPadSize = 0;
-	MM_CopyScanCacheStandard *copyCache;
-	void *newCacheAlloc;
+	MM_CopyScanCacheStandard *copyCache = NULL;
 	bool const compressed = _extensions->compressObjectReferences();
 
 	if (isBackOutFlagRaised()) {
@@ -1443,7 +1620,7 @@ MM_Scavenger::copy(MM_EnvironmentStandard *env, MM_ForwardedHeader* forwardedHea
 
 			uintptr_t spaceAvailableForObject = _activeSubSpace->getMaxSpaceForObjectInEvacuateMemory(forwardedHeader->getObject());
 			Assert_GC_true_with_message4(env, objectCopySizeInBytes <= spaceAvailableForObject,
-					"Corruption in Evacuate at %p: calculated object size %zu larger then available %zu, Forwarded Header at %p\n",
+					"Corruption in Evacuate at %p: calculated object size %zu larger than available %zu, Forwarded Header at %p\n",
 					forwardedHeader->getObject(), objectCopySizeInBytes, spaceAvailableForObject, forwardedHeader);
 
 			copyCache = reserveMemoryForAllocateInTenureSpace(env, forwardedHeader->getObject(), objectReserveSizeInBytes);
@@ -1478,7 +1655,7 @@ MM_Scavenger::copy(MM_EnvironmentStandard *env, MM_ForwardedHeader* forwardedHea
 
 			uintptr_t spaceAvailableForObject = _activeSubSpace->getMaxSpaceForObjectInEvacuateMemory(forwardedHeader->getObject());
 			Assert_GC_true_with_message4(env, objectCopySizeInBytes <= spaceAvailableForObject,
-					"Corruption in Evacuate at %p: calculated object size %zu larger then available %zu, Forwarded Header at %p\n",
+					"Corruption in Evacuate at %p: calculated object size %zu larger than available %zu, Forwarded Header at %p\n",
 					forwardedHeader->getObject(), objectCopySizeInBytes, spaceAvailableForObject, forwardedHeader);
 
 			copyCache = reserveMemoryForAllocateInSemiSpace(env, forwardedHeader->getObject(), objectReserveSizeInBytes);
@@ -1494,7 +1671,7 @@ MM_Scavenger::copy(MM_EnvironmentStandard *env, MM_ForwardedHeader* forwardedHea
 	}
 
 	/* Check if memory was reserved successfully */
-	if(NULL == copyCache) {
+	if (NULL == copyCache) {
 		/* Failure - the scavenger must back out the work it has done. */
 		/* raise the alert and return (with NULL) */
 		setBackOutFlag(env, backOutFlagRaised);
@@ -1507,7 +1684,7 @@ MM_Scavenger::copy(MM_EnvironmentStandard *env, MM_ForwardedHeader* forwardedHea
 	}
 
 	/* Memory has been reserved */
-	destinationObjectPtr = (omrobjectptr_t)copyCache->cacheAlloc;
+	omrobjectptr_t destinationObjectPtr = (omrobjectptr_t)copyCache->cacheAlloc;
 	/* now correct for the hot field alignment */
 	if (0 != hotFieldsAlignment) {
 		uintptr_t remainingInCacheLine = _cacheLineAlignment - ((uintptr_t)destinationObjectPtr % _cacheLineAlignment);
@@ -1528,7 +1705,7 @@ MM_Scavenger::copy(MM_EnvironmentStandard *env, MM_ForwardedHeader* forwardedHea
 	}
 
 	/* and correct for the double array alignment */
-	newCacheAlloc = (void *) (((uint8_t *)destinationObjectPtr) + objectReserveSizeInBytes);
+	void *newCacheAlloc = (void *) (((uint8_t *)destinationObjectPtr) + objectReserveSizeInBytes);
 
 	omrobjectptr_t originalDestinationObjectPtr = destinationObjectPtr;
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
@@ -1536,8 +1713,8 @@ MM_Scavenger::copy(MM_EnvironmentStandard *env, MM_ForwardedHeader* forwardedHea
 	uintptr_t initialSizeToCopy = 0;
 	bool allowDuplicate = false;
 	bool allowDuplicateOrConcurrentDisabled = true;
-	
-	if (IS_CONCURRENT_ENABLED) {
+
+	if (CS == variant) {
 		/* For smaller objects, we allow duplicate (copy first and try to win forwarding).
 		 * For larger objects, there is only one copy (threads setup destination header, one wins, and other participate in copying or wait till copy is complete).
 		 * 1024 is somewhat arbitrary threshold, so that most of time we do not have to go through relatively expensive setup procedure.
@@ -1557,11 +1734,13 @@ MM_Scavenger::copy(MM_EnvironmentStandard *env, MM_ForwardedHeader* forwardedHea
 		destinationObjectPtr = forwardedHeader->setForwardedObject(destinationObjectPtr);
 	}
 
+	/* outter if-forwarding-succeeded check */
 	if (originalDestinationObjectPtr == destinationObjectPtr) {
-		/* Succeeded in forwarding the object, or we allow duplicate (did not even tried to forward yet). */
+		/* Succeeded in forwarding the object [nonCS],
+		 * or we allow duplicate (did not even tried to forward yet) [CS].
+		 */
 
 		if (NULL != hotFieldPadBase) {
-			bool const compressed = _extensions->compressObjectReferences();
 			/* lay down a hole (XXX:  This assumes that we are using AOL (address-ordered-list)) */
 			MM_HeapLinkedFreeHeader::fillWithHoles(hotFieldPadBase, hotFieldPadSize, compressed);
 		}
@@ -1571,7 +1750,7 @@ MM_Scavenger::copy(MM_EnvironmentStandard *env, MM_ForwardedHeader* forwardedHea
 #endif /* defined(OMR_VALGRIND_MEMCHECK) */
 
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
-		if (!allowDuplicateOrConcurrentDisabled) {
+		if ((CS == variant) && !allowDuplicateOrConcurrentDisabled) {
 			/* Copy a non-aligned section */
 			forwardedHeader->copySection(destinationObjectPtr, remainingSizeToCopy, initialSizeToCopy);
 
@@ -1599,7 +1778,7 @@ MM_Scavenger::copy(MM_EnvironmentStandard *env, MM_ForwardedHeader* forwardedHea
 
 #if defined(OMR_VALGRIND_MEMCHECK)
 		valgrindFreeObject(_extensions,(uintptr_t) forwardedHeader->getObject());
-	
+
 		// Object is definitely dead but at many places (glue : ScavangerRootScanner)
 		// We use it's forwardedHeader to check it.
 		valgrindMakeMemDefined((uintptr_t) forwardedHeader->getObject(), sizeof(MM_ForwardedHeader));
@@ -1612,67 +1791,38 @@ MM_Scavenger::copy(MM_EnvironmentStandard *env, MM_ForwardedHeader* forwardedHea
 #endif /* OMR_SCAVENGER_TRACE_COPY */
 
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
-	/* Concurrent Scavenger can update forwarding pointer only after the object has been copied
-	 * (since mutator may access the object as soon as forwarding pointer is installed) */
-	}
-	if (allowDuplicate) {
-		/* On weak memory model, ensure that this candidate copy is visible
-		 * before (potentially) winning forwarding */
-		MM_AtomicOperations::storeSync();
-		destinationObjectPtr = forwardedHeader->setForwardedObject(destinationObjectPtr);
-	}
-	if (originalDestinationObjectPtr == destinationObjectPtr) {
-		/* Succeeded in forwarding the object */
+		/* Concurrent Scavenger can update forwarding pointer only after the object has been copied
+		 * (since mutator may access the object as soon as forwarding pointer is installed) */
+		if ((CS == variant) && allowDuplicate) {
+			/* On weak memory model, ensure that this candidate copy is visible
+			 * before (potentially) winning forwarding */
+			MM_AtomicOperations::storeSync();
+			destinationObjectPtr = forwardedHeader->setForwardedObject(destinationObjectPtr);
+		}
+
+		/* nested if-forwarding-succeeded check */
+		if ((STW == variant) || (originalDestinationObjectPtr == destinationObjectPtr)) {
+			/* Succeeded in forwarding the object */
 #endif /* OMR_GC_CONCURRENT_SCAVENGER */
+			forwardingSucceeded(env, copyCache, newCacheAlloc, oldObjectAge, objectCopySizeInBytes, objectReserveSizeInBytes);
 
-		/* Move the cache allocate pointer to reflect the consumed memory */
-		assume0(copyCache->cacheAlloc <= copyCache->cacheTop);
-		copyCache->cacheAlloc = newCacheAlloc;
-		assume0(copyCache->cacheAlloc <= copyCache->cacheTop);
+			/* depth copy the hot fields of an object if scavenger dynamicBreadthFirstScanOrdering is enabled */
+			depthCopyHotFields(env, forwardedHeader, destinationObjectPtr);
+#if defined(OMR_GC_CONCURRENT_SCAVENGER)
+		} else { /* CS build flag  enabled: mid point of nested if-forwarding-succeeded check */
 
-		/* object has been copied so if scanning hierarchically set effectiveCopyCache to support aliasing check */
-		env->_effectiveCopyScanCache = copyCache;
+			forwardingFailed(env, forwardedHeader, destinationObjectPtr, copyCache);
 
-		/* Update the stats */
-		MM_ScavengerStats *scavStats = &env->_scavengerStats;
-		if(copyCache->flags & OMR_SCAVENGER_CACHE_TYPE_TENURESPACE) {
-			scavStats->_tenureAggregateCount += 1;
-			scavStats->_tenureAggregateBytes += objectCopySizeInBytes;
-			scavStats->getFlipHistory(0)->_tenureBytes[oldObjectAge + 1] += objectReserveSizeInBytes;
-#if defined(OMR_GC_LARGE_OBJECT_AREA)
-			if (copyCache->flags & OMR_SCAVENGER_CACHE_TYPE_LOA) {
-				scavStats->_tenureLOACount += 1;
-				scavStats->_tenureLOABytes += objectCopySizeInBytes;
-			}
-#endif /* OMR_GC_LARGE_OBJECT_AREA */
-		} else {
-			Assert_MM_true(copyCache->flags & OMR_SCAVENGER_CACHE_TYPE_SEMISPACE);
-			scavStats->_flipCount += 1;
-			scavStats->_flipBytes += objectCopySizeInBytes;
-			scavStats->getFlipHistory(0)->_flipBytes[oldObjectAge + 1] += objectReserveSizeInBytes;
-		}
+		} /* CS build flag  enabled: end of nested if-forwarding-succeeded check */
+#endif
+	} else { /* CS build flag  enabled: mid point of outter   if-forwarding-succeeded check
+	          * CS build flag disabled: mid point of the only if-forwarding-succeeded check */
 
-		/* depth copy the hot fields of an object if scavenger dynamicBreadthFirstScanOrdering is enabled */	
-		depthCopyHotFields(env, forwardedHeader, destinationObjectPtr);
-	} else {
-		/* We have not used the reserved space now, but we will for subsequent allocations. If this space was reserved for an individual object,
-		 * we might have created a TLH remainder from previous cache just before reserving this space. This space eventaully can create another remainder.
-		 * At that point, ideally (to recycle as much memory as possibly) we could enqueue this remainder, but as a simple solution we will now abandon
-		 * the current remainder (we assert across the code, there is at most one at a give point of time).
-		 * If we see large amount of discards even with low discard threshold, we may reconsider enqueueing discarded TLHs.
-		 */
-		if (copyCache->flags & OMR_SCAVENGER_CACHE_TYPE_TENURESPACE) {
-			abandonTenureTLHRemainder(env);
-		} else if (copyCache->flags & OMR_SCAVENGER_CACHE_TYPE_SEMISPACE) {
-			abandonSurvivorTLHRemainder(env);
-		} else {
-			Assert_MM_unreachable();
-		}
+		forwardingFailed(env, forwardedHeader, destinationObjectPtr, copyCache);
 
-		/* Failed to forward (someone else did it). Re-fetch the forwarding info and (for Concurrent Scavenger only) ensure
-		 * it's fully copied before letting the caller expose this new version of the object */
-		MM_ForwardedHeader(forwardedHeader->getObject(), compressed).copyOrWait(destinationObjectPtr);
-	}
+	} /* CS build flag  enabled: end of outter   if-forwarding-succeeded check
+	   * CS build flag disabled: end of the only if-forwarding-succeeded check */
+
 	/* return value for updating the slot */
 	return destinationObjectPtr;
 }
@@ -1700,11 +1850,12 @@ MM_Scavenger::depthCopyHotFields(MM_EnvironmentStandard *env, MM_ForwardedHeader
 
 MMINLINE void
 MM_Scavenger::copyHotField(MM_EnvironmentStandard *env, omrobjectptr_t destinationObjectPtr, uint8_t offset) {
-	GC_SlotObject hotFieldObject(_omrVM, (fomrobject_t*)(destinationObjectPtr + offset));
+	bool const compressed = _extensions->compressObjectReferences();
+	GC_SlotObject hotFieldObject(_omrVM, GC_SlotObject::addToSlotAddress((fomrobject_t*)((uintptr_t)destinationObjectPtr), offset, compressed));
 	omrobjectptr_t objectPtr = hotFieldObject.readReferenceFromSlot();
 	if (isObjectInEvacuateMemory(objectPtr)) {
 		/* Hot field needs to be copy and forwarded.  Check if the work has already been done */
-		MM_ForwardedHeader forwardHeaderHotField(objectPtr, _extensions->compressObjectReferences());
+		MM_ForwardedHeader forwardHeaderHotField(objectPtr, compressed);
 		if (!forwardHeaderHotField.isForwardedPointer()) {
 			env->_hotFieldCopyDepthCount += 1;
 			copyObject(env, &forwardHeaderHotField);
@@ -1745,35 +1896,36 @@ bool
 MM_Scavenger::splitIndexableObjectScanner(MM_EnvironmentStandard *env, GC_ObjectScanner *objectScanner, uintptr_t startIndex, omrobjectptr_t *rememberedSetSlot)
 {
 	bool result = false;
+	if (!objectScanner->isIndexableObjectNoSplit()) {
+		if (backOutStarted != _extensions->getScavengerBackOutState()) {
+			Assert_MM_true(objectScanner->isIndexableObject());
+			GC_IndexableObjectScanner *indexableScanner = (GC_IndexableObjectScanner *)objectScanner;
+			uintptr_t maxIndex = indexableScanner->getIndexableRange();
 
-	if (backOutStarted != _extensions->getScavengerBackOutState()) {
-		Assert_MM_true(objectScanner->isIndexableObject());
-		GC_IndexableObjectScanner *indexableScanner = (GC_IndexableObjectScanner *)objectScanner;
-		uintptr_t maxIndex = indexableScanner->getIndexableRange();
+			uintptr_t scvArraySplitAmount = getArraySplitAmount(env, maxIndex - startIndex);
+			uintptr_t endIndex = startIndex + scvArraySplitAmount;
 
-		uintptr_t scvArraySplitAmount = getArraySplitAmount(env, maxIndex - startIndex);
-		uintptr_t endIndex = startIndex + scvArraySplitAmount;
-
-		if (endIndex < maxIndex) {
-			/* try to split the remainder into a new copy cache */
-			MM_CopyScanCacheStandard* splitCache = getFreeCache(env);
-			if (NULL != splitCache) {
-				/* set up the split copy cache and clone the object scanner into the cache */
-				omrarrayptr_t arrayPtr = (omrarrayptr_t)indexableScanner->getArrayObject();
-				void* arrayTop = (void*)((uintptr_t)arrayPtr + _extensions->indexableObjectModel.getSizeInBytesWithHeader(arrayPtr));
-				splitCache->reinitCache((omrobjectptr_t)arrayPtr, arrayTop);
-				splitCache->cacheAlloc = splitCache->cacheTop;
-				splitCache->_arraySplitIndex = endIndex;
-				splitCache->_arraySplitRememberedSlot = rememberedSetSlot;
-				splitCache->flags &= OMR_SCAVENGER_CACHE_TYPE_HEAP;
-				splitCache->flags |= OMR_SCAVENGER_CACHE_TYPE_SPLIT_ARRAY;
-				indexableScanner->splitTo(env, splitCache->getObjectScanner(), scvArraySplitAmount);
+			if (endIndex < maxIndex) {
+				/* try to split the remainder into a new copy cache */
+				MM_CopyScanCacheStandard* splitCache = getFreeCache(env);
+				if (NULL != splitCache) {
+					/* set up the split copy cache and clone the object scanner into the cache */
+					omrarrayptr_t arrayPtr = (omrarrayptr_t)indexableScanner->getArrayObject();
+					void* arrayTop = (void*)((uintptr_t)arrayPtr + _extensions->indexableObjectModel.getSizeInBytesWithHeader(arrayPtr));
+					splitCache->reinitCache((omrobjectptr_t)arrayPtr, arrayTop);
+					splitCache->cacheAlloc = splitCache->cacheTop;
+					splitCache->_arraySplitIndex = endIndex;
+					splitCache->_arraySplitRememberedSlot = rememberedSetSlot;
+					splitCache->flags &= OMR_SCAVENGER_CACHE_TYPE_HEAP;
+					splitCache->flags |= OMR_SCAVENGER_CACHE_TYPE_SPLIT_ARRAY;
+					indexableScanner->splitTo(env, splitCache->getObjectScanner(), scvArraySplitAmount);
 #if defined(J9MODRON_TGC_PARALLEL_STATISTICS)
-				env->_scavengerStats._arraySplitCount += 1;
-				env->_scavengerStats._arraySplitAmount += scvArraySplitAmount;
+					env->_scavengerStats._arraySplitCount += 1;
+					env->_scavengerStats._arraySplitAmount += scvArraySplitAmount;
 #endif /* J9MODRON_TGC_PARALLEL_STATISTICS */
-				addCacheEntryToScanListAndNotify(env, splitCache);
-				result = true;
+					addCacheEntryToScanListAndNotify(env, splitCache);
+					result = true;
+				}
 			}
 		}
 	}
@@ -2082,7 +2234,7 @@ MM_Scavenger::shouldDoFinalNotify(MM_EnvironmentStandard *env)
 {
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
 	if (_extensions->concurrentScavengeExhaustiveTermination && isCurrentPhaseConcurrent() && !_scavengeCacheFreeList.areAllCachesReturned()) {
-		
+
 		/* GC threads ran out of work, but not all copy caches are back to the global free pool. They are kept by mutator threads.
 		 * Activate Async Signal handler which will force Mutator threads to flush their copy caches for scanning. */
 		_delegate.signalThreadsToFlushCaches(env);
@@ -2117,11 +2269,15 @@ MM_Scavenger::getNextScanCache(MM_EnvironmentStandard *env)
 	bool doneFlag = false;
 	volatile uintptr_t doneIndex = _doneIndex;
 
+	OMRPORT_ACCESS_FROM_OMRPORT(env->getPortLibrary());
+
 	if (checkAndSetShouldYieldFlag(env)) {
 		flushBuffersForGetNextScanCache(env);
 		omrthread_monitor_enter(_scanCacheMonitor);
 		if (0 != _waitingCount) {
+			uint64_t  notifyStartTime = omrtime_hires_clock();
 			omrthread_monitor_notify_all(_scanCacheMonitor);
+			env->_scavengerStats.addToNotifyStallTime(notifyStartTime, omrtime_hires_clock());
 		}
 		omrthread_monitor_exit(_scanCacheMonitor);
 		return NULL;
@@ -2161,10 +2317,6 @@ MM_Scavenger::getNextScanCache(MM_EnvironmentStandard *env)
 	env->_scavengerStats._acquireScanListCount += 1;
 #endif /* J9MODRON_TGC_PARALLEL_STATISTICS */
 
-#if defined(OMR_SCAVENGER_TRACE) || defined(J9MODRON_TGC_PARALLEL_STATISTICS)
-	OMRPORT_ACCESS_FROM_OMRPORT(env->getPortLibrary());
-#endif /* OMR_SCAVENGER_TRACE || J9MODRON_TGC_PARALLEL_STATISTICS */
-
  	while (!doneFlag && !shouldAbortScanLoop(env)) {
  		while (_cachedEntryCount > 0) {
  			cache = getNextScanCacheFromList(env);
@@ -2198,7 +2350,9 @@ MM_Scavenger::getNextScanCache(MM_EnvironmentStandard *env)
 				if (shouldDoFinalNotify(env)) {
 					_waitingCount = 0;
 					_doneIndex += 1;
+					uint64_t notifyStartTime = omrtime_hires_clock();
 					omrthread_monitor_notify_all(_scanCacheMonitor);
+					env->_scavengerStats.addToNotifyStallTime(notifyStartTime, omrtime_hires_clock());
 				}
 			} else {
 				while((0 == _cachedEntryCount) && (doneIndex == _doneIndex) && !shouldAbortScanLoop(env)) {
@@ -2508,7 +2662,7 @@ MM_Scavenger::addToRememberedSetFragment(MM_EnvironmentStandard *env, omrobjectp
 		/* There wasn't enough room in the current fragment - allocate a new one */
 		if(allocateMemoryForSublistFragment(env->getOmrVMThread(), (J9VMGC_SublistFragment*)&env->_scavengerRememberedSet)) {
 			/* Failed to allocate a fragment - set the remembered set overflow state and exit */
-			if(!isRememberedSetInOverflowState()) {
+			if (!_isRememberedSetInOverflowAtTheBeginning) {
 				env->_scavengerStats._causedRememberedSetOverflow = 1;
 			}
 			setRememberedSetOverflowState();
@@ -3091,7 +3245,7 @@ MM_Scavenger::getFreeCache(MM_EnvironmentStandard *env)
 
 	MM_CopyScanCacheStandard *cache = _scavengeCacheFreeList.popCache(env);
 
-	if (NULL == cache) {	
+	if (NULL == cache) {
 		env->_scavengerStats._scanCacheOverflow = 1;
 		OMRPORT_ACCESS_FROM_OMRPORT(env->getPortLibrary());
 		uint64_t duration = omrtime_current_time_millis();
@@ -3102,7 +3256,7 @@ MM_Scavenger::getFreeCache(MM_EnvironmentStandard *env)
 		cache = _scavengeCacheFreeList.popCache(env);
 		if (NULL == cache) {
 			resizePerformed = _scavengeCacheFreeList.resizeCacheEntries(env, 1+_scavengeCacheFreeList.getAllocatedCacheCount(), 0);
-		}		
+		}
 		omrthread_monitor_exit(_freeCacheMonitor);
 		if (resizePerformed) {
 			cache = _scavengeCacheFreeList.popCache(env);
@@ -3551,10 +3705,11 @@ MM_Scavenger::checkAndSetShouldYieldFlag(MM_EnvironmentStandard *env) {
 	 * Main info if we should yield comes from exclusive VM access request being broadcasted to this thread (isExclusiveAccessRequestWaiting())
 	 * But since that request in the thread is not cleared even when implicit main GC thread enters STW phase, and since this yield check is invoked
 	 * in common code that can run both during STW and concurrent phase, we have to additionally check we are indeed in concurrent phase before deciding to yield.
-	 * Most of the time we could rely on being in 'concurrent_phase_scan' but it's more reliable to actually check if exclusive access
-	 * is indeed being requested (hence shouldYield() call to delegate, too).
 	 */
-	if (!_shouldYield && env->isExclusiveAccessRequestWaiting() && _delegate.shouldYield()) {
+
+	if (isCurrentPhaseConcurrent() && env->isExclusiveAccessRequestWaiting() && !_shouldYield) {
+		/* If we are yielding we must be working concurrently, so GC better not have exclusive VM access. We can really only assert it for the current thread */
+		Assert_MM_true(0 == env->getOmrVMThread()->exclusiveCount);
 		_shouldYield = true;
 	}
 	return _shouldYield;
@@ -3689,7 +3844,7 @@ MM_Scavenger::backoutFixupAndReverseForwardPointersInSurvivor(MM_EnvironmentStan
 					/* A reverse forwarded object is a hole whose 'next' pointer actually points at the original object.
 					 * This keeps tenure space walkable once the reverse forwarded objects are abandoned.
 					 */
-					UDATA evacuateObjectSizeInBytes = _extensions->objectModel.getConsumedSizeInBytesWithHeader(forwardedObject);					
+					UDATA evacuateObjectSizeInBytes = _extensions->objectModel.getConsumedSizeInBytesWithHeader(forwardedObject);
 					MM_HeapLinkedFreeHeader* freeHeader = MM_HeapLinkedFreeHeader::getHeapLinkedFreeHeader(forwardedObject);
 #if defined(OMR_VALGRIND_MEMCHECK)
 					valgrindMempoolAlloc(_extensions,(uintptr_t) originalObject, (uintptr_t) evacuateObjectSizeInBytes);
@@ -3701,7 +3856,7 @@ MM_Scavenger::backoutFixupAndReverseForwardPointersInSurvivor(MM_EnvironmentStan
 #if defined(OMR_SCAVENGER_TRACE_BACKOUT)
 					omrtty_printf("{SCAV: Back out forward pointer %p[%p]@%p -> %p[%p]}\n", objectPtr, *objectPtr, forwardedObject, freeHeader->getNext(env), freeHeader->getSize());
 					Assert_MM_true(objectPtr == originalObject);
-#endif /* OMR_SCAVENGER_TRACE_BACKOUT */			
+#endif /* OMR_SCAVENGER_TRACE_BACKOUT */
 				}
 			}
 		}
@@ -4050,14 +4205,14 @@ MM_Scavenger::mainThreadGarbageCollect(MM_EnvironmentBase *envBase, MM_AllocateD
 		}
 
 		reportGCCycleStart(env);
-		_extensions->scavengerStats._startTime = omrtime_hires_clock();
+		_cycleTimes.cycleStart = omrtime_hires_clock();
 		mainSetupForGC(env);
 	}
 	clearIncrementGCStats(env, firstIncrement);
 	reportGCStart(env);
 	reportGCIncrementStart(env);
 	reportScavengeStart(env);
-	_extensions->incrementScavengerStats._startTime = omrtime_hires_clock();
+	_cycleTimes.incrementStart = omrtime_hires_clock();
 
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
 	if (_extensions->concurrentScavenger) {
@@ -4074,7 +4229,7 @@ MM_Scavenger::mainThreadGarbageCollect(MM_EnvironmentBase *envBase, MM_AllocateD
 	bool lastIncrement = true;
 #endif
 
-	_extensions->incrementScavengerStats._endTime = omrtime_hires_clock();
+	_cycleTimes.incrementEnd = omrtime_hires_clock();
 
 	/* merge stats from this increment/phase to aggregate cycle stats */
 	mergeIncrementGCStats(env, lastIncrement);
@@ -4089,9 +4244,12 @@ MM_Scavenger::mainThreadGarbageCollect(MM_EnvironmentBase *envBase, MM_AllocateD
 		 */
 		_activeSubSpace->setResizable(_cachedSemiSpaceResizableFlag);
 
-		_extensions->scavengerStats._endTime = omrtime_hires_clock();
+		_cycleTimes.cycleEnd = omrtime_hires_clock();
 
 		if(scavengeCompletedSuccessfully(env)) {
+
+			calculateRecommendedWorkingThreads(env);
+
 			/* Merge sublists in the remembered set (if necessary) */
 			_extensions->rememberedSet.compact(env);
 
@@ -4181,7 +4339,7 @@ MM_Scavenger::mainThreadGarbageCollect(MM_EnvironmentBase *envBase, MM_AllocateD
 }
 
 void
-MM_Scavenger::processLargeAllocateStatsBeforeGC(MM_EnvironmentBase *env) 
+MM_Scavenger::processLargeAllocateStatsBeforeGC(MM_EnvironmentBase *env)
 {
 	MM_MemorySpace *defaultMemorySpace = _extensions->heap->getDefaultMemorySpace();
 	MM_MemorySubSpace *defaultMemorySubspace = defaultMemorySpace->getDefaultMemorySubSpace();
@@ -4192,14 +4350,14 @@ MM_Scavenger::processLargeAllocateStatsBeforeGC(MM_EnvironmentBase *env)
 		/* SemiSpace stats include only Mutator stats (no Collector stats during flipping) */
 		defaultMemorySubspace->getTopLevelMemorySubSpace(MEMORY_TYPE_NEW)->mergeLargeObjectAllocateStats(env);
 	}
-	
-	/* TODO: remove the below 2 lines(resetLargeObjectAllocateStats), so that we do not loose direct mutator allocation info */ 
+
+	/* TODO: remove the below 2 lines(resetLargeObjectAllocateStats), so that we do not loose direct mutator allocation info */
 	MM_MemoryPool *tenureMemoryPool = tenureMemorySubspace->getMemoryPool();
 	tenureMemoryPool->resetLargeObjectAllocateStats();
 }
 
-void 
-MM_Scavenger::processLargeAllocateStatsAfterGC(MM_EnvironmentBase *env) 
+void
+MM_Scavenger::processLargeAllocateStatsAfterGC(MM_EnvironmentBase *env)
 {
 	MM_MemorySpace *defaultMemorySpace = _extensions->heap->getDefaultMemorySpace();
 	MM_MemorySubSpace *tenureMemorySubspace = defaultMemorySpace->getTenureMemorySubSpace();
@@ -4473,7 +4631,7 @@ MM_Scavenger::internalGarbageCollect(MM_EnvironmentBase *envBase, MM_MemorySubSp
 	 */
 	if (expandFailed()) {
 		Trc_MM_Scavenger_percolate_expandFailed(env->getLanguageVMThread());
-	
+
 		/* We do an aggressive percolate if the last scavenge also percolated */
 		uint32_t aggressivePercolate = _extensions->heap->getPercolateStats()->getScavengesSincePercolate() <= 1 ? J9MMCONSTANT_IMPLICIT_GC_PERCOLATE_AGGRESSIVE : J9MMCONSTANT_IMPLICIT_GC_PERCOLATE;
 
@@ -4549,7 +4707,7 @@ MM_Scavenger::internalGarbageCollect(MM_EnvironmentBase *envBase, MM_MemorySubSp
 #endif /* OMR_GC_MODRON_CONCURRENT_MARK */
 
 	/**
-	 * Language percolation trigger	
+	 * Language percolation trigger
 	 * Allow the CollectorLanguageInterface to advise if percolation should occur.
 	 */
 	PercolateReason percolateReason = NONE_SET;
@@ -4626,6 +4784,11 @@ MM_Scavenger::percolateGarbageCollect(MM_EnvironmentBase *env,  MM_MemorySubSpac
 
 	/* Set last percolate reason */
 	_extensions->heap->getPercolateStats()->setLastPercolateReason(percolateReason);
+
+	/* Percolate Global due to Critical regions was not due to tight (Tenure) heap, hence should not really affect its resizing. */
+	if (CRITICAL_REGIONS == percolateReason) {
+		_extensions->heap->getResizeStats()->setExcludeCurrentGCTimeFromStats();
+	}
 
 	/* Percolate the collect to parent MSS */
 	bool result = subSpace->percolateGarbageCollect(env, allocDescription, gcCode);
@@ -4737,13 +4900,13 @@ MM_Scavenger::calculateTiltRatio()
 	 * 	tilt_ratio =  --------------------------------------------------
 	 * 							Nursery size / 100
 	 *
-	 * Quality of calculation if good enough because Nursery size is a large number (at least grater then 1K)
+	 * Quality of calculation if good enough because Nursery size is a large number (at least greater than 1K)
 	 */
 
 	/* Calculate bottom part first */
 	uintptr_t tmp = _extensions->heap->getActiveMemorySize(MEMORY_TYPE_NEW) / 100;
 
-	/* Size of (Total - Tenure) can not be smaller then 100 bytes */
+	/* Size of (Total - Tenure) can not be smaller than 100 bytes */
 	Assert_MM_true (tmp > 0);
 
 	/* allocate size = nursery size - survivor size */
@@ -4991,7 +5154,7 @@ MM_Scavenger::calculateTenureMaskUsingFixed(uintptr_t tenureAge)
 	return mask;
 }
 
-void 
+void
 MM_Scavenger::resetTenureLargeAllocateStats(MM_EnvironmentBase *env)
 {
 	MM_MemorySpace *defaultMemorySpace = _extensions->heap->getDefaultMemorySpace();
@@ -5510,6 +5673,8 @@ MM_Scavenger::mainThreadConcurrentCollect(MM_EnvironmentBase *env)
 		clearIncrementGCStats(env, false);
 
 		_currentPhaseConcurrent = true;
+		/* We claim to work concurrently. GC better not have exclusive VM access. We can really only assert it for the current thread */
+		Assert_MM_true(0 == env->getOmrVMThread()->exclusiveCount);
 
 		MM_ConcurrentScavengeTask scavengeTask(env, _dispatcher, this, MM_ConcurrentScavengeTask::SCAVENGE_SCAN, env->_cycleState);
 		/* Concurrent background task will run with different (typically lower) number of threads. */
@@ -5522,7 +5687,7 @@ MM_Scavenger::mainThreadConcurrentCollect(MM_EnvironmentBase *env)
 		if (_shouldYield) {
 			if (NULL == _extensions->gcExclusiveAccessThreadId) {
 				/* We terminated concurrent cycle due to a external request. We will not move to 'complete' phase,
-				 * but stay in concurrent scan phase and try to resume work after the external party is done 
+				 * but stay in concurrent scan phase and try to resume work after the external party is done
 				 * (when we are able to regain VM access)
 				 */
 				getConcurrentPhaseStats()->_terminationRequestType = MM_ConcurrentPhaseStatsBase::terminationRequest_External;
@@ -5567,14 +5732,16 @@ void MM_Scavenger::preConcurrentInitializeStatsAndReport(MM_EnvironmentBase *env
 			J9HOOK_MM_PRIVATE_CONCURRENT_PHASE_START,
 			stats);
 
-	_extensions->incrementScavengerStats._startTime = omrtime_hires_clock();
+	_cycleTimes.incrementStart = omrtime_hires_clock();
+	stats->_startTime = _cycleTimes.incrementStart;
 }
 
 void MM_Scavenger::postConcurrentUpdateStatsAndReport(MM_EnvironmentBase *env, MM_ConcurrentPhaseStatsBase *stats, UDATA bytesConcurrentlyScanned)
 {
 	OMRPORT_ACCESS_FROM_OMRPORT(env->getPortLibrary());
 
-	_extensions->incrementScavengerStats._endTime = omrtime_hires_clock();
+	_cycleTimes.incrementEnd = omrtime_hires_clock();
+	stats->_endTime = _cycleTimes.incrementEnd;
 
 	TRIGGER_J9HOOK_MM_PRIVATE_CONCURRENT_PHASE_END(
 		_extensions->privateHookInterface,

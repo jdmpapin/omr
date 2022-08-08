@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -124,9 +124,6 @@ extern int64_t getIntegralValue(TR::Node* node);
 #define LOWER_4_BYTES(x) (x)
 #endif
 
-// Multi Code Cache Routines for checking whether an entry point is within reach of a BASRL.
-#define NEEDS_TRAMPOLINE(target, rip, cg) (cg->directCallRequiresTrampoline((intptr_t)target, (intptr_t)rip))
-
 #define TR_MAX_MVC_SIZE 256
 #define TR_MAX_CLC_SIZE 256
 #define TR_MIN_SS_DISP 0
@@ -139,8 +136,6 @@ extern int64_t getIntegralValue(TR::Node* node);
 #define TR_MEMCPY_PAD_MAX_LEN_INDEX 5
 #define TR_MEMCPY_PAD_EQU_LEN_INDEX 6
 #define MVCL_THRESHOLD 16777216
-
-#define USE_CURRENT_DFP_ROUNDING_MODE (uint8_t)0x0
 
 enum TR_MemCpyPadTypes
    {
@@ -200,9 +195,6 @@ public:
    TR_BranchPreloadData _hottestReturn;
    TR_BranchPreloadCallData _outlineCall;
    TR_BranchPreloadCallData _outlineArrayCall;
-
-   TR::list<TR::Register*> *getFirstTimeLiveOOLRegisterList() {return _firstTimeLiveOOLRegisterList;}
-   TR::list<TR::Register*> *setFirstTimeLiveOOLRegisterList(TR::list<TR::Register*> *r) {return _firstTimeLiveOOLRegisterList = r;}
 
    TR::list<TR_BranchPreloadCallData*> *_callsForPreloadList;
 
@@ -284,7 +276,6 @@ public:
    TR::list<TR_OpaqueClassBlock*> * getPICsListForInterfaceSnippet(TR::S390ConstantDataSnippet * ifcSnippet);
 
    void doInstructionSelection();
-   void doRegisterAssignment(TR_RegisterKinds kindsToAssign);
 
    bool loadOrStoreAddressesMatch(TR::Node *node1, TR::Node *node2);
 
@@ -354,15 +345,6 @@ public:
 
    bool isCompressedClassPointerOfObjectHeader(TR::Node * node);
 
-   /**
-    * @brief Create a literal pool entry for the given value.
-    *
-    * @details
-    *    This function must be implemented and will assert if called.
-    *    See issue eclipse/omr#2180 for details.
-    */
-   size_t findOrCreateLiteral(void *value, size_t len);
-
    bool usesImplicit64BitGPRs(TR::Node *node);
    bool nodeMayCauseException(TR::Node *node);
 
@@ -407,18 +389,6 @@ public:
    void setCurrentCheckNodeRegDeps(TR::RegisterDependencyConditions * daaDeps) {_currentBCDRegDeps = daaDeps;}
    TR::RegisterDependencyConditions * getCurrentCheckNodeRegDeps() {return _currentBCDRegDeps;}
 
-   // TODO : Do we need these? And if so there has to be a better way of tracking this this than what we're doing here.
-   /** Active counter used to track control flow basic blocks generated at instruction selection. */
-   int32_t _nextAvailableBlockIndex;
-   /** The index of the current basic block (used and updated during instruction selection). */
-   int32_t _currentBlockIndex;
-
-   void setNextAvailableBlockIndex(int32_t blockIndex) { _nextAvailableBlockIndex = blockIndex; }
-   int32_t getNextAvailableBlockIndex(){ return _nextAvailableBlockIndex; }
-   void incNextAvailableBlockIndex() { _nextAvailableBlockIndex++; }
-
-   void setCurrentBlockIndex(int32_t blockIndex) { _currentBlockIndex = blockIndex; }
-   int32_t getCurrentBlockIndex() { return _currentBlockIndex; }
    int32_t arrayInitMinimumNumberOfBytes() {return 16;}
 
    bool directLoadAddressMatch(TR::Node *load1, TR::Node *load2, bool trace);
@@ -546,25 +516,6 @@ public:
 
    bool afterRA() { return _afterRA; }
 
-#ifdef DEBUG
-   void dumpPreGPRegisterAssignment(TR::Instruction *);
-   void dumpPostGPRegisterAssignment(TR::Instruction *, TR::Instruction *);
-
-   // Internal local RA counters for self evaluation
-   void clearTotalSpills()        {_totalColdSpills=0;        _totalHotSpills=0;       }
-   void clearTotalRegisterXfers() {_totalColdRegisterXfers=0; _totalHotRegisterXfers=0;}
-   void clearTotalRegisterMoves() {_totalColdRegisterMoves=0; _totalHotRegisterMoves=0;}
-
-   // current RA block is only valid during register allocation pass and is only used for debug
-   TR::Block * getCurrentRABlock()           { return _curRABlock; }
-   void setCurrentRABlock(TR::Block * block) { _curRABlock = block; }
-
-   void incTotalSpills();
-   void incTotalRegisterXfers();
-   void incTotalRegisterMoves();
-   void printStats(int32_t);
-#endif
-
    TR_S390OutOfLineCodeSection *findS390OutOfLineCodeSectionFromLabel(TR::LabelSymbol *label);
 
    TR::Instruction *generateNop(TR::Node *node, TR::Instruction *preced=0, TR_NOPKind nopKind=TR_NOPStandard);
@@ -644,9 +595,9 @@ public:
    TR::S390ConstantDataSnippet * createLiteralPoolSnippet(TR::Node * node);
    TR::S390ConstantInstructionSnippet *createConstantInstruction(TR::Node *node, TR::Instruction * instr);
    TR::S390ConstantDataSnippet *findOrCreateConstant(TR::Node *, void *c, uint16_t size);
-   TR::S390ConstantDataSnippet *findOrCreate2ByteConstant(TR::Node *, int16_t c, bool isWarm = 0);
-   TR::S390ConstantDataSnippet *findOrCreate4ByteConstant(TR::Node *, int32_t c, bool isWarm = 0);
-   TR::S390ConstantDataSnippet *findOrCreate8ByteConstant(TR::Node *, int64_t c, bool isWarm = 0);
+   TR::S390ConstantDataSnippet *findOrCreate2ByteConstant(TR::Node *, int16_t c);
+   TR::S390ConstantDataSnippet *findOrCreate4ByteConstant(TR::Node *, int32_t c);
+   TR::S390ConstantDataSnippet *findOrCreate8ByteConstant(TR::Node *, int64_t c);
    TR::S390ConstantDataSnippet *Create4ByteConstant(TR::Node *, int32_t c, bool writable);
    TR::S390ConstantDataSnippet *Create8ByteConstant(TR::Node *, int64_t c, bool writable);
    TR::S390ConstantDataSnippet *CreateConstant(TR::Node *, void *c, uint16_t size, bool writable);
@@ -795,7 +746,8 @@ public:
 
    virtual bool isDispInRange(int64_t disp);
 
-   bool getSupportsOpCodeForAutoSIMD(TR::ILOpCode, TR::DataType);
+   static bool getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::ILOpCode opcode, bool supportsVectorRegisters = true);
+   bool getSupportsOpCodeForAutoSIMD(TR::ILOpCode opcode);
 
    TR::Instruction *_ccInstruction;
    TR::Instruction* ccInstruction() { return _ccInstruction; }
@@ -815,8 +767,7 @@ public:
 protected:
    TR::list<TR::S390ConstantDataSnippet*>  _constantList;
    TR::list<TR::S390ConstantDataSnippet*>  _snippetDataList;
-
-   TR::list<TR::Register*> *_firstTimeLiveOOLRegisterList;
+   List<TR_Pair<TR::Node, int32_t> > _ialoadUnneeded;
 
 private:
 
@@ -844,16 +795,6 @@ private:
    /** For aggregate type GRA */
    bool considerAggregateSizeForGRA(int32_t size);
 
-#ifdef DEBUG
-   uint32_t _totalColdSpills;
-   uint32_t _totalColdRegisterXfers;
-   uint32_t _totalColdRegisterMoves;
-   uint32_t _totalHotSpills;
-   uint32_t _totalHotRegisterXfers;
-   uint32_t _totalHotRegisterMoves;
-   TR::Block * _curRABlock;
-#endif
-
    bool  TR_LiteralPoolOnDemandOnRun;
 
    TR_BackingStore* _localF2ISpill;
@@ -868,7 +809,6 @@ private:
 
 protected:
 
-   bool _afterRA;
    flags32_t  _cgFlags;
 
    /** Miscellaneous S390CG boolean flags. */

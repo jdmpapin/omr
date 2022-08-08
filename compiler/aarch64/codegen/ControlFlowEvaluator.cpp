@@ -95,6 +95,50 @@ TR::Register *OMR::ARM64::TreeEvaluator::gotoEvaluator(TR::Node *node, TR::CodeG
    return NULL;
    }
 
+/**
+ * @brief Returns the number of integer or address child nodes of the GlRegDeps node
+ *
+ * @param[in]  glRegDepsNode: GlRegDeps node
+ * @param[in]             cg: Code Generator
+ * @return the number of integer or address child nodes of the GlRegDeps node
+ */
+static uint32_t countIntegerAndAddressTypesInGlRegDeps(TR::Node *glRegDepsNode, TR::CodeGenerator *cg)
+   {
+   uint32_t n = glRegDepsNode->getNumChildren();
+   uint32_t numIntNodes = 0;
+
+   for (int i = 0; i < n; i++)
+      {
+      TR::Node *child = glRegDepsNode->getChild(i);
+      /*
+       *  For PassThrough node, we need to check the data type of the child node of PassThrough.
+       *    GlRegDeps
+       *       PassThrough x15
+       *         ==>acalli
+       *
+       *   For RegLoad node, we check the data type of the RegLoad node.
+       *   GlRegDeps
+       *      aRegLoad x15
+       *      iRegLoad x14
+       *      dRegLoad d31
+       *      dRegLoad d30
+       */
+      if (child->getOpCodeValue() == TR::PassThrough)
+         {
+         child = child->getFirstChild();
+         }
+
+      if (!(child->getDataType().isFloatingPoint() || child->getDataType().isVector()))
+         {
+         numIntNodes++;
+         }
+      }
+   if (cg->comp()->getOption(TR_TraceCG))
+      traceMsg(cg->comp(), "%d integer/address nodes found in GlRegDeps node %p\n", numIntNodes, glRegDepsNode);
+
+   return numIntNodes;
+   }
+
 static TR::Instruction *ificmpHelper(TR::Node *node, TR::ARM64ConditionCode cc, bool is64bit, TR::CodeGenerator *cg)
    {
    if (virtualGuardHelper(node, cg))
@@ -109,10 +153,11 @@ static TR::Instruction *ificmpHelper(TR::Node *node, TR::ARM64ConditionCode cc, 
    TR::LabelSymbol *dstLabel;
    TR::Instruction *result;
    TR::RegisterDependencyConditions *deps;
+   bool secondChildNeedsRelocation = cg->profiledPointersRequireRelocation() && (secondChild->getOpCodeValue() == TR::aconst) &&
+                                       (secondChild->isClassPointerConstant() || secondChild->isMethodPointerConstant());
 
 #ifdef J9_PROJECT_SPECIFIC
-if (cg->profiledPointersRequireRelocation() && secondChild->getOpCodeValue() == TR::aconst &&
-   (secondChild->isClassPointerConstant() || secondChild->isMethodPointerConstant()))
+if (secondChildNeedsRelocation)
    {
    if (node->isProfiledGuard())
       {
@@ -142,7 +187,7 @@ if (cg->profiledPointersRequireRelocation() && secondChild->getOpCodeValue() == 
              * We need to use a b.cond instruction instead for that case.
              */
             && ((node->getNumChildren() != 3) ||
-             (node->getChild(2)->getNumChildren() != cg->getLinkage()->getProperties().getNumAllocatableIntegerRegisters())))
+             (countIntegerAndAddressTypesInGlRegDeps(node->getChild(2), cg) < cg->getLinkage()->getProperties().getNumAllocatableIntegerRegisters())))
          {
          TR::InstOpCode::Mnemonic op;
          if (cc == TR::CC_EQ )
@@ -157,7 +202,12 @@ if (cg->profiledPointersRequireRelocation() && secondChild->getOpCodeValue() == 
             TR_ASSERT(thirdChild->getOpCodeValue() == TR::GlRegDeps, "The third child of a compare must be a TR::GlRegDeps");
             cg->evaluate(thirdChild);
 
-            deps = generateRegisterDependencyConditions(cg, thirdChild, 0);
+            deps = generateRegisterDependencyConditions(cg, thirdChild, 1);
+            uint32_t numPreConditions = deps->getAddCursorForPre();
+            if (!deps->getPreConditions()->containsVirtualRegister(src1Reg, numPreConditions))
+               {
+               TR::addDependency(deps, src1Reg, TR::RealRegister::NoReg, TR_GPR, cg);
+               }
             result = generateCompareBranchInstruction(cg, op, node, src1Reg, dstLabel, deps);
             }
          else
@@ -176,15 +226,11 @@ if (cg->profiledPointersRequireRelocation() && secondChild->getOpCodeValue() == 
          }
       }
 
-   if (secondChild->getOpCode().isLoadConst() && secondChild->getRegister() == NULL)
+   if ((!secondChildNeedsRelocation) && secondChild->getOpCode().isLoadConst() && secondChild->getRegister() == NULL)
       {
       int64_t value = is64bit ? secondChild->getLongInt() : secondChild->getInt();
-      if (constantIsUnsignedImm12(value))
-         {
-         generateCompareImmInstruction(cg, node, src1Reg, value, is64bit);
-         useRegCompare = false;
-         }
-      else if (constantIsUnsignedImm12(-value))
+      if (constantIsUnsignedImm12(value) || constantIsUnsignedImm12(-value) ||
+          constantIsUnsignedImm12Shifted(value) || constantIsUnsignedImm12Shifted(-value))
          {
          generateCompareImmInstruction(cg, node, src1Reg, value, is64bit);
          useRegCompare = false;
@@ -375,16 +421,14 @@ static TR::Register *icmpHelper(TR::Node *node, TR::ARM64ConditionCode cc, bool 
    TR::Node *secondChild = node->getSecondChild();
    TR::Register *src1Reg = cg->evaluate(firstChild);
    bool useRegCompare = true;
+   bool secondChildNeedsRelocation = cg->profiledPointersRequireRelocation() && (secondChild->getOpCodeValue() == TR::aconst) &&
+                                       (secondChild->isClassPointerConstant() || secondChild->isMethodPointerConstant());
 
-   if (secondChild->getOpCode().isLoadConst() && secondChild->getRegister() == NULL)
+   if ((!secondChildNeedsRelocation) && secondChild->getOpCode().isLoadConst() && secondChild->getRegister() == NULL)
       {
       int64_t value = is64bit ? secondChild->getLongInt() : secondChild->getInt();
-      if (constantIsUnsignedImm12(value))
-         {
-         generateCompareImmInstruction(cg, node, src1Reg, value, is64bit);
-         useRegCompare = false;
-         }
-      else if (constantIsUnsignedImm12(-value))
+      if (constantIsUnsignedImm12(value) || constantIsUnsignedImm12(-value) ||
+          constantIsUnsignedImm12Shifted(value) || constantIsUnsignedImm12Shifted(-value))
          {
          generateCompareImmInstruction(cg, node, src1Reg, value, is64bit);
          useRegCompare = false;
@@ -405,14 +449,14 @@ static TR::Register *icmpHelper(TR::Node *node, TR::ARM64ConditionCode cc, bool 
    return trgReg;
    }
 
-// also handles bcmpeq, bucmpeq, scmpeq, sucmpeq
+// also handles bcmpeq, scmpeq
 TR::Register *
 OMR::ARM64::TreeEvaluator::icmpeqEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    return icmpHelper(node, TR::CC_EQ, false, cg);
    }
 
-// also handles bcmpne, bucmpne, scmpne, sucmpne
+// also handles bcmpne, scmpne
 TR::Register *
 OMR::ARM64::TreeEvaluator::icmpneEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
@@ -565,13 +609,6 @@ OMR::ARM64::TreeEvaluator::lcmpEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    }
 
 TR::Register *
-OMR::ARM64::TreeEvaluator::acmpeqEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-	{
-	// TODO:ARM64: Enable TR::TreeEvaluator::acmpeqEvaluator in compiler/aarch64/codegen/TreeEvaluatorTable.hpp when Implemented.
-	return OMR::ARM64::TreeEvaluator::unImpOpEvaluator(node, cg);
-	}
-
-TR::Register *
 OMR::ARM64::TreeEvaluator::lookupEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    int32_t numChildren = node->getNumChildren();
@@ -706,48 +743,6 @@ OMR::ARM64::TreeEvaluator::tableEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    cg->decReferenceCount(node->getFirstChild());
    return NULL;
    }
-
-TR::Register *
-OMR::ARM64::TreeEvaluator::ZEROCHKEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-	{
-	// TODO:ARM64: Enable TR::TreeEvaluator::ZEROCHKEvaluator in compiler/aarch64/codegen/TreeEvaluatorTable.hpp when Implemented.
-	return OMR::ARM64::TreeEvaluator::unImpOpEvaluator(node, cg);
-	}
-
-TR::Register *
-OMR::ARM64::TreeEvaluator::DIVCHKEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-	{
-	// TODO:ARM64: Enable TR::TreeEvaluator::DIVCHKEvaluator in compiler/aarch64/codegen/TreeEvaluatorTable.hpp when Implemented.
-	return OMR::ARM64::TreeEvaluator::unImpOpEvaluator(node, cg);
-	}
-
-TR::Register *
-OMR::ARM64::TreeEvaluator::BNDCHKEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-	{
-	// TODO:ARM64: Enable TR::TreeEvaluator::BNDCHKEvaluator in compiler/aarch64/codegen/TreeEvaluatorTable.hpp when Implemented.
-	return OMR::ARM64::TreeEvaluator::unImpOpEvaluator(node, cg);
-	}
-
-TR::Register *
-OMR::ARM64::TreeEvaluator::ArrayCopyBNDCHKEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-	{
-	// TODO:ARM64: Enable TR::TreeEvaluator::ArrayCopyBNDCHKEvaluator in compiler/aarch64/codegen/TreeEvaluatorTable.hpp when Implemented.
-	return OMR::ARM64::TreeEvaluator::unImpOpEvaluator(node, cg);
-	}
-
-TR::Register *
-OMR::ARM64::TreeEvaluator::ArrayStoreCHKEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-	{
-	// TODO:ARM64: Enable TR::TreeEvaluator::ArrayStoreCHKEvaluator in compiler/aarch64/codegen/TreeEvaluatorTable.hpp when Implemented.
-	return OMR::ARM64::TreeEvaluator::unImpOpEvaluator(node, cg);
-	}
-
-TR::Register *
-OMR::ARM64::TreeEvaluator::ArrayCHKEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-	{
-	// TODO:ARM64: Enable TR::TreeEvaluator::ArrayCHKEvaluator in compiler/aarch64/codegen/TreeEvaluatorTable.hpp when Implemented.
-	return OMR::ARM64::TreeEvaluator::unImpOpEvaluator(node, cg);
-	}
 
 static TR::Register *
 commonMinMaxEvaluator(TR::Node *node, bool is64bit, TR::ARM64ConditionCode cc, TR::CodeGenerator *cg)

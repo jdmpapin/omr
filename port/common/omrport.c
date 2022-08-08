@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2015, 2020 IBM Corp. and others
+ * Copyright (c) 2015, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -253,6 +253,8 @@ static OMRPortLibrary MainPortLibraryTable = {
 	omrfile_blockingasync_unlock_bytes, /* file_blockingasync_unlock_bytes */
 	omrfile_blockingasync_lock_bytes, /* file_blockingasync_lock_bytes */
 	omrstr_ftime, /* str_ftime */
+	omrstr_ftime_ex, /* str_ftime_ex */
+	omrstr_current_time_zone, /* str_current_time_zone */
 	omrmmap_startup, /* mmap_startup */
 	omrmmap_shutdown, /* mmap_shutdown */
 	omrmmap_capabilities, /* mmap_capabilities */
@@ -345,6 +347,7 @@ static OMRPortLibrary MainPortLibraryTable = {
 	omrintrospect_threads_nextDo, /* introspect_threads_nextDo */
 	omrintrospect_backtrace_thread, /* introspect_backtrace_thread */
 	omrintrospect_backtrace_symbols, /* introspect_backtrace_symbols */
+	omrintrospect_backtrace_symbols_ex, /* introspect_backtrace_symbols_ex */
 	omrsyslog_query, /* syslog_query */
 	omrsyslog_set, /* syslog_set */
 	omrmem_walk_categories, /* mem_walk_categories */

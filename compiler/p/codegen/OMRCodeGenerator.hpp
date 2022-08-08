@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -196,7 +196,6 @@ public:
 
    void beginInstructionSelection();
    void endInstructionSelection();
-   void doRegisterAssignment(TR_RegisterKinds kindsToAssign);
    void doBinaryEncoding();
    void processRelocations();
    void expandInstructions();
@@ -208,6 +207,7 @@ public:
    bool canEmitDataForExternallyRelocatableInstructions();
 
    bool inlineDirectCall(TR::Node *node, TR::Register *&resultReg);
+   bool supportsInliningOfIsInstance();
 
    /**
     * Return the proper linkage for this call, especially for the case when the methodSymbol
@@ -282,23 +282,13 @@ public:
       return false;
       }
 
-   bool getSupportsOpCodeForAutoSIMD(TR::ILOpCode, TR::DataType);
+   static bool getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::ILOpCode opcode);
+   bool getSupportsOpCodeForAutoSIMD(TR::ILOpCode opcode);
 
    bool getSupportsEncodeUtf16LittleWithSurrogateTest();
 
    bool getSupportsEncodeUtf16BigWithSurrogateTest();
 
-   // Active counter used to track control flow basic blocks generated at instruction selection.
-   int32_t _nextAvailableBlockIndex;
-   // The index of the current basic block (used and updated during instruction selection).
-   int32_t _currentBlockIndex;
-
-   void setNextAvailableBlockIndex(int32_t blockIndex) { _nextAvailableBlockIndex = blockIndex; }
-   int32_t getNextAvailableBlockIndex() { return _currentBlockIndex = _nextAvailableBlockIndex; }
-   void incNextAvailableBlockIndex() { _nextAvailableBlockIndex++; }
-
-   void setCurrentBlockIndex(int32_t blockIndex) { _currentBlockIndex = blockIndex; }
-   int32_t getCurrentBlockIndex() { return _currentBlockIndex; }
    int32_t arrayInitMinimumNumberOfBytes() {return 32;}
 
    TR::SymbolReference &getDouble2LongSymbolReference()  { return *_symRefTab->findOrCreateRuntimeHelper(TR_PPCdouble2Long); }
@@ -347,10 +337,6 @@ public:
    TR::SymbolReference &getForwardHalfWordArrayCopySymbolReference();
    TR::SymbolReference &getReferenceArrayCopySymbolReference() { return *_symRefTab->findOrCreateRuntimeHelper(TR_PPCreferenceArrayCopy); }
    TR::SymbolReference &getGeneralArrayCopySymbolReference() { return *_symRefTab->findOrCreateRuntimeHelper(TR_PPCgeneralArrayCopy); }
-   TR::SymbolReference &getArrayCmpVMXSymbolReference() { return *_symRefTab->findOrCreateRuntimeHelper(TR_PPCarrayCmpVMX); }
-   TR::SymbolReference &getArrayCmpLenVMXSymbolReference() { return *_symRefTab->findOrCreateRuntimeHelper(TR_PPCarrayCmpLenVMX); }
-   TR::SymbolReference &getArrayCmpScalarSymbolReference() { return *_symRefTab->findOrCreateRuntimeHelper(TR_PPCarrayCmpScalar); }
-   TR::SymbolReference &getArrayCmpLenScalarSymbolReference() { return *_symRefTab->findOrCreateRuntimeHelper(TR_PPCarrayCmpLenScalar); }
    TR::SymbolReference &getSamplingPatchCallSiteSymbolReference() { return *_symRefTab->findOrCreateRuntimeHelper(TR_PPCsamplingPatchCallSite); }
    TR::SymbolReference &getSamplingRecompileMethodSymbolReference() { return *_symRefTab->findOrCreateRuntimeHelper(TR_PPCsamplingRecompileMethod); }
    TR::SymbolReference &getCountingPatchCallSiteSymbolReference() { return *_symRefTab->findOrCreateRuntimeHelper(TR_PPCcountingPatchCallSite); }

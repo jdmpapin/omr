@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -26,6 +26,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include "omrformatconsts.h"
 #include "codegen/CodeGenerator.hpp"
 #include "env/FrontEnd.hpp"
 #include "env/KnownObjectTable.hpp"
@@ -89,7 +90,7 @@ class TR_OpaqueMethodBlock;
 
 
 OMR::SymbolReferenceTable::SymbolReferenceTable(size_t sizeHint, TR::Compilation *comp) :
-     baseArray(comp->trMemory(), sizeHint + TR_numRuntimeHelpers),
+     baseArray(comp->trMemory(), static_cast<uint32_t>(sizeHint + TR_numRuntimeHelpers)),
      aliasBuilder(self(), sizeHint, comp),
      _trMemory(comp->trMemory()),
      _fe(comp->fe()),
@@ -942,7 +943,7 @@ OMR::SymbolReferenceTable::methodSymRefFromName(TR::ResolvedMethodSymbol * ownin
    //
    TR::StackMemoryRegion stackMemoryRegion(*trMemory());
 
-   int32_t fullSignatureLength = strlen(className) + 1 + strlen(methodName) + strlen(methodSignature);
+   auto fullSignatureLength = strlen(className) + 1 + strlen(methodName) + strlen(methodSignature);
    char *fullSignature = (char*)trMemory()->allocateMemory(1 + fullSignatureLength, stackAlloc);
    sprintf(fullSignature, "%s.%s%s", className, methodName, methodSignature);
    TR_ASSERT(strlen(fullSignature) == fullSignatureLength, "Computed fullSignatureLength must match actual length of fullSignature");
@@ -1225,6 +1226,7 @@ OMR::SymbolReferenceTable::findOrCreateGCRPatchPointSymbolRef()
       sym->setStaticAddress(0);
       sym->setGCRPatchPoint(); // set the flag
       sym->setNotDataAddress();
+      sym->setStaticAddressWithinMethodBounds();
       element(gcrPatchPointSymbol) = new (trHeapMemory()) TR::SymbolReference(self(), gcrPatchPointSymbol, sym);
       }
    return element(gcrPatchPointSymbol);
@@ -1240,6 +1242,7 @@ OMR::SymbolReferenceTable::findOrCreateStartPCSymbolRef()
       sym->setStaticAddress(0);
       sym->setStartPC();
       sym->setNotDataAddress();
+      sym->setStaticAddressWithinMethodBounds();
       element(startPCSymbol) = new (trHeapMemory()) TR::SymbolReference(self(), startPCSymbol, sym);
       }
    return element(startPCSymbol);
@@ -1319,7 +1322,7 @@ OMR::SymbolReferenceTable::findOrCreateClassSymbol(
       // the class on AOT load.
       TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp()->fe());
       void *loader = fej9->getClassLoader((TR_OpaqueClassBlock*)classObject);
-      void *bootstrapLoader = TR::Compiler->javaVM->systemClassLoader;
+      void *bootstrapLoader = fej9->getSystemClassLoader();
       TR_ASSERT_FATAL(
          loader == bootstrapLoader,
          "class symref cpIndex=-1 in AOT not loaded by bootstrap loader\n");
@@ -1449,7 +1452,7 @@ OMR::SymbolReferenceTable::findOrCreateMethodSymbol(
               && owningMethodIndex == symRef->getOwningMethodIndex()
               && cpIndex != -1
               && symRef->getSymbol()->getMethodSymbol()->getMethodKind() == callKind
-              && !(resolvedMethod && symRef->isUnresolved())
+              && !(resolvedMethod && (symRef->isUnresolved() || symRef->getSymbol()->isDummyResolvedMethod()))
             )
           return symRef;
         }
@@ -1606,7 +1609,7 @@ OMR::SymbolReferenceTable::findOrCreateAutoSymbolImpl(TR::ResolvedMethodSymbol *
 
       if (isInternalPointer)
          {
-         sym = size ? TR::AutomaticSymbol::createInternalPointer(trHeapMemory(), type, size, comp()->fe()) :
+         sym = size ? TR::AutomaticSymbol::createInternalPointer(trHeapMemory(), type, static_cast<uint32_t>(size), comp()->fe()) :
                       TR::AutomaticSymbol::createInternalPointer(trHeapMemory(), type);
          _numInternalPointers++;
          if (_numInternalPointers > comp()->maxInternalPointers())
@@ -1616,7 +1619,7 @@ OMR::SymbolReferenceTable::findOrCreateAutoSymbolImpl(TR::ResolvedMethodSymbol *
          }
       else
          {
-         sym = size ? TR::AutomaticSymbol::create(trHeapMemory(),type,size) :
+         sym = size ? TR::AutomaticSymbol::create(trHeapMemory(),type,static_cast<uint32_t>(size)) :
                       TR::AutomaticSymbol::create(trHeapMemory(),type);
          }
 
@@ -1661,15 +1664,22 @@ OMR::SymbolReferenceTable::findOrCreateAutoSymbolImpl(TR::ResolvedMethodSymbol *
 TR::SymbolReference *
 OMR::SymbolReferenceTable::findOrCreateShadowSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t cpIndex, bool isStore)
    {
-      TR_UNIMPLEMENTED();
-      return NULL;
+   TR_UNIMPLEMENTED();
+   return NULL;
    }
 
 TR::SymbolReference *
 OMR::SymbolReferenceTable::findOrFabricateShadowSymbol(TR_OpaqueClassBlock *containingClass, TR::DataType type, uint32_t offset, bool isVolatile, bool isPrivate, bool isFinal, const char * name, const char * signature)
    {
-      TR_UNIMPLEMENTED();
-      return NULL;
+   TR_UNIMPLEMENTED();
+   return NULL;
+   }
+
+TR::SymbolReference *
+OMR::SymbolReferenceTable::findOrFabricateFlattenedArrayElementFieldShadowSymbol(TR_OpaqueClassBlock *arrayComponentClass, TR::DataType type, uint32_t offset, bool isPrivate, const char * name, const char * signature)
+   {
+   TR_UNIMPLEMENTED();
+   return NULL;
    }
 
 TR::SymbolReference *
@@ -1783,7 +1793,7 @@ OMR::SymbolReferenceTable::findOrCreatePendingPushTemporary(
    }
 
 TR::SymbolReference *
-OMR::SymbolReferenceTable::createNamedStatic(TR::ResolvedMethodSymbol *owningMethodSymbol, TR::DataType type, const char *name) 
+OMR::SymbolReferenceTable::createNamedStatic(TR::ResolvedMethodSymbol *owningMethodSymbol, TR::DataType type, const char *name)
    {
    TR::StaticSymbol * sym = TR::StaticSymbol::createNamed(trHeapMemory(),type, name);
    return new (trHeapMemory()) TR::SymbolReference(self(),sym,owningMethodSymbol->getResolvedMethodIndex(),owningMethodSymbol->incTempIndex(fe()));
@@ -1887,7 +1897,7 @@ bool OMR::SymbolReferenceTable::isNonHelper(TR::SymbolReference *symRef, CommonN
 
 bool OMR::SymbolReferenceTable::isNonHelper(int32_t ref, CommonNonhelperSymbol s)
    {
-   if (ref >= _numHelperSymbols && ref < _numHelperSymbols + getLastCommonNonhelperSymbol() && s < getLastCommonNonhelperSymbol())
+   if (unsigned(ref) >= _numHelperSymbols && unsigned(ref) < _numHelperSymbols + getLastCommonNonhelperSymbol() && s < getLastCommonNonhelperSymbol())
       {
       return ref == getNonhelperIndex(s);
       }
@@ -1904,7 +1914,7 @@ bool OMR::SymbolReferenceTable::isNonHelper(TR::SymbolReference *symRef)
 
 bool OMR::SymbolReferenceTable::isNonHelper(int32_t ref)
    {
-   return (ref >= _numHelperSymbols && ref < _numHelperSymbols + getLastCommonNonhelperSymbol());
+   return (unsigned(ref) >= _numHelperSymbols && unsigned(ref) < _numHelperSymbols + getLastCommonNonhelperSymbol());
    }
 
 OMR::SymbolReferenceTable::CommonNonhelperSymbol OMR::SymbolReferenceTable::getNonHelperSymbol(TR::SymbolReference *symRef)
@@ -2023,7 +2033,7 @@ OMR::SymbolReferenceTable::findOrCreateJProfileValuePlaceHolderWithNullCHKSymbol
       sym->setHelper();
       element(jProfileValueWithNullCHKSymbol) = new (trHeapMemory()) TR::SymbolReference(self(), jProfileValueWithNullCHKSymbol, sym);
       }
-   return element(jProfileValueWithNullCHKSymbol); 
+   return element(jProfileValueWithNullCHKSymbol);
    }
 
 TR::SymbolReference *
@@ -2092,4 +2102,85 @@ OMR::SymbolReferenceTable::rememberOriginalUnimprovedSymRef(
       improved->getReferenceNumber(),
       entryPreventingInsertion->second,
       original->getReferenceNumber());
+   }
+
+
+const char *OMR::SymbolReferenceTable::_commonNonHelperSymbolNames[] =
+   {
+   "<contiguousArraySize>",
+   "<discontiguousArraySize>",
+   "<arrayClassRomPtr>",
+   "<javaLangClassFromClass>",
+   "<classFromJavaLangClass>",
+   "<addressOfClassOfMethod>",
+   "<componentClass>",
+   "<isArray>",
+   "<isClassAndDepthFlags>",
+   "<isClassFlags>",
+   "<vft>",
+   "<currentThread>",
+   "<recompilationCounter>",
+   "<excp>",
+   "<indexableSize>",
+   "<resolveCheck>",
+   "<arrayTranslate>",
+   "<arrayTranslateAndTest>",
+   "<long2String>",
+   "<bitOpMem>",
+   "<reverseLoad>",
+   "<reverseStore>",
+   "<currentTimeMaxPrecision>",
+   "<headerFlags>",
+   "<singlePrecisionSQRT>",
+   "<countForRecompile>",
+   "<gcrPatchPoint>",
+   "<counterAddress>",
+   "<startPC>",
+   "<compiledMethod>",
+   "<thisRangeExtension>",
+   "<profilingBufferCursor>",
+   "<profilingBufferEnd>",
+   "<profilingBuffer>",
+   "<osrBuffer>",
+   "<osrScratchBuffer>",
+   "<osrFrameIndex>",
+   "<osrReturnAddress>",
+   "<potentialOSRPointHelper>",
+   "<osrFearPointHelper>",
+   "<eaEscapeHelper>",
+   "<instanceShape>",
+   "<instanceDescription>",
+   "<descriptionWordFromPtr>",
+   "<objectEqualityComparison>",
+   "<objectInequalityComparison>",
+   "<nonNullableArrayNullStoreCheck>",
+   "<synchronizedFieldLoad>",
+   "<atomicAdd>",
+   "<atomicFetchAndAdd>",
+   "<atomicFetchAndAdd32Bit>",
+   "<atomicFetchAndAdd64Bit>",
+   "<atomicSwap>",
+   "<atomicSwap32Bit>",
+   "<atomicSwap64Bit>",
+   "<atomicCompareAndSwapReturnStatus>",
+   "<atomicCompareAndSwapReturnValue>",
+   "<jProfileValueSymbol>",
+   "<jProfileValueWithNullCHKSymbol>"
+   };
+
+
+const char *
+OMR::SymbolReferenceTable::getNonHelperSymbolName(CommonNonhelperSymbol nonHelper)
+   {
+   TR_ASSERT_FATAL(nonHelper >= OMRfirstPrintableCommonNonhelperSymbol &&
+                   nonHelper <= OMRlastPrintableCommonNonhelperSymbol,
+                   "unknown non helper %" OMR_PRId32, static_cast<int32_t>(nonHelper));
+
+#if 0
+   static_assert(sizeof(_commonNonHelperSymbolNames)/sizeof(_commonNonHelperSymbolNames[0]) ==
+                 static_cast<int32_t>(OMRlastPrintableCommonNonhelperSymbol - OMRfirstPrintableCommonNonhelperSymbol + 1),
+                 "_commonNonHelperSymbolNames array must match CommonNonHelperSymbol enumeration");
+#endif
+
+   return _commonNonHelperSymbolNames[static_cast<int32_t>(nonHelper - OMRfirstPrintableCommonNonhelperSymbol)];
    }

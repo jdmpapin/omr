@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -23,8 +23,6 @@
 include(OmrCompilerSupport)
 
 find_package(PythonInterp REQUIRED)
-
-set(OMR_WARNINGS_AS_ERRORS OFF)
 
 # JitBuilder Files
 set(JITBUILDER_OBJECTS
@@ -108,6 +106,13 @@ list(APPEND JITBUILDER_OBJECTS
 	${JITBUILDER_API_SOURCES}
 )
 
+if(OMR_ARCH_X86 OR OMR_ARCH_S390)
+	set(OMR_ENHANCED_WARNINGS OFF)
+else()
+	set(OMR_WARNINGS_AS_ERRORS OFF)
+	set(OMR_ENHANCED_WARNINGS OFF)
+endif()
+
 # Create jitbuilder library.
 create_omr_compiler_library(
 	NAME    jitbuilder
@@ -116,7 +121,7 @@ create_omr_compiler_library(
 )
 
 # Add interface path so that include paths propagate.
-# NOTE: `release` directory  isn't being automatically setup, so this
+# NOTE: `release` directory isn't being automatically setup, so this
 #       is adding the actual compiler dir, as opposed to the 'composed'
 #       install directory.
 target_include_directories(jitbuilder
@@ -129,7 +134,7 @@ target_link_libraries(jitbuilder
 		${OMR_PORT_LIB}
 )
 
-## JitBuilder examples only work on 64 bit currently.
+# JitBuilder examples only work on 64 bit currently.
 if(OMR_JITBUILDER AND OMR_ENV_DATA64)
 	add_subdirectory(release)
 endif()
@@ -151,8 +156,7 @@ endif()
 #         PUBLIC_HEADER DESTINATION ${CMAKE_BINARY_DIR}/jitbuilder_release/include
 #         )
 #
-#
-# #Create release directory
+# # Create release directory
 # file(MAKE_DIRECTORY jitbuilder_release)
 # file(COPY ${jitbuilder_library} DESTINATION jitbuilder_release)
 # file(COPY ${CMAKE_SOURCE_DIR}/compiler/env   DESTINATION jitbuilder_release/include)

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -46,10 +46,11 @@ OMR::OpCodeProperties OMR::ILOpCode::_opCodeProperties[] =
 #include "il/ILOpCodeProperties.hpp"
    };
 
+
 void
 OMR::ILOpCode::checkILOpArrayLengths()
    {
-   for (int i = TR::FirstOMROp; i < TR::NumIlOps; i++)
+   for (int i = TR::FirstOMROp; i < TR::NumScalarIlOps; i++)
       {
       TR::ILOpCodes opCode = (TR::ILOpCodes)i;
       TR::ILOpCode  op(opCode);
@@ -67,7 +68,7 @@ OMR::ILOpCode::setTarget()
    {
    if (TR::Compiler->target.is64Bit())
       {
-      for (int32_t i = 0; i < TR::NumIlOps; ++i)
+      for (int32_t i = 0; i < opCodePropertiesSize; ++i)
          {
          flags32_t *tp = (flags32_t*)(&_opCodeProperties[i].typeProperties); // so ugly
          if (tp->getValue() == ILTypeProp::Reference)
@@ -80,7 +81,7 @@ OMR::ILOpCode::setTarget()
       }
    else
       {
-      for (int32_t i = 0; i < TR::NumIlOps; ++i)
+      for (int32_t i = 0; i < opCodePropertiesSize; ++i)
          {
          flags32_t *tp = (flags32_t*)(&_opCodeProperties[i].typeProperties); // so ugly
          if (tp->getValue() == ILTypeProp::Reference)
@@ -147,22 +148,6 @@ OMR::ILOpCode::compareOpCode(TR::DataType dt,
                case TR_cmpLE: return TR::lucmple;
                case TR_cmpGT: return TR::lucmpgt;
                case TR_cmpGE: return TR::lucmpge;
-               default: return TR::BadILOp;
-               }
-            break;
-            }
-         case TR::Float:
-            {
-            switch(ct)
-               {
-               default: return TR::BadILOp;
-               }
-            break;
-            }
-         case TR::Double:
-            {
-            switch(ct)
-               {
                default: return TR::BadILOp;
                }
             break;
@@ -317,4 +302,63 @@ OMR::ILOpCode::getCompareType(TR::ILOpCodes op)
       return TR_cmpEQ;
    else
       return TR_cmpNE;
+   }
+
+
+namespace OMR {
+
+#define TR_Bad TR::BadILOp
+
+static TR::ILOpCodes conversionMap[TR::NumOMRTypes][TR::NumOMRTypes] =
+//                       No      Int8     Int16    Int32    Int64    Float    Double   Addr     Aggregate
+   {
+   /* NoType */        { TR_Bad, TR_Bad,  TR_Bad,  TR_Bad,  TR_Bad,  TR_Bad,  TR_Bad,  TR_Bad,  TR_Bad},  // NoType
+   /* Int8 */          { TR_Bad, TR_Bad,  TR::b2s, TR::b2i, TR::b2l, TR::b2f, TR::b2d, TR::b2a, TR_Bad},  // Int8
+   /* Int16 */         { TR_Bad, TR::s2b, TR_Bad,  TR::s2i, TR::s2l, TR::s2f, TR::s2d, TR::s2a, TR_Bad},  // Int16
+   /* Int32 */         { TR_Bad, TR::i2b, TR::i2s, TR_Bad,  TR::i2l, TR::i2f, TR::i2d, TR::i2a, TR_Bad},  // Int32
+   /* Int64 */         { TR_Bad, TR::l2b, TR::l2s, TR::l2i, TR_Bad,  TR::l2f, TR::l2d, TR::l2a, TR_Bad},  // Int64
+   /* Float */         { TR_Bad, TR::f2b, TR::f2s, TR::f2i, TR::f2l, TR_Bad,  TR::f2d, TR_Bad,  TR_Bad},  // Float
+   /* Double */        { TR_Bad, TR::d2b, TR::d2s, TR::d2i, TR::d2l, TR::d2f, TR_Bad,  TR_Bad,  TR_Bad},  // Double
+   /* Address */       { TR_Bad, TR::a2b, TR::a2s, TR::a2i, TR::a2l, TR_Bad,  TR_Bad,  TR_Bad,  TR_Bad},  // Address
+   /* Aggregate */     { TR_Bad, TR_Bad,  TR_Bad,  TR_Bad,  TR_Bad,  TR_Bad,  TR_Bad,  TR_Bad,  TR_Bad},  // Aggregate
+   };
+
+#undef TR_Bad
+
+} // namespace OMR
+
+
+TR::ILOpCodes
+OMR::ILOpCode::getDataTypeConversion(TR::DataType t1, TR::DataType t2)
+   {
+   if (t1.isVector() && t2.isVector())
+      return TR::ILOpCode::createVectorOpCode(TR::vcast, t1, t2);
+
+   if (t1.isVector() || t2.isVector())
+      return TR::BadILOp;
+
+
+   TR_ASSERT(t1 < TR::NumOMRTypes, "conversion opcode from unexpected datatype %s requested", t1.toString());
+   TR_ASSERT(t2 < TR::NumOMRTypes, "conversion opcode to unexpected datatype %s requested", t2.toString());
+   return OMR::conversionMap[t1][t2];
+   }
+
+TR::ILOpCodes
+OMR::ILOpCode::getDataTypeBitConversion(TR::DataType t1, TR::DataType t2)
+   {
+   if (t1.isVector() || t2.isVector())
+      return TR::BadILOp;
+
+   TR_ASSERT(t1 < TR::NumOMRTypes, "conversion opcode from unexpected datatype %s requested", t1.toString());
+   TR_ASSERT(t2 < TR::NumOMRTypes, "conversion opcode to unexpected datatype %s requested", t2.toString());
+   if (t1 == TR::Int32 && t2 == TR::Float)
+      return TR::ibits2f;
+   else if (t1 == TR::Float && t2 == TR::Int32)
+      return TR::fbits2i;
+   else if (t1 == TR::Int64 && t2 == TR::Double)
+      return TR::lbits2d;
+   else if (t1 == TR::Double && t2 == TR::Int64)
+      return TR::dbits2l;
+   else
+      return TR::BadILOp;
    }

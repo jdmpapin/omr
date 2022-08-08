@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -114,7 +114,7 @@ TR::RealRegister *OMR::ARM::Machine::freeBestRegister(TR::Instruction     *curre
    TR::RealRegister    *best, *crtemp=NULL;
    TR::Instruction     *cursor;
    TR::Node               *currentNode = currentInstruction->getNode();
-   TR_ARMOpCodes          opCode;
+   TR::InstOpCode::Mnemonic          opCode;
    int                    numCandidates = 0;
    int                    first, last;
 
@@ -157,8 +157,8 @@ TR::RealRegister *OMR::ARM::Machine::freeBestRegister(TR::Instruction     *curre
       cursor = currentInstruction;
       while (numCandidates > 1                 &&
              cursor != NULL                    &&
-             cursor->getOpCodeValue() != ARMOp_label &&
-             cursor->getOpCodeValue() != ARMOp_proc)
+             cursor->getOpCodeValue() != TR::InstOpCode::label &&
+             cursor->getOpCodeValue() != TR::InstOpCode::proc)
          {
          for (int i = 0; i < numCandidates; i++)
             {
@@ -237,44 +237,42 @@ TR::RealRegister *OMR::ARM::Machine::freeBestRegister(TR::Instruction     *curre
    candidates[0]->setBackingStorage(location);
 
    tmemref = new (self()->cg()->trHeapMemory()) TR::MemoryReference(currentNode, location->getSymbolReference(), ((rk == TR_FPR) ? 8 : 4), self()->cg());
-   if (!comp->getOption(TR_DisableOOL))
-      {
-      if (!self()->cg()->isOutOfLineColdPath())
-         {
-         TR_Debug   *debugObj = self()->cg()->getDebug();
-         // the spilledRegisterList contains all registers that are spilled before entering
-         // the OOL cold path, post dependencies will be generated using this list
-         self()->cg()->getSpilledRegisterList()->push_front(candidates[0]);
 
-         // OOL cold path: depth = 3, hot path: depth =2,  main line: depth = 1
-         // if the spill is outside of the OOL cold/hot path, we need to protect the spill slot
-         // if we reverse spill this register inside the OOL cold/hot path
-         if (!self()->cg()->isOutOfLineHotPath())
-            {// main line
-            location->setMaxSpillDepth(1);
-            }
-         else
-            {
-            // hot path
-            // do not overwrite main line spill depth
-            if (location->getMaxSpillDepth() != 1)
-               location->setMaxSpillDepth(2);
-            }
-         if (debugObj)
-            self()->cg()->traceRegisterAssignment("OOL: adding %s to the spilledRegisterList, maxSpillDepth = %d ",
-                                          debugObj->getName(candidates[0]), location->getMaxSpillDepth());
+   if (!self()->cg()->isOutOfLineColdPath())
+      {
+      TR_Debug   *debugObj = self()->cg()->getDebug();
+      // the spilledRegisterList contains all registers that are spilled before entering
+      // the OOL cold path, post dependencies will be generated using this list
+      self()->cg()->getSpilledRegisterList()->push_front(candidates[0]);
+
+      // OOL cold path: depth = 3, hot path: depth =2,  main line: depth = 1
+      // if the spill is outside of the OOL cold/hot path, we need to protect the spill slot
+      // if we reverse spill this register inside the OOL cold/hot path
+      if (!self()->cg()->isOutOfLineHotPath())
+         {// main line
+         location->setMaxSpillDepth(1);
          }
       else
          {
-         // do not overwrite mainline and hot path spill depth
-         // if this spill is inside OOL cold path, we do not need to protecting the spill slot
-         // because the post condition at OOL entry does not expect this register to be spilled
-         if (location->getMaxSpillDepth() != 1 &&
-             location->getMaxSpillDepth() != 2 )
-            {
-            location->setMaxSpillDepth(3);
-            self()->cg()->traceRegisterAssignment("OOL: In OOL cold path, spilling %s not adding to spilledRegisterList", (candidates[0])->getRegisterName(self()->cg()->comp()));
-            }
+         // hot path
+         // do not overwrite main line spill depth
+         if (location->getMaxSpillDepth() != 1)
+            location->setMaxSpillDepth(2);
+         }
+      if (debugObj)
+         self()->cg()->traceRegisterAssignment("OOL: adding %s to the spilledRegisterList, maxSpillDepth = %d ",
+                                       debugObj->getName(candidates[0]), location->getMaxSpillDepth());
+      }
+   else
+      {
+      // do not overwrite mainline and hot path spill depth
+      // if this spill is inside OOL cold path, we do not need to protecting the spill slot
+      // because the post condition at OOL entry does not expect this register to be spilled
+      if (location->getMaxSpillDepth() != 1 &&
+            location->getMaxSpillDepth() != 2 )
+         {
+         location->setMaxSpillDepth(3);
+         self()->cg()->traceRegisterAssignment("OOL: In OOL cold path, spilling %s not adding to spilledRegisterList", (candidates[0])->getRegisterName(self()->cg()->comp()));
          }
       }
 
@@ -288,12 +286,12 @@ TR::RealRegister *OMR::ARM::Machine::freeBestRegister(TR::Instruction     *curre
    switch (rk)
       {
       case TR_GPR:
-         generateTrg1MemInstruction(self()->cg(), ARMOp_ldr, currentNode, best, tmemref, currentInstruction);
+         generateTrg1MemInstruction(self()->cg(), TR::InstOpCode::ldr, currentNode, best, tmemref, currentInstruction);
          break;
 
       case TR_FPR:
-         //if targetRegister is FS0-FS15, using ARMOp_flds.
-         generateTrg1MemInstruction(self()->cg(), (isSinglePrecision ? ARMOp_flds : ARMOp_fldd), currentNode, best, tmemref, currentInstruction);
+         //if targetRegister is FS0-FS15, using TR::InstOpCode::flds.
+         generateTrg1MemInstruction(self()->cg(), (isSinglePrecision ? TR::InstOpCode::flds : TR::InstOpCode::fldd), currentNode, best, tmemref, currentInstruction);
          break;
 
       }
@@ -315,7 +313,7 @@ TR::RealRegister *OMR::ARM::Machine::reverseSpillState(TR::Instruction      *cur
    TR_BackingStore       *location = spilledRegister->getBackingStorage();
    TR::Node               *currentNode = currentInstruction->getNode();
    TR_RegisterKinds       rk       = spilledRegister->getKind();
-   TR_ARMOpCodes          opCode;
+   TR::InstOpCode::Mnemonic          opCode;
    TR_Debug          *debugObj = self()->cg()->getDebug();
 
    if (targetRegister == NULL)
@@ -348,124 +346,106 @@ TR::RealRegister *OMR::ARM::Machine::reverseSpillState(TR::Instruction      *cur
 
    tmemref = new (self()->cg()->trHeapMemory()) TR::MemoryReference(currentNode, location->getSymbolReference(), ((rk == TR_FPR) ? 8 : 4), self()->cg());
 
-   if (self()->cg()->comp()->getOption(TR_DisableOOL))
+   int32_t dataSize = 0; // GARY OOL
+   switch (rk)
       {
-      switch (rk)
-         {
-         case TR_GPR:
-            self()->cg()->freeSpill(location, TR::Compiler->om.sizeofReferenceAddress(), 0);
-            generateMemSrc1Instruction(self()->cg(), ARMOp_str, currentNode, tmemref, targetRegister, currentInstruction);
-            break;
-         case TR_FPR:
-            self()->cg()->freeSpill(location, 8, 0); // TODO: use 4 when floatSpill is implemented
-            //if targetRegister is FS0-FS15, using ARMOp_fsts.
-            generateMemSrc1Instruction(self()->cg(), (isSinglePrecision ? ARMOp_fsts : ARMOp_fstd), currentNode, tmemref, targetRegister, currentInstruction);
-            break;
-         }
+      case TR_GPR:
+         dataSize = TR::Compiler->om.sizeofReferenceAddress();
+         break;
+      case TR_FPR:
+         dataSize = 8; // TODO: use 4 when floatSpill is implemented
+         break;
       }
-   else
+   if (self()->cg()->isOutOfLineColdPath())
       {
-      int32_t dataSize = 0; // GARY OOL
-      switch (rk)
+      bool isOOLentryReverseSpill = false;
+      if (currentInstruction->isLabel())
          {
-         case TR_GPR:
-            dataSize = TR::Compiler->om.sizeofReferenceAddress();
-            break;
-         case TR_FPR:
-            dataSize = 8; // TODO: use 4 when floatSpill is implemented
-            break;
-         }
-      if (self()->cg()->isOutOfLineColdPath())
-         {
-         bool isOOLentryReverseSpill = false;
-         if (currentInstruction->isLabel())
+         if (((TR::ARMLabelInstruction*)currentInstruction)->getLabelSymbol()->isStartOfColdInstructionStream())
             {
-            if (((TR::ARMLabelInstruction*)currentInstruction)->getLabelSymbol()->isStartOfColdInstructionStream())
-               {
-               // indicates that we are at OOL entry point post conditions. Since
-               // we are now exiting the OOL cold path (going reverse order)
-               // and we called reverseSpillState(), the main line path
-               // expects the Virt reg to be assigned to a real register
-               // we can now safely unlock the protected backing storage
-               // This prevents locking backing storage for future OOL blocks
-               isOOLentryReverseSpill = true;
-               }
-            }
-         // OOL: only free the spill slot if the register was spilled in the same or less dominant path
-         // ex: spilled in cold path, reverse spill in hot path or main line
-         // we have to spill this register again when we reach OOL entry point due to post
-         // conditions. We want to guarantee that the same spill slot will be protected and reused.
-         // maxSpillDepth: 3:cold path, 2:hot path, 1:main line
-         // Also free the spill if maxSpillDepth==0, which will be the case if the reverse spill also occured on the hot path.
-         // If the reverse spill occured on both paths then this is the last chance we have to free the spill slot.
-         if (location->getMaxSpillDepth() == 3 || location->getMaxSpillDepth() == 0 || isOOLentryReverseSpill)
-            {
-            if (location->getMaxSpillDepth() != 0)
-               location->setMaxSpillDepth(0);
-            else if (debugObj)
-               self()->cg()->traceRegisterAssignment("\nOOL: reverse spill %s in less dominant path (%d / 3), reverse spill on both paths indicated, free spill slot (%p)\n",
-                                             debugObj->getName(spilledRegister), location->getMaxSpillDepth(), location);
-            self()->cg()->freeSpill(location, dataSize, 0);
-            if (!self()->cg()->isFreeSpillListLocked())
-               {
-               spilledRegister->setBackingStorage(NULL);
-               }
-            }
-         else
-            {
-            if (debugObj)
-               self()->cg()->traceRegisterAssignment("\nOOL: reverse spill %s in less dominant path (%d / 3), protect spill slot (%p)\n",
-                                             debugObj->getName(spilledRegister), location->getMaxSpillDepth(), location);
+            // indicates that we are at OOL entry point post conditions. Since
+            // we are now exiting the OOL cold path (going reverse order)
+            // and we called reverseSpillState(), the main line path
+            // expects the Virt reg to be assigned to a real register
+            // we can now safely unlock the protected backing storage
+            // This prevents locking backing storage for future OOL blocks
+            isOOLentryReverseSpill = true;
             }
          }
-      else if (self()->cg()->isOutOfLineHotPath())
+      // OOL: only free the spill slot if the register was spilled in the same or less dominant path
+      // ex: spilled in cold path, reverse spill in hot path or main line
+      // we have to spill this register again when we reach OOL entry point due to post
+      // conditions. We want to guarantee that the same spill slot will be protected and reused.
+      // maxSpillDepth: 3:cold path, 2:hot path, 1:main line
+      // Also free the spill if maxSpillDepth==0, which will be the case if the reverse spill also occured on the hot path.
+      // If the reverse spill occured on both paths then this is the last chance we have to free the spill slot.
+      if (location->getMaxSpillDepth() == 3 || location->getMaxSpillDepth() == 0 || isOOLentryReverseSpill)
          {
-         // the spilledRegisterList contains all registers that are spilled before entering
-         // the OOL path (in backwards RA). Post dependencies will be generated using this list.
-         // Any registers reverse spilled before entering OOL should be removed from the spilled list
-         if (debugObj)
-            self()->cg()->traceRegisterAssignment("\nOOL: removing %s from the spilledRegisterList\n", debugObj->getName(spilledRegister));
-         self()->cg()->getSpilledRegisterList()->remove(spilledRegister);
-         // Reset maxSpillDepth here so that in the cold path we know to free the spill
-         // and so that the spill is not included in future GC points in the hot path while it is protected
-         location->setMaxSpillDepth(0);
-         if (location->getMaxSpillDepth() == 2)
-            {
-            self()->cg()->freeSpill(location, dataSize, 0);
-            if (!self()->cg()->isFreeSpillListLocked())
-               {
-               spilledRegister->setBackingStorage(NULL);
-               }
-            }
-         else
-            {
-            if (debugObj)
-               self()->cg()->traceRegisterAssignment("\nOOL: reverse spilling %s in less dominant path (%d / 2), protect spill slot (%p)\n",
-                                             debugObj->getName(spilledRegister), location->getMaxSpillDepth(), location);
-            }
-         }
-      else // main line
-         {
-         if (debugObj)
-            self()->cg()->traceRegisterAssignment("\nOOL: removing %s from the spilledRegisterList)\n", debugObj->getName(spilledRegister));
-         self()->cg()->getSpilledRegisterList()->remove(spilledRegister);
-         location->setMaxSpillDepth(0);
+         if (location->getMaxSpillDepth() != 0)
+            location->setMaxSpillDepth(0);
+         else if (debugObj)
+            self()->cg()->traceRegisterAssignment("\nOOL: reverse spill %s in less dominant path (%d / 3), reverse spill on both paths indicated, free spill slot (%p)\n",
+                                          debugObj->getName(spilledRegister), location->getMaxSpillDepth(), location);
          self()->cg()->freeSpill(location, dataSize, 0);
          if (!self()->cg()->isFreeSpillListLocked())
             {
             spilledRegister->setBackingStorage(NULL);
             }
          }
-      switch (rk)
+      else
          {
-         case TR_GPR:
-            generateMemSrc1Instruction(self()->cg(), ARMOp_str, currentNode, tmemref, targetRegister, currentInstruction);
-            break;
-         case TR_FPR:
-             //if targetRegister is FS0-FS15, using ARMOp_fsts.
-             generateMemSrc1Instruction(self()->cg(), (isSinglePrecision ? ARMOp_fsts : ARMOp_fstd), currentNode, tmemref, targetRegister, currentInstruction);
-            break;
+         if (debugObj)
+            self()->cg()->traceRegisterAssignment("\nOOL: reverse spill %s in less dominant path (%d / 3), protect spill slot (%p)\n",
+                                          debugObj->getName(spilledRegister), location->getMaxSpillDepth(), location);
          }
+      }
+   else if (self()->cg()->isOutOfLineHotPath())
+      {
+      // the spilledRegisterList contains all registers that are spilled before entering
+      // the OOL path (in backwards RA). Post dependencies will be generated using this list.
+      // Any registers reverse spilled before entering OOL should be removed from the spilled list
+      if (debugObj)
+         self()->cg()->traceRegisterAssignment("\nOOL: removing %s from the spilledRegisterList\n", debugObj->getName(spilledRegister));
+      self()->cg()->getSpilledRegisterList()->remove(spilledRegister);
+      // Reset maxSpillDepth here so that in the cold path we know to free the spill
+      // and so that the spill is not included in future GC points in the hot path while it is protected
+      location->setMaxSpillDepth(0);
+      if (location->getMaxSpillDepth() == 2)
+         {
+         self()->cg()->freeSpill(location, dataSize, 0);
+         if (!self()->cg()->isFreeSpillListLocked())
+            {
+            spilledRegister->setBackingStorage(NULL);
+            }
+         }
+      else
+         {
+         if (debugObj)
+            self()->cg()->traceRegisterAssignment("\nOOL: reverse spilling %s in less dominant path (%d / 2), protect spill slot (%p)\n",
+                                          debugObj->getName(spilledRegister), location->getMaxSpillDepth(), location);
+         }
+      }
+   else // main line
+      {
+      if (debugObj)
+         self()->cg()->traceRegisterAssignment("\nOOL: removing %s from the spilledRegisterList)\n", debugObj->getName(spilledRegister));
+      self()->cg()->getSpilledRegisterList()->remove(spilledRegister);
+      location->setMaxSpillDepth(0);
+      self()->cg()->freeSpill(location, dataSize, 0);
+      if (!self()->cg()->isFreeSpillListLocked())
+         {
+         spilledRegister->setBackingStorage(NULL);
+         }
+      }
+   switch (rk)
+      {
+      case TR_GPR:
+         generateMemSrc1Instruction(self()->cg(), TR::InstOpCode::str, currentNode, tmemref, targetRegister, currentInstruction);
+         break;
+      case TR_FPR:
+            //if targetRegister is FS0-FS15, using TR::InstOpCode::fsts.
+            generateMemSrc1Instruction(self()->cg(), (isSinglePrecision ? TR::InstOpCode::fsts : TR::InstOpCode::fstd), currentNode, tmemref, targetRegister, currentInstruction);
+         break;
       }
    return targetRegister;
    }
@@ -835,7 +815,7 @@ static void registerCopy(TR::Instruction     *precedingInstruction,
    switch (rk)
       {
       case TR_GPR:
-         new (cg->trHeapMemory()) TR::ARMTrg1Src1Instruction(precedingInstruction, ARMOp_mov, node, targetReg, sourceReg, cg);
+         new (cg->trHeapMemory()) TR::ARMTrg1Src1Instruction(precedingInstruction, TR::InstOpCode::mov, node, targetReg, sourceReg, cg);
          break;
       case TR_FPR:
          bool isTargetSinglePrecision = isSinglePrecision(targetReg->getRegisterNumber());
@@ -844,22 +824,22 @@ static void registerCopy(TR::Instruction     *precedingInstruction,
             {
             if (isSourceSinglePrecision)
                {
-                new (cg->trHeapMemory()) TR::ARMTrg1Src1Instruction(precedingInstruction, ARMOp_fcpys, node, targetReg, sourceReg, cg);
+                new (cg->trHeapMemory()) TR::ARMTrg1Src1Instruction(precedingInstruction, TR::InstOpCode::fcpys, node, targetReg, sourceReg, cg);
                }
             else
                {
-               generateTrg1Src1Instruction(cg, ARMOp_fcvtsd, node, targetReg, sourceReg);
+               generateTrg1Src1Instruction(cg, TR::InstOpCode::fcvtsd, node, targetReg, sourceReg);
                }
             }
          else
             {
             if (isSourceSinglePrecision)
                {
-               generateTrg1Src1Instruction(cg, ARMOp_fcvtds, node, targetReg, sourceReg);
+               generateTrg1Src1Instruction(cg, TR::InstOpCode::fcvtds, node, targetReg, sourceReg);
                }
             else
                {
-               new (cg->trHeapMemory()) TR::ARMTrg1Src1Instruction(precedingInstruction, ARMOp_fcpyd, node, targetReg, sourceReg, cg);
+               new (cg->trHeapMemory()) TR::ARMTrg1Src1Instruction(precedingInstruction, TR::InstOpCode::fcpyd, node, targetReg, sourceReg, cg);
                }
            }
          break;
@@ -884,9 +864,9 @@ static void registerExchange(TR::Instruction     *precedingInstruction,
       }
    else
       {
-      new (cg->trHeapMemory()) TR::ARMTrg1Src2Instruction(precedingInstruction, ARMOp_eor, node, targetReg, targetReg, sourceReg, cg);
-      new (cg->trHeapMemory()) TR::ARMTrg1Src2Instruction(precedingInstruction, ARMOp_eor, node, sourceReg, targetReg, sourceReg, cg);
-      new (cg->trHeapMemory()) TR::ARMTrg1Src2Instruction(precedingInstruction, ARMOp_eor, node, targetReg, targetReg, sourceReg, cg);
+      new (cg->trHeapMemory()) TR::ARMTrg1Src2Instruction(precedingInstruction, TR::InstOpCode::eor, node, targetReg, targetReg, sourceReg, cg);
+      new (cg->trHeapMemory()) TR::ARMTrg1Src2Instruction(precedingInstruction, TR::InstOpCode::eor, node, sourceReg, targetReg, sourceReg, cg);
+      new (cg->trHeapMemory()) TR::ARMTrg1Src2Instruction(precedingInstruction, TR::InstOpCode::eor, node, targetReg, targetReg, sourceReg, cg);
       }
    }
 
@@ -954,7 +934,7 @@ uint32_t OMR::ARM::Machine::_globalRegisterNumberToRealRegisterMap[MAX_ARM_GLOBA
    };
 
 TR::RegisterDependencyConditions*
-OMR::ARM::Machine::createCondForLiveAndSpilledGPRs(bool cleanRegState, TR::list<TR::Register*> *spilledRegisterList)
+OMR::ARM::Machine::createCondForLiveAndSpilledGPRs(TR::list<TR::Register*> *spilledRegisterList)
    {
    // Calculate number of register dependencies required.  This step is not really necessary, but
    // it is space conscious.
@@ -989,14 +969,12 @@ OMR::ARM::Machine::createCondForLiveAndSpilledGPRs(bool cleanRegState, TR::list<
             TR_ASSERT(!spilledRegisterList || !(std::find(spilledRegisterList->begin(), spilledRegisterList->end(), virtReg) != spilledRegisterList->end())
             		,"a register should not be in both an assigned state and in the spilled list\n");
             deps->addPostCondition(virtReg, realReg->getRegisterNumber());
-            if (cleanRegState)
-               {
-               virtReg->incTotalUseCount();
-               virtReg->incFutureUseCount();
-               virtReg->setAssignedRegister(NULL);
-               realReg->setAssignedRegister(NULL);
-               realReg->setState(TR::RealRegister::Free);
-               }
+
+            virtReg->incTotalUseCount();
+            virtReg->incFutureUseCount();
+            virtReg->setAssignedRegister(NULL);
+            realReg->setAssignedRegister(NULL);
+            realReg->setState(TR::RealRegister::Free);
             }
          }
 

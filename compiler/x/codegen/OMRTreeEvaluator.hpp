@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -39,7 +39,7 @@ namespace OMR { typedef OMR::X86::TreeEvaluator TreeEvaluatorConnector; }
 #include "env/jittypes.h"
 #include "il/ILOpCodes.hpp"
 #include "runtime/Runtime.hpp"
-#include "x/codegen/X86Ops.hpp"
+#include "codegen/InstOpCode.hpp"
 
 namespace TR { class X86MemInstruction;         }
 namespace TR { class X86RegImmInstruction;      }
@@ -81,7 +81,6 @@ class OMR_EXTENSIBLE TreeEvaluator: public OMR::TreeEvaluator
    static TR::Register *istoreEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *bstoreEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *sstoreEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *cstoreEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *ilstoreEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *gotoEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *lookupEvaluator(TR::Node *node, TR::CodeGenerator *cg);
@@ -96,12 +95,10 @@ class OMR_EXTENSIBLE TreeEvaluator: public OMR::TreeEvaluator
    static TR::Register *daddEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *baddEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *saddEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *caddEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *fsubEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *dsubEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *bsubEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *ssubEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *csubEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *fmulEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *dmulEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *fdivEvaluator(TR::Node *node, TR::CodeGenerator *cg);
@@ -226,7 +223,6 @@ class OMR_EXTENSIBLE TreeEvaluator: public OMR::TreeEvaluator
    static TR::Register *BBStartEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *BBEndEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *minmaxEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *zccAddSubEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *sbyteswapEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    typedef TR::Register *(* EvaluatorComputesCarry)(TR::Node *node, TR::CodeGenerator *codeGen, bool computesCarry);
    // routines for integers (or addresses) that can fit in one register
@@ -267,7 +263,7 @@ class OMR_EXTENSIBLE TreeEvaluator: public OMR::TreeEvaluator
    static TR::Register *unsignedIntegerIfCmpgtEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *unsignedIntegerIfCmpleEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
-   
+
    static TR::Register *tstartEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *tfinishEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *tabortEvaluator(TR::Node *node, TR::CodeGenerator *cg);
@@ -278,11 +274,29 @@ class OMR_EXTENSIBLE TreeEvaluator: public OMR::TreeEvaluator
    static TR::Register *fpSqrtEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *dsqrtEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
+   static TR::Register *vnegEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vsqrtEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+
+   static TR::Register *vreductionAddEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vreductionAndEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vreductionFirstNonZeroEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vreductionMaxEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vreductionMinEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vreductionMulEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vreductionOrEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vreductionOrUncheckedEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vreductionXorEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+
    // routines for floating point values that can fit in one GPR
    static TR::Register *floatingPointStoreEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
    // For ILOpCode that can be translated to single SSE/AVX instructions
-   static TR::Register *FloatingPointAndVectorBinaryArithmeticEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::InstOpCode getNativeSIMDOpcode(TR::ILOpCodes opcode, TR::DataType et, bool mem);
+   static TR::Register *vectorBinaryArithmeticEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *floatingPointBinaryArithmeticEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+
+   // For unary ILOpcodes that can be translated to a single SSE/AVX instruction
+   static TR::Register *unaryVectorArithmeticEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
    // SIMD evaluators
    static TR::Register *SIMDRegLoadEvaluator(TR::Node *node, TR::CodeGenerator *cg);
@@ -290,13 +304,12 @@ class OMR_EXTENSIBLE TreeEvaluator: public OMR::TreeEvaluator
    static TR::Register *SIMDloadEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *SIMDstoreEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *SIMDsplatsEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *SIMDgetvelemEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *SIMDvgetelemEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
    static TR::Register *icmpsetEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *bztestnsetEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
    // VM dependent routines
-   static TR::Register *VMmergenewEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static bool VMinlineCallEvaluator(TR::Node *node, bool isIndirect, TR::CodeGenerator *cg);
    static TR::Instruction *VMtestForReferenceArray(TR::Node *, TR::Register *objectReg, TR::CodeGenerator *cg);
    static bool genNullTestSequence(TR::Node *node, TR::Register *opReg, TR::Register *targetReg, TR::CodeGenerator *cg);
@@ -319,11 +332,20 @@ class OMR_EXTENSIBLE TreeEvaluator: public OMR::TreeEvaluator
       TR::SymbolReference &symRef,
       TR::CodeGenerator   *cg);
 
-   static void insertPrecisionAdjustment(TR::Register *reg, TR::Node *node, TR::CodeGenerator *cg);
-
-   static TR::Register *coerceFPRToXMMR(TR::Node *node, TR::Register *fpRegister, TR::CodeGenerator *cg);
-   static TR::Register *coerceXMMRToFPR(TR::Node *node, TR::Register *fpRegister, TR::CodeGenerator *cg);
-   static void coerceFPOperandsToXMMRs(TR::Node *node, TR::CodeGenerator *cg);
+   /**
+    * @brief Coerce the value in x87 ST0 into a TR_FPR register.
+    *
+    * @param[in] node : \c TR::Node under evaluation
+    * @param[in] dt : \c TR::DataType in ST0
+    * @param[in] cg : \c TR::CodeGenerator object
+    * @param[in] xmmReg : Optional \c TR::Register with \c TR_FPR kind to store the
+    *               coerced result.  If provided, then St0 will be coerecd into that
+    *               register.  Otherwise, a new \c TR_FPR register will be allocated
+    *               to hold the result and returned.
+    *
+    * @return \c TR::Register of kind \c TR_FPR that holds the coerced result
+    */
+   static TR::Register *coerceST0ToFPR(TR::Node *node, TR::DataType dt, TR::CodeGenerator *cg, TR::Register *xmmReg = NULL);
 
    enum
       {
@@ -365,28 +387,25 @@ class OMR_EXTENSIBLE TreeEvaluator: public OMR::TreeEvaluator
    static TR::Register *performIload(TR::Node *node, TR::MemoryReference  *sourceMR, TR::CodeGenerator *cg);
    static TR::Register *performFload(TR::Node *node, TR::MemoryReference  *sourceMR, TR::CodeGenerator *cg);
    static TR::Register *performDload(TR::Node *node, TR::MemoryReference  *sourceMR, TR::CodeGenerator *cg);
-   static TR::Register *negEvaluatorHelper(TR::Node *node, TR_X86OpCodes RegInstr, TR::CodeGenerator *cg);
-   static TR::Register *logicalEvaluator(TR::Node *node, TR_X86OpCodes package[], TR::CodeGenerator *cg);
-   static TR::Register *fpBinaryArithmeticEvaluator(TR::Node *node, bool isFloat, TR::CodeGenerator *cg);
-   static TR::Register *bcmpEvaluator(TR::Node *node, TR_X86OpCodes setOp, TR::CodeGenerator *cg);
-   static TR::Register *cmp2BytesEvaluator(TR::Node *node, TR_X86OpCodes setOp, TR::CodeGenerator *cg);
+   static TR::Register *negEvaluatorHelper(TR::Node *node, TR::InstOpCode::Mnemonic RegInstr, TR::CodeGenerator *cg);
+   static TR::Register *logicalEvaluator(TR::Node *node, TR::InstOpCode::Mnemonic package[], TR::CodeGenerator *cg);
+   static TR::Register *bcmpEvaluator(TR::Node *node, TR::InstOpCode::Mnemonic setOp, TR::CodeGenerator *cg);
+   static TR::Register *cmp2BytesEvaluator(TR::Node *node, TR::InstOpCode::Mnemonic setOp, TR::CodeGenerator *cg);
 
    static TR::Register *loadMemory(TR::Node *node, TR::MemoryReference  *sourceMR, TR_RematerializableTypes type, bool markImplicitExceptionPoint, TR::CodeGenerator *cg);
-   static TR::Register *conversionAnalyser(TR::Node *node, TR_X86OpCodes memoryToRegisterOp, TR_X86OpCodes registerToRegisterOp, TR::CodeGenerator *cg);
-   static TR::Register *fpConvertToInt(TR::Node *node, TR::SymbolReference *helperSymRef, TR::CodeGenerator *cg);
+   static TR::Register *conversionAnalyser(TR::Node *node, TR::InstOpCode::Mnemonic memoryToRegisterOp, TR::InstOpCode::Mnemonic registerToRegisterOp, TR::CodeGenerator *cg);
    static TR::Register *fpConvertToLong(TR::Node *node, TR::SymbolReference *helperSymRef, TR::CodeGenerator *cg);
-   static TR::Register *generateBranchOrSetOnFPCompare(TR::Node *node, TR::Register *accRegister, bool generateBranch, TR::CodeGenerator *cg);
-   static TR::Register *generateFPCompareResult(TR::Node *node, TR::Register *accRegister, TR::CodeGenerator *cg);
-   static bool canUseFCOMIInstructions(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *compareFloatOrDoubleForOrder(TR::Node *, TR_X86OpCodes, TR_X86OpCodes, TR_X86OpCodes, TR_X86OpCodes, TR_X86OpCodes, bool, TR::CodeGenerator *);
+   static TR::Register *generateBranchOrSetOnFPCompare(TR::Node *node, bool generateBranch, TR::CodeGenerator *cg);
+   static TR::Register *generateFPCompareResult(TR::Node *node, TR::CodeGenerator *cg);
+   static void compareFloatOrDoubleForOrder(TR::Node *, TR::InstOpCode::Mnemonic, TR::InstOpCode::Mnemonic, TR::CodeGenerator *);
    static void removeLiveDiscardableStatics(TR::CodeGenerator *cg);
 
    static bool analyseAddForLEA(TR::Node *node, TR::CodeGenerator *cg);
    static bool analyseSubForLEA(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *signedIntegerDivOrRemAnalyser(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *dstoreEvaluatorHelper(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::X86MemInstruction *generateMemoryShift(TR::Node *node, TR_X86OpCodes immShiftOpCode, TR_X86OpCodes regShiftOpCode, TR::CodeGenerator *cg);
-   static TR::X86RegInstruction *generateRegisterShift(TR::Node *node, TR_X86OpCodes immShiftOpCode, TR_X86OpCodes regShiftOpCode,TR::CodeGenerator *cg);
+   static TR::X86MemInstruction *generateMemoryShift(TR::Node *node, TR::InstOpCode::Mnemonic immShiftOpCode, TR::InstOpCode::Mnemonic regShiftOpCode, TR::CodeGenerator *cg);
+   static TR::X86RegInstruction *generateRegisterShift(TR::Node *node, TR::InstOpCode::Mnemonic immShiftOpCode, TR::InstOpCode::Mnemonic regShiftOpCode,TR::CodeGenerator *cg);
    static TR::Instruction *compareGPMemoryToImmediate(TR::Node *node, TR::MemoryReference  *mr, int32_t value, TR::CodeGenerator *cg);
    static void compareGPRegisterToImmediate(TR::Node *node, TR::Register *cmpRegister, int32_t value, TR::CodeGenerator *cg);
    static void compareGPRegisterToImmediateForEquality(TR::Node *node, TR::Register *cmpRegister, int32_t value, TR::CodeGenerator *cg);
@@ -397,10 +416,9 @@ class OMR_EXTENSIBLE TreeEvaluator: public OMR::TreeEvaluator
    static void compareIntegersForOrder(TR::Node *node, TR::Node *firstChild, TR::Node *secondChild, TR::CodeGenerator *cg);
    static void compareBytesForOrder(TR::Node *node, TR::CodeGenerator *cg);
    static void compare2BytesForOrder(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *integerEqualityHelper(TR::Node *node, TR_X86OpCodes setOp, TR::CodeGenerator *cg);
-   static TR::Register *integerOrderHelper(TR::Node *node, TR_X86OpCodes setOp, TR::CodeGenerator *cg);
+   static TR::Register *integerEqualityHelper(TR::Node *node, TR::InstOpCode::Mnemonic setOp, TR::CodeGenerator *cg);
+   static TR::Register *integerOrderHelper(TR::Node *node, TR::InstOpCode::Mnemonic setOp, TR::CodeGenerator *cg);
    static TR::Register *evaluateNULLCHKWithPossibleResolve(TR::Node *node, bool needResolution, TR::CodeGenerator *cg);
-   static TR::Register *commonFPRemEvaluator( TR::Node *node, TR::CodeGenerator *cg, bool isDouble);
    static TR::Register *generateLEAForLoadAddr(TR::Node *node, TR::MemoryReference *memRef, TR::SymbolReference *symRef,TR::CodeGenerator *cg, bool isInternalPointer);
 
    static bool constNodeValueIs32BitSigned(TR::Node *node, intptr_t *value, TR::CodeGenerator *cg);
@@ -429,7 +447,7 @@ class OMR_EXTENSIBLE TreeEvaluator: public OMR::TreeEvaluator
       lastOpPackage = numLogicalOpPackages-1
       };
 
-   static TR_X86OpCodes _logicalOpPackage[numLogicalOpPackages][numLogicalOpForms];
+   static TR::InstOpCode::Mnemonic _logicalOpPackage[numLogicalOpPackages][numLogicalOpForms];
 
    static bool generateIAddOrSubForOverflowCheck(TR::Node *compareNode, TR::CodeGenerator *cg);
    static bool generateLAddOrSubForOverflowCheck(TR::Node *compareNode, TR::CodeGenerator *cg);

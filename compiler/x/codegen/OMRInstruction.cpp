@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -37,7 +37,7 @@
 #include "infra/Assert.hpp"
 #include "ras/Debug.hpp"
 #include "codegen/X86Instruction.hpp"
-#include "x/codegen/X86Ops.hpp"
+#include "codegen/InstOpCode.hpp"
 #include "env/CompilerEnv.hpp"
 
 namespace TR { class Node; }
@@ -46,34 +46,36 @@ namespace TR { class Node; }
 // OMR::X86::Instruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-OMR::X86::Instruction::Instruction(TR::CodeGenerator *cg, TR::InstOpCode::Mnemonic op, TR::Node *node)
+OMR::X86::Instruction::Instruction(TR::CodeGenerator *cg, TR::InstOpCode::Mnemonic op, TR::Node *node, OMR::X86::Encoding encoding)
    : OMR::Instruction(cg, op, node),
       _conditions(0),
-      _rexRepeatCount(0)
+      _rexRepeatCount(0),
+      _encodingMethod(encoding)
    {
 
    }
 
-OMR::X86::Instruction::Instruction(TR::CodeGenerator *cg, TR::Instruction *precedingInstruction, TR::InstOpCode::Mnemonic op, TR::Node *node)
+OMR::X86::Instruction::Instruction(TR::CodeGenerator *cg, TR::Instruction *precedingInstruction, TR::InstOpCode::Mnemonic op, TR::Node *node, OMR::X86::Encoding encoding)
    : OMR::Instruction(cg, precedingInstruction, op, node),
       _conditions(0),
-      _rexRepeatCount(0)
+      _rexRepeatCount(0),
+      _encodingMethod(encoding)
    {
 
    }
 
 
 void
-OMR::X86::Instruction::initialize(TR::CodeGenerator *cg, TR::RegisterDependencyConditions *cond, TR_X86OpCodes op, bool flag)
+OMR::X86::Instruction::initialize(TR::CodeGenerator *cg, TR::RegisterDependencyConditions *cond, TR::InstOpCode::Mnemonic op, bool flag)
    {
    self()->assumeValidInstruction();
    self()->clobberRegsForRematerialisation();
 
-   if (cond && op != ASSOCREGS)
+   if (cond && op != TR::InstOpCode::assocreg)
       {
       cond->useRegisters(self(), cg);
 
-      if (flag && op != FPREGSPILL && cg->enableRegisterAssociations())
+      if (flag && cg->enableRegisterAssociations())
          {
          cond->createRegisterAssociationDirective(self(), cg);
          }
@@ -90,26 +92,26 @@ bool OMR::X86::Instruction::isRegRegMove()
    {
    switch (self()->getOpCodeValue())
       {
-      case FLDRegReg:
-      case DLDRegReg:
-      case MOVAPSRegReg:
-      case MOVAPDRegReg:
-      case MOVUPSRegReg:
-      case MOVUPDRegReg:
-      case MOVSSRegReg:
-      case MOVSDRegReg:
-      case MOV1RegReg:
-      case MOV2RegReg:
-      case MOV4RegReg:
-      case MOV8RegReg:
-      case MOVDQURegReg:
+      case TR::InstOpCode::FLDRegReg:
+      case TR::InstOpCode::DLDRegReg:
+      case TR::InstOpCode::MOVAPSRegReg:
+      case TR::InstOpCode::MOVAPDRegReg:
+      case TR::InstOpCode::MOVUPSRegReg:
+      case TR::InstOpCode::MOVUPDRegReg:
+      case TR::InstOpCode::MOVSSRegReg:
+      case TR::InstOpCode::MOVSDRegReg:
+      case TR::InstOpCode::MOV1RegReg:
+      case TR::InstOpCode::MOV2RegReg:
+      case TR::InstOpCode::MOV4RegReg:
+      case TR::InstOpCode::MOV8RegReg:
+      case TR::InstOpCode::MOVDQURegReg:
          return true;
       default:
          return false;
       }
    }
 
-bool OMR::X86::Instruction::isPatchBarrier()
+bool OMR::X86::Instruction::isPatchBarrier(TR::CodeGenerator *cg)
    {
    Kind kind = self()->getKind();
    return kind == TR::Instruction::IsPatchableCodeAlignment
@@ -126,7 +128,7 @@ void OMR::X86::Instruction::assignRegisters(TR_RegisterKinds kindsToBeAssigned)
       return;
       }
 
-   if (self()->getOpCodeValue() != ASSOCREGS)
+   if (self()->getOpCodeValue() != TR::InstOpCode::assocreg)
       {
       if ((self()->cg()->getAssignmentDirection() == self()->cg()->Backward))
          {
@@ -139,7 +141,7 @@ void OMR::X86::Instruction::assignRegisters(TR_RegisterKinds kindsToBeAssigned)
          self()->getDependencyConditions()->assignPostConditionRegisters(self(), kindsToBeAssigned, self()->cg());
          }
       }
-   else if ((self()->getOpCodeValue() == ASSOCREGS) && self()->cg()->enableRegisterAssociations())
+   else if ((self()->getOpCodeValue() == TR::InstOpCode::assocreg) && self()->cg()->enableRegisterAssociations())
       {
       if (kindsToBeAssigned & TR_GPR_Mask)
          {
@@ -167,8 +169,8 @@ void OMR::X86::Instruction::assignRegisters(TR_RegisterKinds kindsToBeAssigned)
          // Next loop through and set up the new associations (both on the machine
          // and by associating the virtual registers with their real dependencies)
          //
-         TR_X86RegisterDependencyGroup *depGroup = self()->getDependencyConditions()->getPostConditions();
-         for (int j = 0; j < self()->getDependencyConditions()->getNumPostConditions(); ++j)
+         TR::RegisterDependencyGroup *depGroup = self()->getDependencyConditions()->getPostConditions();
+         for (auto j = 0U; j < self()->getDependencyConditions()->getNumPostConditions(); ++j)
             {
             TR::RegisterDependency  *dep = depGroup->getRegisterDependency(j);
             machine->setVirtualAssociatedWithReal(dep->getRealRegister(), dep->getRegister());
@@ -228,10 +230,10 @@ void OMR::X86::Instruction::adjustVFPState(TR_VFPState *state, TR::CodeGenerator
    if (state->_register == TR::RealRegister::esp)
       {
       if (self()->getOpCode().isPushOp())
-         state->_displacement += TR::Compiler->om.sizeofReferenceAddress();
+         state->_displacement += static_cast<int32_t>(TR::Compiler->om.sizeofReferenceAddress());
       else if (self()->getOpCode().isPopOp())
-         state->_displacement -= TR::Compiler->om.sizeofReferenceAddress();
-      else if (self()->getOpCodeValue() == RET || self()->getOpCodeValue() == RETImm2 || self()->getOpCodeValue() == ReturnMarker)
+         state->_displacement -= static_cast<int32_t>(TR::Compiler->om.sizeofReferenceAddress());
+      else if (self()->getOpCodeValue() == TR::InstOpCode::RET || self()->getOpCodeValue() == TR::InstOpCode::RETImm2 || self()->getOpCodeValue() == TR::InstOpCode::retn)
          *state = cg->vfpResetInstruction()->getSavedState();
       }
    }
@@ -255,8 +257,8 @@ void OMR::X86::Instruction::clobberRegsForRematerialisation()
    //
    if (  self()->cg()->enableRematerialisation()
       && self()->getDependencyConditions()
-      && (self()->getOpCodeValue() != ASSOCREGS)  // reg associations aren't really instructions, so they don't modify anything
-      && (self()->getOpCodeValue() != LABEL)      // labels must already be handled properly for a variety of reasons
+      && (self()->getOpCodeValue() != TR::InstOpCode::assocreg)  // reg associations aren't really instructions, so they don't modify anything
+      && (self()->getOpCodeValue() != TR::InstOpCode::label)      // labels must already be handled properly for a variety of reasons
       && (!self()->getOpCode().isShiftOp())
       && (!self()->getOpCode().isRotateOp())      // shifts and rotates often have a postcondition on ecx but don't clobber it
       ){
@@ -264,7 +266,7 @@ void OMR::X86::Instruction::clobberRegsForRematerialisation()
       // instruction that kills the rematerialisable range of a register.
       //
       TR::ClobberingInstruction *clob = NULL;
-      TR_X86RegisterDependencyGroup *post = self()->getDependencyConditions()->getPostConditions();
+      TR::RegisterDependencyGroup *post = self()->getDependencyConditions()->getPostConditions();
       for (uint32_t i = 0; i < self()->getDependencyConditions()->getNumPostConditions(); i++)
          {
          TR::Register *reg = post->getRegisterDependency(i)->getRegister();
@@ -309,7 +311,7 @@ OMR::X86::Instruction::rexBits()
 bool
 OMR::X86::Instruction::isLabel()
    {
-   return self()->getOpCodeValue() == LABEL;
+   return self()->getOpCodeValue() == TR::InstOpCode::label;
    }
 
 uint8_t *
@@ -336,24 +338,4 @@ uint8_t
 OMR::X86::Instruction::rexRepeatCount()
    {
    return _rexRepeatCount;
-   }
-
-/* -----------------------------------------------------------------------------
- * The following code is here only temporarily during the transition to OMR.
- * -----------------------------------------------------------------------------
- */
-
-void TR_X86OpCode::trackUpperBitsOnReg(TR::Register *reg, TR::CodeGenerator *cg)
-   {
-   if (cg->comp()->target().is64Bit())
-      {
-      if (clearsUpperBits())
-         {
-         reg->setUpperBitsAreZero(true);
-         }
-      else if (setsUpperBits())
-         {
-         reg->setUpperBitsAreZero(false);
-         }
-      }
    }

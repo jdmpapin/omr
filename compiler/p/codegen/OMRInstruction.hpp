@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -121,7 +121,6 @@ class OMR_EXTENSIBLE Instruction : public OMR::Instruction
    virtual bool     isLabel()          {return _opcode.getOpCodeValue() == TR::InstOpCode::label;}
    virtual bool     isAdmin()          {return _opcode.isAdmin();}
    virtual bool     is4ByteLoad();
-   virtual bool     isDebugFence()     {return false;};
    virtual int32_t  getMachineOpCode();
    virtual bool     isBeginBlock();
    virtual bool     isFloat()          {return _opcode.isFloat();}
@@ -132,10 +131,6 @@ class OMR_EXTENSIBLE Instruction : public OMR::Instruction
 
    virtual bool   isAsyncBranch()            { return _asyncBranch;}
    virtual bool   setAsyncBranch()           { return (_asyncBranch = true);}
-
-   //  Basic Block Index Routines
-   int32_t  getBlockIndex()            { return _blockIndex; }
-   void     setBlockIndex(int32_t i)   { _blockIndex = i; }
 
    void    PPCNeedsGCMap(uint32_t mask);
 
@@ -191,7 +186,6 @@ class OMR_EXTENSIBLE Instruction : public OMR::Instruction
    private:
     //  TR::InstOpCode   _opcode;
       uint8_t        _estimatedBinaryLength;
-      int32_t       _blockIndex;
       TR::RegisterDependencyConditions *_conditions;
       bool        _asyncBranch;
 

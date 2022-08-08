@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -226,7 +226,6 @@ int32_t TR_TrivialInliner::perform()
       inliner.performInlining(sym);
       }
 
-   comp()->setSupressEarlyInlining(false);
    return 1; // cost??
    }
 
@@ -326,9 +325,9 @@ TR_InlinerBase::setInlineThresholds(TR::ResolvedMethodSymbol *callerSymbol)
    _maxInliningCallSites = 4095;
    _maxRecursiveCallByteCodeSizeEstimate = 1024;
 
-   if (comp()->getNodeCount() > _nodeCountThreshold)
+   if (comp()->getNodeCount() > unsigned(_nodeCountThreshold))
       {
-      _nodeCountThreshold = comp()->getNodeCount() * (1.05F);    // allow a little bit of inlining anyways to get smaller methods
+      _nodeCountThreshold = static_cast<int32_t>(comp()->getNodeCount() * (1.05F));    // allow a little bit of inlining anyways to get smaller methods
       }
 
    // Code That should go to its frontend
@@ -410,7 +409,7 @@ TR_InlinerBase::linkOSRCodeBlocks()
    {
    TR_OSRCompilationData* compData = comp()->getOSRCompilationData();
    const TR_Array<TR_OSRMethodData *>& methodDataArray = compData->getOSRMethodDataArray();
-   for (intptr_t i = 0; i < methodDataArray.size(); ++i)
+   for (auto i = 0U; i < methodDataArray.size(); ++i)
       {
       TR_OSRMethodData *osrMethodData = methodDataArray[i];
       if (osrMethodData == NULL
@@ -658,7 +657,7 @@ TR_InlinerBase::exceedsSizeThreshold(TR_CallSite *callsite, int bytecodeSize, TR
       heuristicTrace(tracer()," to %d because of const arguments",bytecodeSize);
       }
 
-   if (inlineThreshold && (uint32_t)bytecodeSize > inlineThreshold)
+   if (inlineThreshold != 0 && (uint32_t)bytecodeSize > unsigned(inlineThreshold))
       {
       TR::Options::INLINE_calleeToBig ++;
       TR::Options::INLINE_calleeToBigSum += bytecodeSize;
@@ -1033,7 +1032,7 @@ TR_CallStack::initializeControlFlowInfo(TR::ResolvedMethodSymbol * callerSymbol)
 
    for (int32_t i = 0; i < numberOfBlocks; ++i)
       {
-      blockInfo(i)._inALoop = loopingBlocks.get(i);
+      blockInfo(i)._inALoop = (loopingBlocks.get(i) != 0);
       }
    // Walk forward following successor edges to mark blocks that are always reached
    //
@@ -1114,7 +1113,6 @@ TR_InlineCall::inlineCall(TR::TreeTop * callNodeTreeTop, TR_OpaqueClassBlock * t
    TR_InnerPreexistenceInfo *innerPrexInfo = getUtil()->createInnerPrexInfo(comp(), callerSymbol, 0, 0, 0, TR_NoGuard);
    callStack._innerPrexInfo = innerPrexInfo;
 
-   TR_VirtualGuardSelection *guard;
    TR::MethodSymbol *calleeSymbol = symRef->getSymbol()->castToMethodSymbol();
 
 
@@ -1146,7 +1144,8 @@ TR_InlineCall::inlineCall(TR::TreeTop * callNodeTreeTop, TR_OpaqueClassBlock * t
       if (comp()->trace(OMR::inlining))
          traceMsg(comp(), "inliner: Setting current inline depth=%d\n", currentInlineDepth);
 
-      calltarget->_prexArgInfo = new (trHeapMemory()) TR_PrexArgInfo(calltarget->_myCallSite->_callNode->getNumArguments(), trMemory());
+      TR_PrexArgInfo *callerArgInfo = comp()->getCurrentInlinedCallArgInfo();
+      calltarget->_prexArgInfo = getUtil()->computePrexInfo(calltarget, callerArgInfo);
 
       // this is called on a case-by-case basis, and can get repeatedly called for recursive
       // methods triggering a loop.  Unfortunately the callStack is not pervasive
@@ -1512,7 +1511,14 @@ TR_InlinerBase::createVirtualGuard(
       {
       TR::KnownObjectTable *knot = comp()->getOrCreateKnownObjectTable();
       if (knot)
-         heuristicTrace(tracer(),"  createVirtualGuard: MutableCallSite.epoch is %p.obj%d (%p.%p)", guard->_mutableCallSiteObject, guard->_mutableCallSiteEpoch, *guard->_mutableCallSiteObject, knot->getPointer(guard->_mutableCallSiteEpoch));
+         {
+         heuristicTrace(
+            tracer(),
+            "  createVirtualGuard: MutableCallSite %p epoch is obj%d",
+            guard->_mutableCallSiteObject,
+            guard->_mutableCallSiteEpoch);
+         }
+
       return TR_VirtualGuard::createMutableCallSiteTargetGuard(comp(), calleeIndex, callNode, destination, guard->_mutableCallSiteObject, guard->_mutableCallSiteEpoch);
       }
 
@@ -1864,6 +1870,13 @@ TR_InlinerBase::addGuardForVirtual(
       }
    else if (!disableHCRGuards && comp()->getHCRMode() != TR::none)
       createdHCRGuard = true;
+
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+// for inlined callee methods that do not have HCR guards, setting createdHCRGuard to false
+// prevents creating an OSR transition point to be taken in cases such as a failed TR_ProfiledGuard
+   if (skipHCRGuardForCallee)
+      createdHCRGuard = false;
+#endif
 
    static const char *disableFSDGuard = feGetEnv("TR_DisableFSDGuard");
    if ( !disableFSDGuard && comp()->getOption(TR_FullSpeedDebug) && guard->_kind != TR_BreakpointGuard)
@@ -2362,7 +2375,7 @@ TR_ParameterToArgumentMapper::initialize(TR_CallStack *callStack)
                TR::SymbolReference * symRef = NULL;
                const static bool disableUseKnownObjectTempsForParms = feGetEnv("TR_DisableUseKnownObjectTempsForParmsInCallee") ? true: false;
                int argOrdinal = argIndex - _callNode->getFirstArgumentIndex();
-               TR_PrexArgument * prexArgument = _argInfo->get(argOrdinal);
+               TR_PrexArgument * prexArgument =  _argInfo ? _argInfo->get(argOrdinal) : NULL;
                // use known object temp if the argument is a known object
                if (!disableUseKnownObjectTempsForParms && prexArgument
                    && !parmMap->_parmIsModified
@@ -2508,7 +2521,7 @@ TR_ParameterToArgumentMapper::mapOSRCallSiteRematTable(uint32_t siteIndex)
       }
 
    // Update the remat tables for calls within the current
-   for (int32_t childIndex = 0; childIndex < comp()->getNumInlinedCallSites(); ++childIndex)
+   for (auto childIndex = 0U; childIndex < comp()->getNumInlinedCallSites(); ++childIndex)
       {
       TR_InlinedCallSite &ics = comp()->getInlinedCallSite(childIndex);
       if (siteIndex == ics._byteCodeInfo.getCallerIndex())
@@ -3678,8 +3691,6 @@ TR::TreeTop * TR_TransformInlinedFunction::findSimpleCallReference(TR::TreeTop *
    if (callNode->getReferenceCount() == 2)
       {
       TR::TreeTop * nextTreeTop = callNodeTreeTop->getNextTreeTop();
-      while (nextTreeTop->getNode()->getOpCodeValue() == TR::dbgFence)
-         nextTreeTop = nextTreeTop->getNextTreeTop();
       TR::Node * nextTreeTopNode = nextTreeTop->getNode();
       TR::ILOpCode opcode = nextTreeTopNode->getOpCode();
       findCallNodeRecursionDepth = MAX_FIND_SIMPLE_CALL_REFERENCE_DEPTH;
@@ -4063,6 +4074,15 @@ bool OMR_InlinerPolicy::canInlineMethodWhileInstrumenting(TR_ResolvedMethod *met
    return true;
    }
 
+bool OMR_InlinerPolicy::shouldRemoveDifferingTargets(TR::Node *callNode)
+   {
+   //if ilgen and localopts decided that this was a direct call
+   //there isn't much sense to deal with more than one target
+   //either find a matching one
+   //or make any target look like callsite's calleeSymbol
+   return !callNode->getOpCode().isCallIndirect();
+   }
+
 void TR_InlinerBase::applyPolicyToTargets(TR_CallStack *callStack, TR_CallSite *callsite)
    {
    for (int32_t i=0; i<callsite->numTargets(); i++)
@@ -4156,15 +4176,6 @@ void TR_InlinerBase::applyPolicyToTargets(TR_CallStack *callStack, TR_CallSite *
          {
          tracer()->insertCounter(EH_Aware_Callee,callsite->_callNodeTreeTop);
          callsite->removecalltarget(i,tracer(),EH_Aware_Callee);
-         i--;
-         continue;
-         }
-
-      if (!callsite->_callerResolvedMethod->isStrictFP() && calltarget->_calleeMethod->isStrictFP())
-         {
-         tracer()->insertCounter(StrictFP_Callee,callsite->_callNodeTreeTop);
-         callsite->removecalltarget(i,tracer(),StrictFP_Callee);
-
          i--;
          continue;
          }
@@ -4419,11 +4430,7 @@ TR_CallSite* TR_InlinerBase::findAndUpdateCallSiteInGraph(TR_CallStack *callStac
    if (callNode->getSymbolReference()->getSymbol()->castToMethodSymbol()->isInterface() && callsite->_initialCalleeSymbol)
       debugTrace(tracer(), "findAndUpdateCallSiteInGraph: BAD: Interface call has an initialCalleeSYmbol %p for calNode %p", callsite->_initialCalleeSymbol, callNode);
 
-   //if ilgen and localopts decided that this was a direct call
-   //there isn't much sense to deal with more than one target
-   //either find a matching one
-   //or make any target look like callsite's calleeSymbol
-   if (!callNode->getOpCode().isCallIndirect())
+   if (getPolicy()->shouldRemoveDifferingTargets(callNode))
       {
       //find a matching target if there's any
       for (int32_t i = 0 ; i < callsite->numTargets() ; i++)
@@ -4600,7 +4607,8 @@ void TR_InlinerBase::inlineFromGraph(TR_CallStack *prevCallStack, TR_CallTarget 
                for (int32_t i = 0; i < site->numTargets(); i++)
                   {
                   TR_CallTarget *target = site->getTarget(i);
-                  getUtil()->computePrexInfo(target, calltarget->_prexArgInfo);
+                  // Compute arg info for target to inline, and propagate caller's arg info into callee
+                  target->_prexArgInfo = getUtil()->computePrexInfo(target, calltarget->_prexArgInfo);
                   targetsToInline.add(target);
                   }
                }
@@ -4666,6 +4674,9 @@ static void updateCallersFlags(TR::ResolvedMethodSymbol* callerSymbol, TR::Resol
 
    if (calleeSymbol->hasMethodHandleInvokes())
       callerSymbol->setHasMethodHandleInvokes(true);
+
+   if (calleeSymbol->hasVectorAPI())
+      callerSymbol->setHasVectorAPI(true);
 
    // Make sure we propagate to the top-level symbol too
    //
@@ -5556,7 +5567,7 @@ void TR_CallSite::removecalltarget(TR_CallTarget *calltarget, TR_InlinerTracer *
 
 void TR_CallSite::removeTargets(TR_InlinerTracer *tracer, int index, TR_InlinerFailureReason reason)
    {
-   for (int num = _mytargets.size() - index; num > 0; --num)
+   for (auto num = _mytargets.size() - index; num > 0; --num)
       {
       removecalltarget(index,tracer,reason);
       }
@@ -5688,6 +5699,17 @@ TR_CallSite::addTarget(TR_Memory* mem, TR_InlinerBase *inliner, TR_VirtualGuardS
    {
    TR_PrexArgInfo *myPrexArgInfo = inliner->getUtil()->createPrexArgInfoForCallTarget(guard, implementer);
 
+   // Merge call site prex arginfo into `myPrexArgInfo`
+   if (myPrexArgInfo && _ecsPrexArgInfo)
+      {
+      TR_PrexArgInfo::enhance(myPrexArgInfo, _ecsPrexArgInfo, _comp);
+      }
+   else if (_ecsPrexArgInfo)
+      {
+      // Clone call site prex arg info
+      myPrexArgInfo = new (comp()->trHeapMemory()) TR_PrexArgInfo(_ecsPrexArgInfo, comp()->trMemory());
+      }
+
    TR_CallTarget *result = new (mem,allocKind) TR_CallTarget(this,_initialCalleeSymbol,implementer,guard,receiverClass,myPrexArgInfo,ratio);
 
    addTarget(result);
@@ -5713,7 +5735,7 @@ TR_CallSite::calleeClass()
       TR::StackMemoryRegion stackMemoryRegion(*_comp->trMemory());
 
       int32_t len = _interfaceMethod->classNameLength();
-      char * s = classNameToSignature(_interfaceMethod->classNameChars(), len, _comp, stackAlloc);
+      char * s = TR::Compiler->cls.classNameToSignature(_interfaceMethod->classNameChars(), len, _comp, stackAlloc);
       TR_OpaqueClassBlock *result = _comp->fe()->getClassFromSignature(s, len, _callerResolvedMethod, true);
 
       return result;
@@ -6099,132 +6121,6 @@ TR_InlinerTracer::dumpCallStack(TR_CallStack *callStack, const char *fmt, ...)
       }
    }
 
-void
-TR_InlinerTracer::dumpInline(TR_LinkHead<TR_CallTarget> *targets, const char *fmt, ...)
-   {
-   va_list args;
-   va_start(args,fmt);
-
-   char buffer[2056];
-
-   const char *str = comp()->getDebug()->formattedString(buffer,sizeof(buffer)/sizeof(buffer[0]),fmt,args);
-
-   va_end(args);
-
-   traceMsg(comp(), "Inliner: %s\n",str);
-
-   TR_InlinerDelimiter delimiter(this,"InlineScript");
-
-   TR_Stack<TR_CallTarget*> targetsToBeEvaluated(comp()->trMemory());
-
-   if(!targets->getFirst())
-      return;
-
-   // put the caller name here
-   traceMsg(comp(),"\t%s\n","[");
-
-   for(TR_CallTarget * calltarget = targets->getFirst() ; calltarget ; calltarget = calltarget->getNext())
-      {
-      targetsToBeEvaluated.push(calltarget);
-
-      TR_CallTarget *currentTarget = NULL;
-
-      traceMsg(comp(),"\t%s\n","[");
-
-      do
-         {
-         currentTarget = targetsToBeEvaluated.pop();
-
-         if (currentTarget)
-            {
-            TR_ASSERT(currentTarget->_calleeMethod, "dumping Call Graph: a target has no resolved method!");
-            }
-         else
-            {
-            //end mark
-            traceMsg(comp(),"\t%s\n","]");
-            continue;
-            }
-
-         char nameBuffer[SIGNATURE_SIZE];
-
-         if (currentTarget->_failureReason == InlineableTarget ||
-             currentTarget->_failureReason == OverrideInlineTarget ||
-             currentTarget->_failureReason == TryToInlineTarget)
-            {
-            traceMsg(comp(),"\t%s","+");
-            traceMsg(comp(),"\t\t\t%s\n",comp()->fe()->sampleSignature(currentTarget->_calleeMethod->getPersistentIdentifier(),nameBuffer,SIGNATURE_SIZE,trMemory()));
-            }
-         else if (currentTarget->_failureReason == DontInline_Callee)
-            {
-            traceMsg(comp(),"\t%s","-");
-            traceMsg(comp(),"\t\t\t%s\n",comp()->fe()->sampleSignature(currentTarget->_calleeMethod->getPersistentIdentifier(),nameBuffer,SIGNATURE_SIZE,trMemory()));
-            }
-         else
-            {
-            //traceMsg(comp(),"\t%s","?");
-            //traceMsg(comp(),"\t\t\t%s\n",comp()->fe()->sampleSignature(currentTarget->_calleeMethod->getPersistentIdentifier(),nameBuffer,SIGNATURE_SIZE,trMemory()));
-            }
-
-         traceMsg(comp(),"\t%s\n","[");
-
-         if(currentTarget && !currentTarget->_myCallees.isEmpty())
-            {
-
-            TR_CallSite *callsite = NULL;
-
-            for(callsite = currentTarget->_myCallees.getFirst(); callsite; callsite=callsite->getNext())
-               {
-               for(int i=0; i<callsite->numTargets(); i++)
-                  targetsToBeEvaluated.push(callsite->getTarget(i));
-
-               if(callsite->numRemovedTargets())
-                  {
-                  for(int i=0; i<callsite->numRemovedTargets(); i++)
-                     targetsToBeEvaluated.push(callsite->getRemovedTarget(i));
-                  }
-               }
-            }
-
-         if(currentTarget && !currentTarget->_deletedCallees.isEmpty())
-            {
-            TR_CallSite *callsite = NULL;
-
-            for(callsite = currentTarget->_deletedCallees.getFirst(); callsite; callsite=callsite->getNext())
-               {
-               if(callsite->numTargets())
-                  {
-                  for(int32_t i=0; i<callsite->numTargets(); i++)
-                     targetsToBeEvaluated.push(callsite->getTarget(i));
-                  }
-
-               else if (callsite->numRemovedTargets())
-                  {
-                  for(int32_t i=0; i< callsite->numRemovedTargets(); i++)
-                     {
-                     targetsToBeEvaluated.push(callsite->getRemovedTarget(i));
-                     }
-                  }
-               else
-                  {
-                  //No one to push??
-                  //traceMsg(comp(),"\t%d\t%d\t%p\t%d\t%s",callsite->getDepth(),0,0,0,getFailureReasonString(callsite->_failureReason));
-                  //traceMsg(comp(),"\t%d\t\t%s\n",callsite->_byteCodeIndex,"No name  Consult bc index");
-                  }
-               }
-            }
-
-         //after pushing all the children, let's put an end mark;
-         currentTarget = NULL;
-         targetsToBeEvaluated.push(currentTarget);
-         }
-      while (!targetsToBeEvaluated.isEmpty());
-
-      }
-
-   traceMsg(comp(),"\t%s\n","]");
-   }
-
 void TR_InlinerTracer::dumpPartialInline (TR_InlineBlocks *partialInline)
    {
    TR_InlineBlock *aBlock = NULL;
@@ -6365,15 +6261,9 @@ OMR_InlinerUtil::computePrexInfo(TR_CallTarget *target, TR_PrexArgInfo *callerAr
 /**
  * \brief
  *    Clear non-invariant argument arg info for target
- *
- * \parm target
- *    Call target whose arg info is to be cleared for non-invariant arguments
- *
- * \parm tracer
- *    Inliner tracer used for trace message
  */
 void
-OMR_InlinerUtil::clearArgInfoForNonInvariantArguments(TR_CallTarget *target, TR_InlinerTracer* tracer)
+OMR_InlinerUtil::clearArgInfoForNonInvariantArguments(TR_PrexArgInfo* argInfo, TR::ResolvedMethodSymbol* methodSymbol, TR_InlinerTracer* tracer)
    {
    if (comp()->getOption(TR_DisableInlinerArgsPropagation))
       return;
@@ -6382,13 +6272,12 @@ OMR_InlinerUtil::clearArgInfoForNonInvariantArguments(TR_CallTarget *target, TR_
    if (tracePrex)
       traceMsg(comp(), "Clearing arg info for non invariant arguments\n");
 
-   TR::ResolvedMethodSymbol* methodSymbol = target->_calleeSymbol;
+   TR_ASSERT(argInfo, "argInfo can't be NULL");
+   TR_ASSERT(methodSymbol, "methodSymbol can't be NULL");
 
-   TR_PrexArgInfo* argInfo = target->_prexArgInfo;
-   if (!argInfo)
+   if (!methodSymbol->getFirstTreeTop() && tracePrex)
       {
-      if (tracePrex)
-         traceMsg(comp(), "Prex arg info not avaiable\n");
+      traceMsg(comp(), "IL trees are not generated for method, no arg info is cleared\n");
       return;
       }
 
@@ -6426,13 +6315,34 @@ OMR_InlinerUtil::clearArgInfoForNonInvariantArguments(TR_CallTarget *target, TR_
          }
       }
 
-   if (cleanedAnything)
+   if (tracePrex)
       {
-      if (tracePrex)
+      if (cleanedAnything)
+         {
          traceMsg(comp(), "ARGS PROPAGATION: argInfo %p after clear arg info for non-invariant arguments", argInfo);
-      if (tracer->heuristicLevel())
-         argInfo->dumpTrace();
+         if (tracer->heuristicLevel())
+            argInfo->dumpTrace();
+         }
+      else
+         traceMsg(comp(), "ARGS PROPAGATION: Nothing is cleared\n");
       }
+   }
+
+/**
+ * \brief
+ *    Clear non-invariant argument arg info for target
+ *
+ * \parm target
+ *    Call target whose arg info is to be cleared for non-invariant arguments
+ *
+ * \parm tracer
+ *    Inliner tracer used for trace message
+ */
+void
+OMR_InlinerUtil::clearArgInfoForNonInvariantArguments(TR_CallTarget *target, TR_InlinerTracer* tracer)
+   {
+   if (target->_prexArgInfo)
+      clearArgInfoForNonInvariantArguments(target->_prexArgInfo, target->_calleeSymbol, tracer);
    }
 
 bool

@@ -88,6 +88,8 @@ static const char* xcmpSuffix(Comparison cmp) {
             return "gt";
         case Comparison::le:
             return "le";
+        default:
+            return "";
     }
 }
 
@@ -110,6 +112,8 @@ static int32_t xcmpOracle(Comparison cmp, CompareType c1, CompareType c2) {
             return c1 > c2;
         case Comparison::le:
             return c1 <= c2;
+        default:
+            return 0;
     }
 }
 
@@ -135,10 +139,10 @@ static typename OMR::EnableIf<OMR::IsFloatingPoint<T>::VALUE, std::vector<std::t
     std::tuple<T, T> inputArray[] = {
         std::make_pair(-std::numeric_limits<T>::infinity(), std::numeric_limits<T>::infinity()),
         std::make_pair(std::numeric_limits<T>::infinity(), -std::numeric_limits<T>::infinity()),
-        std::make_pair(0.0, std::numeric_limits<T>::infinity()),
-        std::make_pair(0.0, -std::numeric_limits<T>::infinity()),
-        std::make_pair(0.0, std::numeric_limits<T>::quiet_NaN()),
-        std::make_pair(0.0, 0.0),
+        std::make_pair(T(0), std::numeric_limits<T>::infinity()),
+        std::make_pair(T(0), -std::numeric_limits<T>::infinity()),
+        std::make_pair(T(0), std::numeric_limits<T>::quiet_NaN()),
+        std::make_pair(T(0), T(0)),
     };
     return std::vector<std::tuple<T, T>>(inputArray, inputArray + sizeof(inputArray) / sizeof(*inputArray));
 }
@@ -146,11 +150,11 @@ static typename OMR::EnableIf<OMR::IsFloatingPoint<T>::VALUE, std::vector<std::t
 template <typename T>
 static std::vector<std::tuple<T, T>> resultInputs() {
     std::tuple<T, T> inputArray[] = {
-        std::make_pair(1, 0),
-        std::make_pair(0, 1),
-        std::make_pair(-1, 0),
-        std::make_pair(0, -1),
-        std::make_pair(5, 7),
+        std::make_pair(T(1), T(0)),
+        std::make_pair(T(0), T(1)),
+        std::make_pair(T(-1), T(0)),
+        std::make_pair(T(0), T(-1)),
+        std::make_pair(T(5), T(7)),
     };
     return std::vector<std::tuple<T, T>>(inputArray, inputArray + sizeof(inputArray) / sizeof(*inputArray));
 }
@@ -1352,6 +1356,7 @@ class Int32SelectInt8CompareTest : public SelectCompareTest<int8_t, int32_t> {};
 
 TEST_P(Int32SelectInt8CompareTest, UsingLoadParam) {
     SKIP_ON_ARM(MissingImplementation);
+    SKIP_ON_RISCV(MissingImplementation) << "Opcode bcmpeq is not implemented";
     SKIP_ON_S390(KnownBug) << "The Z code generator crashes when a sub-integer compare is the first child of an integral select (#5499)";
     SKIP_ON_S390X(KnownBug) << "The Z code generator crashes when a sub-integer compare is the first child of an integral select (#5499)";
     SKIP_ON_X86(KnownBug) << "The x86 code generator returns wrong results when a sub-integer compare is the first child of a select (#5501)";
@@ -1386,6 +1391,7 @@ TEST_P(Int32SelectInt8CompareTest, UsingLoadParam) {
 
 TEST_P(Int32SelectInt8CompareTest, UsingConstCompare) {
     SKIP_ON_ARM(MissingImplementation);
+    SKIP_ON_RISCV(MissingImplementation) << "Opcode bcmpeq is not implemented";
     SKIP_ON_S390(KnownBug) << "The Z code generator crashes when a sub-integer compare is the first child of an integral select (#5499)";
     SKIP_ON_S390X(KnownBug) << "The Z code generator crashes when a sub-integer compare is the first child of an integral select (#5499)";
     SKIP_ON_X86(KnownBug) << "The x86 code generator returns wrong results when a sub-integer compare is the first child of a select (#5501)";
@@ -1421,6 +1427,7 @@ TEST_P(Int32SelectInt8CompareTest, UsingConstCompare) {
 
 TEST_P(Int32SelectInt8CompareTest, UsingConstValues) {
     SKIP_ON_ARM(MissingImplementation);
+    SKIP_ON_RISCV(MissingImplementation) << "Opcode bcmpeq is not implemented";
     SKIP_ON_S390(KnownBug) << "The Z code generator crashes when a sub-integer compare is the first child of an integral select (#5499)";
     SKIP_ON_S390X(KnownBug) << "The Z code generator crashes when a sub-integer compare is the first child of an integral select (#5499)";
     SKIP_ON_X86(KnownBug) << "The x86 code generator returns wrong results when a sub-integer compare is the first child of a select (#5501)";
@@ -1465,6 +1472,7 @@ class Int32SelectInt16CompareTest : public SelectCompareTest<int16_t, int32_t> {
 
 TEST_P(Int32SelectInt16CompareTest, UsingLoadParam) {
     SKIP_ON_ARM(MissingImplementation);
+    SKIP_ON_RISCV(MissingImplementation) << "Opcode scmpeq is not implemented";
     SKIP_ON_S390(KnownBug) << "The Z code generator crashes when a sub-integer compare is the first child of an integral select (#5499)";
     SKIP_ON_S390X(KnownBug) << "The Z code generator crashes when a sub-integer compare is the first child of an integral select (#5499)";
     SKIP_ON_X86(KnownBug) << "The x86 code generator returns wrong results when a sub-integer compare is the first child of a select (#5501)";
@@ -1499,6 +1507,7 @@ TEST_P(Int32SelectInt16CompareTest, UsingLoadParam) {
 
 TEST_P(Int32SelectInt16CompareTest, UsingConstCompare) {
     SKIP_ON_ARM(MissingImplementation);
+    SKIP_ON_RISCV(MissingImplementation) << "Opcode scmpeq is not implemented";
     SKIP_ON_S390(KnownBug) << "The Z code generator crashes when a sub-integer compare is the first child of an integral select (#5499)";
     SKIP_ON_S390X(KnownBug) << "The Z code generator crashes when a sub-integer compare is the first child of an integral select (#5499)";
     SKIP_ON_X86(KnownBug) << "The x86 code generator returns wrong results when a sub-integer compare is the first child of a select (#5501)";
@@ -1534,6 +1543,7 @@ TEST_P(Int32SelectInt16CompareTest, UsingConstCompare) {
 
 TEST_P(Int32SelectInt16CompareTest, UsingConstValues) {
     SKIP_ON_ARM(MissingImplementation);
+    SKIP_ON_RISCV(MissingImplementation) << "Opcode scmpeq is not implemented";
     SKIP_ON_S390(KnownBug) << "The Z code generator crashes when a sub-integer compare is the first child of an integral select (#5499)";
     SKIP_ON_S390X(KnownBug) << "The Z code generator crashes when a sub-integer compare is the first child of an integral select (#5499)";
     SKIP_ON_X86(KnownBug) << "The x86 code generator returns wrong results when a sub-integer compare is the first child of a select (#5501)";

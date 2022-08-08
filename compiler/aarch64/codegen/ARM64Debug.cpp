@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -93,7 +93,14 @@ static const char *ARM64ExtendCodeNames[] =
 
 static const char *opCodeToNameMap[] =
    {
+   "assocreg",
    "bad",
+   "dd",
+   "fence",
+   "label",
+   "proc",
+   "retn",
+   "vgnop",
    "cbzw",
    "cbnzw",
    "cbzx",
@@ -322,6 +329,230 @@ static const char *opCodeToNameMap[] =
    "vstrimmd",
    "vldrimmd",
    "prfmimm",
+   "ldaddx",
+   "ldaddax",
+   "ldaddlx",
+   "ldaddalx",
+   "ldaddw",
+   "ldaddaw",
+   "ldaddlw",
+   "ldaddalw",
+   "ldaddb",
+   "ldaddab",
+   "ldaddlb",
+   "ldaddalb",
+   "ldaddh",
+   "ldaddah",
+   "ldaddlh",
+   "ldaddalh",
+   "ldclrx",
+   "ldclrax",
+   "ldclrlx",
+   "ldclralx",
+   "ldclrw",
+   "ldclraw",
+   "ldclrlw",
+   "ldclralw",
+   "ldclrb",
+   "ldclrab",
+   "ldclrlb",
+   "ldclralb",
+   "ldclrh",
+   "ldclrah",
+   "ldclrlh",
+   "ldclralh",
+   "ldeorx",
+   "ldeorax",
+   "ldeorlx",
+   "ldeoralx",
+   "ldeorw",
+   "ldeoraw",
+   "ldeorlw",
+   "ldeoralw",
+   "ldeorb",
+   "ldeorab",
+   "ldeorlb",
+   "ldeoralb",
+   "ldeorh",
+   "ldeorah",
+   "ldeorlh",
+   "ldeoralh",
+   "ldsetx",
+   "ldsetax",
+   "ldsetlx",
+   "ldsetalx",
+   "ldsetw",
+   "ldsetaw",
+   "ldsetlw",
+   "ldsetalw",
+   "ldsetb",
+   "ldsetab",
+   "ldsetlb",
+   "ldsetalb",
+   "ldseth",
+   "ldsetah",
+   "ldsetlh",
+   "ldsetalh",
+   "ldsmaxx",
+   "ldsmaxax",
+   "ldsmaxlx",
+   "ldsmaxalx",
+   "ldsmaxw",
+   "ldsmaxaw",
+   "ldsmaxlw",
+   "ldsmaxalw",
+   "ldsmaxb",
+   "ldsmaxab",
+   "ldsmaxlb",
+   "ldsmaxalb",
+   "ldsmaxh",
+   "ldsmaxah",
+   "ldsmaxlh",
+   "ldsmaxalh",
+   "ldsminx",
+   "ldsminax",
+   "ldsminlx",
+   "ldsminalx",
+   "ldsminw",
+   "ldsminaw",
+   "ldsminlw",
+   "ldsminalw",
+   "ldsminb",
+   "ldsminab",
+   "ldsminlb",
+   "ldsminalb",
+   "ldsminh",
+   "ldsminah",
+   "ldsminlh",
+   "ldsminalh",
+   "ldumaxx",
+   "ldumaxax",
+   "ldumaxlx",
+   "ldumaxalx",
+   "ldumaxw",
+   "ldumaxaw",
+   "ldumaxlw",
+   "ldumaxalw",
+   "ldumaxb",
+   "ldumaxab",
+   "ldumaxlb",
+   "ldumaxalb",
+   "ldumaxh",
+   "ldumaxah",
+   "ldumaxlh",
+   "ldumaxalh",
+   "lduminx",
+   "lduminax",
+   "lduminlx",
+   "lduminalx",
+   "lduminw",
+   "lduminaw",
+   "lduminlw",
+   "lduminalw",
+   "lduminb",
+   "lduminab",
+   "lduminlb",
+   "lduminalb",
+   "lduminh",
+   "lduminah",
+   "lduminlh",
+   "lduminalh",
+   "staddx",
+   "staddlx",
+   "staddw",
+   "staddlw",
+   "staddb",
+   "staddlb",
+   "staddh",
+   "staddlh",
+   "stclrx",
+   "stclrlx",
+   "stclrw",
+   "stclrlw",
+   "stclrb",
+   "stclrlb",
+   "stclrh",
+   "stclrlh",
+   "steorx",
+   "steorlx",
+   "steorw",
+   "steorlw",
+   "steorb",
+   "steorlb",
+   "steorh",
+   "steorlh",
+   "stsetx",
+   "stsetlx",
+   "stsetw",
+   "stsetlw",
+   "stsetb",
+   "stsetlb",
+   "stseth",
+   "stsetlh",
+   "stsmaxx",
+   "stsmaxlx",
+   "stsmaxw",
+   "stsmaxlw",
+   "stsmaxb",
+   "stsmaxlb",
+   "stsmaxh",
+   "stsmaxlh",
+   "stsminx",
+   "stsminlx",
+   "stsminw",
+   "stsminlw",
+   "stsminb",
+   "stsminlb",
+   "stsminh",
+   "stsminlh",
+   "stumaxx",
+   "stumaxlx",
+   "stumaxw",
+   "stumaxlw",
+   "stumaxb",
+   "stumaxlb",
+   "stumaxh",
+   "stumaxlh",
+   "stuminx",
+   "stuminlx",
+   "stuminw",
+   "stuminlw",
+   "stuminb",
+   "stuminlb",
+   "stuminh",
+   "stuminlh",
+   "swpx",
+   "swpax",
+   "swplx",
+   "swpalx",
+   "swpw",
+   "swpaw",
+   "swplw",
+   "swpalw",
+   "swpb",
+   "swpab",
+   "swplb",
+   "swpalb",
+   "swph",
+   "swpah",
+   "swplh",
+   "swpalh",
+   "casx",
+   "casax",
+   "caslx",
+   "casalx",
+   "casw",
+   "casaw",
+   "caslw",
+   "casalw",
+   "casb",
+   "casab",
+   "caslb",
+   "casalb",
+   "cash",
+   "casah",
+   "caslh",
+   "casalh",
    "adr",
    "adrp",
    "addimmw",
@@ -469,8 +700,6 @@ static const char *opCodeToNameMap[] =
    "scvtf_xtod",
    "fmovimms",
    "fmovimmd",
-   "movi0s",
-   "movi0d",
    "fcmps",
    "fcmps_zero",
    "fcmpd",
@@ -497,14 +726,300 @@ static const char *opCodeToNameMap[] =
    "fmaxd",
    "fmins",
    "fmind",
+   "vmovi16b",
+   "vmovi8h",
+   "vmovi2s",
+   "vmovi4s",
+   "vmovi4s_one",
+   "movid",
+   "vmovi2d",
+   "vfmov4s",
+   "vfmov2d",
+   "vmvni8h",
+   "vmvni4s",
+   "vmvni4s_one",
+   "vbicimm8h",
+   "vbicimm4s",
+   "vorrimm8h",
+   "vorrimm4s",
+   "vshl16b",
+   "vshl8h",
+   "vshl4s",
+   "vshl2d",
+   "vsshll_8h",
+   "vsshll_4s",
+   "vsshll_2d",
+   "vsshll2_8h",
+   "vsshll2_4s",
+   "vsshll2_2d",
+   "vushll_8h",
+   "vushll_4s",
+   "vushll_2d",
+   "vushll2_8h",
+   "vushll2_4s",
+   "vushll2_2d",
+   "vsshr16b",
+   "vsshr8h",
+   "vsshr4s",
+   "vsshr2d",
+   "vushr16b",
+   "vushr8h",
+   "vushr4s",
+   "vushr2d",
+   "vshll_8h",
+   "vshll_4s",
+   "vshll_2d",
+   "vshll2_8h",
+   "vshll2_4s",
+   "vshll2_2d",
+   "vcmeq16b",
+   "vcmeq8h",
+   "vcmeq4s",
+   "vcmeq2d",
+   "vcmeq16b_zero",
+   "vcmeq8h_zero",
+   "vcmeq4s_zero",
+   "vcmeq2d_zero",
+   "vcmhs16b",
+   "vcmhs8h",
+   "vcmhs4s",
+   "vcmhs2d",
+   "vcmge16b",
+   "vcmge8h",
+   "vcmge4s",
+   "vcmge2d",
+   "vcmge16b_zero",
+   "vcmge8h_zero",
+   "vcmge4s_zero",
+   "vcmge2d_zero",
+   "vcmhi16b",
+   "vcmhi8h",
+   "vcmhi4s",
+   "vcmhi2d",
+   "vcmgt16b",
+   "vcmgt8h",
+   "vcmgt4s",
+   "vcmgt2d",
+   "vcmgt16b_zero",
+   "vcmgt8h_zero",
+   "vcmgt4s_zero",
+   "vcmgt2d_zero",
+   "vcmle16b_zero",
+   "vcmle8h_zero",
+   "vcmle4s_zero",
+   "vcmle2d_zero",
+   "vcmlt16b_zero",
+   "vcmlt8h_zero",
+   "vcmlt4s_zero",
+   "vcmlt2d_zero",
+   "vcmtst16b",
+   "vcmtst8h",
+   "vcmtst4s",
+   "vcmtst2d",
+   "vfcmeq4s",
+   "vfcmeq2d",
+   "vfcmeq4s_zero",
+   "vfcmeq2d_zero",
+   "vfcmge4s",
+   "vfcmge2d",
+   "vfcmge4s_zero",
+   "vfcmge2d_zero",
+   "vfcmgt4s",
+   "vfcmgt2d",
+   "vfcmgt4s_zero",
+   "vfcmgt2d_zero",
+   "vfcmle4s_zero",
+   "vfcmle2d_zero",
+   "vfcmlt4s_zero",
+   "vfcmlt2d_zero",
+   "vfacge4s",
+   "vfacge2d",
+   "vfacgt4s",
+   "vfacgt2d",
+   "vadd16b",
+   "vadd8h",
+   "vadd4s",
+   "vadd2d",
+   "vfadd4s",
+   "vfadd2d",
+   "vsub16b",
+   "vsub8h",
+   "vsub4s",
+   "vsub2d",
+   "vfsub4s",
+   "vfsub2d",
+   "vmul16b",
+   "vmul8h",
+   "vmul4s",
+   "vfmul4s",
+   "vfmul2d",
+   "vfdiv4s",
+   "vfdiv2d",
+   "vand16b",
+   "vbic16b",
+   "vorr16b",
+   "veor16b",
+   "vmla16b",
+   "vmla8h",
+   "vmla4s",
+   "vfmla4s",
+   "vfmla2d",
+   "vsmin16b",
+   "vsmin8h",
+   "vsmin4s",
+   "vfmin4s",
+   "vfmin2d",
+   "vsmax16b",
+   "vsmax8h",
+   "vsmax4s",
+   "vfmax4s",
+   "vfmax2d",
+   "vsshl16b",
+   "vsshl8h",
+   "vsshl4s",
+   "vsshl2d",
+   "vushl16b",
+   "vushl8h",
+   "vushl4s",
+   "vushl2d",
+   "vbif16b",
+   "vbit16b",
+   "vbsl16b",
+   "vzip1_16b",
+   "vzip1_8h",
+   "vzip1_4s",
+   "vzip1_2d",
+   "vzip2_16b",
+   "vzip2_8h",
+   "vzip2_4s",
+   "vzip2_2d",
+   "vuzp1_16b",
+   "vuzp1_8h",
+   "vuzp1_4s",
+   "vuzp1_2d",
+   "vuzp2_16b",
+   "vuzp2_8h",
+   "vuzp2_4s",
+   "vuzp2_2d",
+   "vneg16b",
+   "vneg8h",
+   "vneg4s",
+   "vneg2d",
+   "vfneg4s",
+   "vfneg2d",
+   "vnot16b",
+   "vfsqrt4s",
+   "vfsqrt2d",
+   "vabs16b",
+   "vabs8h",
+   "vabs4s",
+   "vabs2d",
+   "vfabs4s",
+   "vfabs2d",
+   "vrev16_16b",
+   "vrev32_16b",
+   "vrev32_8h",
+   "vrev64_16b",
+   "vrev64_8h",
+   "vrev64_4s",
+   "vdup16b",
+   "vdup8h",
+   "vdup4s",
+   "vdup2d",
+   "vdupe16b",
+   "vdupe8h",
+   "vdupe4s",
+   "vdupe2d",
+   "smovwb",
+   "smovwh",
+   "smovxb",
+   "smovxh",
+   "smovxs",
+   "umovwb",
+   "umovwh",
+   "umovws",
+   "umovxd",
+   "vinsb",
+   "vinsh",
+   "vinss",
+   "vinsd",
+   "vinseb",
+   "vinseh",
+   "vinses",
+   "vinsed",
+   "fmulelem_4s",
+   "fmulelem_2d",
+   "vfmulelem_4s",
+   "vfmulelem_2d",
+   "vumlal_8h",
+   "vumlal_4s",
+   "vumlal_2d",
+   "vumlal2_8h",
+   "vumlal2_4s",
+   "vumlal2_2d",
+   "vumlsl_8h",
+   "vumlsl_4s",
+   "vumlsl_2d",
+   "vumlsl2_8h",
+   "vumlsl2_4s",
+   "vumlsl2_2d",
+   "vumull_8h",
+   "vumull_4s",
+   "vumull_2d",
+   "vumull2_8h",
+   "vumull2_4s",
+   "vumull2_2d",
+   "vaddv16b",
+   "vaddv8h",
+   "vaddv4s",
+   "vfmaxnmv4s",
+   "vfmaxv4s",
+   "vfminnmv4s",
+   "vfminv4s",
+   "vsaddlv8h",
+   "vsaddlv4s",
+   "vsaddlv2d",
+   "vsmaxv16b",
+   "vsmaxv8h",
+   "vsmaxv4s",
+   "vsminv16b",
+   "vsminv8h",
+   "vsminv4s",
+   "vuaddlv8h",
+   "vuaddlv4s",
+   "vuaddlv2d",
+   "vumaxv16b",
+   "vumaxv8h",
+   "vumaxv4s",
+   "vuminv16b",
+   "vuminv8h",
+   "vuminv4s",
+   "vaddp16b",
+   "vaddp8h",
+   "vaddp4s",
+   "vaddp2d",
+   "addp2d",
+   "vfaddp4s",
+   "vfaddp2d",
+   "faddp2s",
+   "faddp2d",
+   "vfmaxnmp4s",
+   "vfmaxnmp2d",
+   "fmaxnmp2s",
+   "fmaxnmp2d",
+   "vfmaxp4s",
+   "vfmaxp2d",
+   "fmaxp2s",
+   "fmaxp2d",
+   "vfminnmp4s",
+   "vfminnmp2d",
+   "fminnmp2s",
+   "fminnmp2d",
+   "vfminp4s",
+   "vfminp2d",
+   "fminp2s",
+   "fminp2d",
    "nop",
-   "proc",
-   "fence",
-   "return",
-   "dd",
-   "label",
-   "vgdnop",
-   "assocreg"
    };
 
 const char *
@@ -582,11 +1097,17 @@ TR_Debug::print(TR::FILE *pOutFile, TR::Instruction *instr)
       case OMR::Instruction::IsTrg1Imm:
          print(pOutFile, (TR::ARM64Trg1ImmInstruction *)instr);
          break;
+      case OMR::Instruction::IsTrg1ImmShifted:
+         print(pOutFile, (TR::ARM64Trg1ImmShiftedInstruction *)instr);
+         break;
       case OMR::Instruction::IsTrg1ImmSym:
          print(pOutFile, (TR::ARM64Trg1ImmSymInstruction *)instr);
          break;
       case OMR::Instruction::IsTrg1ZeroSrc1:
          print(pOutFile, (TR::ARM64Trg1ZeroSrc1Instruction *)instr);
+         break;
+      case OMR::Instruction::IsTrg1ZeroImm:
+         print(pOutFile, (TR::ARM64Trg1ZeroImmInstruction *)instr);
          break;
       case OMR::Instruction::IsTrg1Src1:
          print(pOutFile, (TR::ARM64Trg1Src1Instruction *)instr);
@@ -606,6 +1127,9 @@ TR_Debug::print(TR::FILE *pOutFile, TR::Instruction *instr)
       case OMR::Instruction::IsTrg1Src2Extended:
          print(pOutFile, (TR::ARM64Trg1Src2ExtendedInstruction *)instr);
          break;
+      case OMR::Instruction::IsTrg1Src2IndexedElement:
+         print(pOutFile, (TR::ARM64Trg1Src2IndexedElementInstruction *)instr);
+         break;
       case OMR::Instruction::IsTrg1Src2Zero:
          print(pOutFile, (TR::ARM64Trg1Src2ZeroInstruction *)instr);
          break;
@@ -617,6 +1141,9 @@ TR_Debug::print(TR::FILE *pOutFile, TR::Instruction *instr)
          break;
       case OMR::Instruction::IsMem:
          print(pOutFile, (TR::ARM64MemInstruction *)instr);
+         break;
+      case OMR::Instruction::IsMemImm:
+         print(pOutFile, (TR::ARM64MemImmInstruction *)instr);
          break;
       case OMR::Instruction::IsMemSrc1:
          print(pOutFile, (TR::ARM64MemSrc1Instruction *)instr);
@@ -704,6 +1231,8 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64ImmSymInstruction *instr)
    else
       trfprintf(pOutFile, "%s \t" POINTER_PRINTF_FORMAT, getOpCodeName(&instr->getOpCode()), instr->getAddrImmediate());
 
+   printInstructionComment(pOutFile, 1, instr);
+
    if (instr->getDependencyConditions())
       print(pOutFile, instr->getDependencyConditions());
    trfflush(_comp->getOutFile());
@@ -768,6 +1297,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64ConditionalBranchInstruction *instr
       {
       trfprintf(pOutFile, " (%s)", getName(snippet));
       }
+   printInstructionComment(pOutFile, 1, instr);
    if (instr->getDependencyConditions())
       print(pOutFile, instr->getDependencyConditions());
    trfflush(_comp->getOutFile());
@@ -787,6 +1317,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64CompareBranchInstruction *instr)
       {
       trfprintf(pOutFile, " (%s)", getName(snippet));
       }
+   printInstructionComment(pOutFile, 1, instr);
    if (instr->getDependencyConditions())
       print(pOutFile, instr->getDependencyConditions());
    trfflush(_comp->getOutFile());
@@ -807,6 +1338,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64TestBitBranchInstruction *instr)
       {
       trfprintf(pOutFile, " (%s)", getName(snippet));
       }
+   printInstructionComment(pOutFile, 1, instr);
    if (instr->getDependencyConditions())
       print(pOutFile, instr->getDependencyConditions());
    trfflush(_comp->getOutFile());
@@ -818,6 +1350,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64RegBranchInstruction *instr)
    printPrefix(pOutFile, instr);
    trfprintf(pOutFile, "%s \t", getOpCodeName(&instr->getOpCode()));
    print(pOutFile, instr->getTargetRegister(), TR_DoubleWordReg);
+   printInstructionComment(pOutFile, 1, instr);
    if (instr->getDependencyConditions())
       print(pOutFile, instr->getDependencyConditions());
    trfflush(_comp->getOutFile());
@@ -919,17 +1452,63 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Trg1ImmInstruction *instr)
          }
       trfprintf(pOutFile, ", " POINTER_PRINTF_FORMAT, (instr->getBinaryEncoding() + offset));
       }
-   else if ((op == TR::InstOpCode::fmovimms) || (op == TR::InstOpCode::fmovimmd))
+   else if (op == TR::InstOpCode::fmovimms || op == TR::InstOpCode::fmovimmd ||
+            op == TR::InstOpCode::vfmov4s || op == TR::InstOpCode::vfmov2d)
       {
       uint32_t imm = instr->getSourceImmediate() & 0xFF;
       trfprintf(pOutFile, ", 0x%02x (%lf)", imm, getDoubleFromImm8(imm));
       }
-   else
+   else if (op == TR::InstOpCode::movzx || op == TR::InstOpCode::movzw ||
+            op == TR::InstOpCode::movnx || op == TR::InstOpCode::movnw ||
+            op == TR::InstOpCode::movkx || op == TR::InstOpCode::movkw)
       {
       uint32_t imm = instr->getSourceImmediate() & 0xFFFF;
       uint32_t shift = (instr->getSourceImmediate() & 0x30000) >> 12;
       trfprintf(pOutFile, ", 0x%04x", imm);
       if (shift != 0)
+         {
+         trfprintf(pOutFile, ", LSL #%d", shift);
+         }
+      }
+   else if (op == TR::InstOpCode::vmovi2d)
+      {
+      uint8_t imm8 = instr->getSourceImmediate() & 0xFF;
+      uint64_t imm = 0;
+      for (int i = 0; i < 8; i++)
+         {
+         if ((imm8 & (1 << i)) != 0)
+            {
+            imm |= static_cast<uint64_t>(0xff) << (i * 8);
+            }
+         }
+      trfprintf(pOutFile, ", 0x%08llx", imm);
+      }
+   else
+      {
+      uint32_t imm = instr->getSourceImmediate() & 0xFF;
+      trfprintf(pOutFile, ", 0x%02x", imm);
+      }
+   trfflush(_comp->getOutFile());
+   }
+
+void
+TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Trg1ImmShiftedInstruction *instr)
+   {
+   printPrefix(pOutFile, instr);
+   trfprintf(pOutFile, "%s \t", getOpCodeName(&instr->getOpCode()));
+   print(pOutFile, instr->getTargetRegister(), TR_WordReg);
+
+   TR::InstOpCode::Mnemonic op = instr->getOpCodeValue();
+   uint32_t imm = instr->getSourceImmediate() & 0xFF;
+   uint32_t shift = instr->getShiftAmount();
+   trfprintf(pOutFile, ", 0x%02x", imm);
+   if (shift != 0)
+      {
+      if ((op == TR::InstOpCode::vmovi4s_one) || (op == TR::InstOpCode::vmvni4s_one))
+         {
+         trfprintf(pOutFile, ", MSL #%d", shift);
+         }
+      else
          {
          trfprintf(pOutFile, ", LSL #%d", shift);
          }
@@ -983,6 +1562,15 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Trg1Src1Instruction *instr)
 
    print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
    print(pOutFile, instr->getSource1Register(), TR_WordReg);
+
+   TR::InstOpCode::Mnemonic op = instr->getOpCodeValue();
+   if (op >= TR::InstOpCode::vshll_8h && op <= TR::InstOpCode::vshll2_2d)
+      {
+      uint32_t size = (TR::InstOpCode::getOpCodeBinaryEncoding(op) >> 22) & 0x3;
+      uint32_t shiftAmount = 8 << size;
+      trfprintf(pOutFile, ", %d", shiftAmount);
+      }
+
    trfflush(_comp->getOutFile());
    }
 
@@ -996,6 +1584,11 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Trg1ZeroSrc1Instruction *instr)
       {
       // mov alias
       trfprintf(pOutFile, "mov%c \t", (op == TR::InstOpCode::orrx) ? 'x' : 'w');
+      }
+   else if (op == TR::InstOpCode::ornx || op == TR::InstOpCode::ornw)
+      {
+      // mvn alias
+      trfprintf(pOutFile, "mvn%c \t", (op == TR::InstOpCode::ornx) ? 'x' : 'w');
       }
    else if (op == TR::InstOpCode::subx || op == TR::InstOpCode::subw)
       {
@@ -1021,13 +1614,13 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Trg1Src1ImmInstruction *instr)
    if (op == TR::InstOpCode::subsimmx || op == TR::InstOpCode::subsimmw ||
        op == TR::InstOpCode::addsimmx || op == TR::InstOpCode::addsimmw)
       {
+      done = true;
       TR::Register *r = instr->getTargetRegister();
       if (r && r->getRealRegister()
           && toRealRegister(r)->getRegisterNumber() == TR::RealRegister::xzr)
          {
          // cmp/cmn alias
          char *mnemonic = NULL;
-         done = true;
          switch (op)
             {
             case TR::InstOpCode::subsimmx:
@@ -1045,6 +1638,30 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Trg1Src1ImmInstruction *instr)
          trfprintf(pOutFile, "%s \t", mnemonic);
          print(pOutFile, instr->getSource1Register(), TR_WordReg);
          trfprintf(pOutFile, ", %d", instr->getSourceImmediate());
+         }
+      else
+         {
+         trfprintf(pOutFile, "%s \t", getOpCodeName(&instr->getOpCode()));
+         print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
+         print(pOutFile, instr->getSource1Register(), TR_WordReg);
+         trfprintf(pOutFile, ", %d", instr->getSourceImmediate());
+         }
+      if (instr->getNbit())
+         {
+         trfprintf(pOutFile, ", LSL #%d", 12);
+         }
+      }
+   else if ((op == TR::InstOpCode::subimmx || op == TR::InstOpCode::subimmw ||
+             op == TR::InstOpCode::addimmx || op == TR::InstOpCode::addimmw))
+      {
+      done = true;
+      trfprintf(pOutFile, "%s \t", getOpCodeName(&instr->getOpCode()));
+      print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
+      print(pOutFile, instr->getSource1Register(), TR_WordReg);
+      trfprintf(pOutFile, ", %d", instr->getSourceImmediate());
+      if (instr->getNbit())
+         {
+         trfprintf(pOutFile, ", LSL #%d", 12);
          }
       }
    else if (op == TR::InstOpCode::sbfmx || op == TR::InstOpCode::sbfmw)
@@ -1092,6 +1709,14 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Trg1Src1ImmInstruction *instr)
             print(pOutFile, instr->getSource1Register(), TR_WordReg); 
             }
          }
+      if (!done)
+         {
+         done = true;
+         trfprintf(pOutFile, "%s \t", getOpCodeName(&instr->getOpCode()));
+         print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
+         print(pOutFile, instr->getSource1Register(), TR_WordReg);
+         trfprintf(pOutFile, ", %d, %d", immr, imms);
+         }
       }
    else if (op == TR::InstOpCode::ubfmx || op == TR::InstOpCode::ubfmw)
       {
@@ -1117,6 +1742,24 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Trg1Src1ImmInstruction *instr)
             print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
             print(pOutFile, instr->getSource1Register(), TR_WordReg);
             trfprintf(pOutFile, ", %d", 63 - imms);
+            }
+         else if (imms < immr)
+            {
+            // ubfiz alias
+            done = true;
+            trfprintf(pOutFile, "ubfizx \t");
+            print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
+            print(pOutFile, instr->getSource1Register(), TR_WordReg);
+            trfprintf(pOutFile, ", %d, %d", 64 - immr, imms + 1);
+            }
+         else
+            {
+            // ubfx alias
+            done = true;
+            trfprintf(pOutFile, "ubfxx \t");
+            print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
+            print(pOutFile, instr->getSource1Register(), TR_WordReg);
+            trfprintf(pOutFile, ", %d, %d", immr, imms + 1 - immr);
             }
          }
       else if ((op == TR::InstOpCode::ubfmw) && ((immr & (1 << 6)) == 0) && ((imms & (1 << 6)) == 0))
@@ -1147,6 +1790,32 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Trg1Src1ImmInstruction *instr)
             print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
             print(pOutFile, instr->getSource1Register(), TR_WordReg);
             }
+         else if (imms < immr)
+            {
+            // ubfiz alias
+            done = true;
+            trfprintf(pOutFile, "ubfizw \t");
+            print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
+            print(pOutFile, instr->getSource1Register(), TR_WordReg);
+            trfprintf(pOutFile, ", %d, %d", 32 - immr, imms + 1);
+            }
+         else
+            {
+            // ubfx alias
+            done = true;
+            trfprintf(pOutFile, "ubfxw \t");
+            print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
+            print(pOutFile, instr->getSource1Register(), TR_WordReg);
+            trfprintf(pOutFile, ", %d, %d", immr, imms + 1 - immr);
+            }
+         }
+      if (!done)
+         {
+         done = true;
+         trfprintf(pOutFile, "%s \t", getOpCodeName(&instr->getOpCode()));
+         print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
+         print(pOutFile, instr->getSource1Register(), TR_WordReg);
+         trfprintf(pOutFile, ", %d, %d", immr, imms);
          }
       }
    else if (op == TR::InstOpCode::andimmx || op == TR::InstOpCode::andimmw ||
@@ -1184,6 +1853,62 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Trg1Src1ImmInstruction *instr)
             }
          }
       }
+   else if ((op >= TR::InstOpCode::vshl16b) && (op <= TR::InstOpCode::vushr2d))
+      {
+      done = true;
+      bool isShiftLeft = (op <= TR::InstOpCode::vushll2_2d);
+      uint32_t immh = (TR::InstOpCode::getOpCodeBinaryEncoding(op) >> 19) & 0xf;
+      uint32_t elementSize = 8 << (31 - leadingZeroes(immh));
+      uint32_t imm = instr->getSourceImmediate();
+      uint32_t shiftAmount = isShiftLeft ? (imm - elementSize) : (elementSize * 2 - imm);
+      trfprintf(pOutFile, "%s \t", getOpCodeName(&instr->getOpCode()));
+      print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
+      print(pOutFile, instr->getSource1Register(), TR_WordReg);
+      trfprintf(pOutFile, ", %d", shiftAmount);
+      }
+   else if ((op >= TR::InstOpCode::vdupe16b) && (op <= TR::InstOpCode::umovxd))
+      {
+      done = true;
+      const uint32_t elementSizeShift = (op <= TR::InstOpCode::vdupe2d) ? (op - TR::InstOpCode::vdupe16b) :
+                                        ((op <= TR::InstOpCode::smovwh) ? (op - TR::InstOpCode::smovwb) :
+                                        ((op <= TR::InstOpCode::smovxh) ? (op - TR::InstOpCode::smovxb) : (op - TR::InstOpCode::umovwb)));
+
+      const uint32_t imm5 = instr->getSourceImmediate() & 0x1f;
+      const uint32_t index = imm5 >> (elementSizeShift + 1);
+      trfprintf(pOutFile, "%s \t", getOpCodeName(&instr->getOpCode()));
+      print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
+      print(pOutFile, instr->getSource1Register(), TR_WordReg);
+      trfprintf(pOutFile, ".[%d]", index);
+      }
+   else if ((op >= TR::InstOpCode::vinswb) && (op <= TR::InstOpCode::vinsxd))
+      {
+      done = true;
+      const uint32_t elementSizeShift = op - TR::InstOpCode::vinswb;
+      const uint32_t imm5 = instr->getSourceImmediate() & 0x1f;
+      const uint32_t index = imm5 >> (elementSizeShift + 1);
+
+      trfprintf(pOutFile, "%s \t", getOpCodeName(&instr->getOpCode()));
+      print(pOutFile, instr->getTargetRegister(), TR_WordReg);
+      trfprintf(pOutFile, ".[%d]", index);
+      trfprintf(pOutFile, ", ");
+      print(pOutFile, instr->getSource1Register(), TR_WordReg);
+      }
+   else if ((op >= TR::InstOpCode::vinseb) && (op <= TR::InstOpCode::vinsed))
+      {
+      done = true;
+      const uint32_t elementSizeShift = op - TR::InstOpCode::vinseb;
+      const uint32_t imm5 = (instr->getSourceImmediate() >> 5) & 0x1f;
+      const uint32_t imm4 = instr->getSourceImmediate() & 0xf;
+      const uint32_t dstIndex = imm5 >> (elementSizeShift + 1);
+      const uint32_t srcIndex = imm4 >> elementSizeShift;
+
+      trfprintf(pOutFile, "%s \t", getOpCodeName(&instr->getOpCode()));
+      print(pOutFile, instr->getTargetRegister(), TR_WordReg);
+      trfprintf(pOutFile, ".[%d]", dstIndex);
+      trfprintf(pOutFile, ", ");
+      print(pOutFile, instr->getSource1Register(), TR_WordReg);
+      trfprintf(pOutFile, ".[%d]", srcIndex);
+      }
 
    if (!done)
       {
@@ -1200,6 +1925,54 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Trg1Src1ImmInstruction *instr)
    }
 
 void
+TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Trg1ZeroImmInstruction *instr)
+   {
+   printPrefix(pOutFile, instr);
+   TR::InstOpCode::Mnemonic op = instr->getOpCodeValue();
+   bool done = false;
+   if (op == TR::InstOpCode::orrimmx || op == TR::InstOpCode::orrimmw)
+      {
+      // mov (bitmask immediate) alias
+      uint32_t imm12 = instr->getSourceImmediate();
+      auto immr = imm12 >> 6;
+      auto imms = imm12 & 0x3f;
+      auto n = instr->getNbit();
+      if (op == TR::InstOpCode::orrimmx)
+         {
+         uint64_t immediate;
+         if (decodeBitMasks(n, immr, imms, immediate))
+            {
+            done = true;
+            trfprintf(pOutFile, "movx \t");
+            print(pOutFile, instr->getTargetRegister(), TR_WordReg);
+            trfprintf(pOutFile, ", 0x%llx", immediate);
+            }
+         }
+      else
+         {
+         uint32_t immediate;
+         if (decodeBitMasks(n, immr, imms, immediate))
+            {
+            done = true;
+            trfprintf(pOutFile, "movw \t");
+            print(pOutFile, instr->getTargetRegister(), TR_WordReg);
+            trfprintf(pOutFile, ", 0x%lx", immediate);
+            }
+         }
+      }
+   if (!done)
+      {
+      trfprintf(pOutFile, "%s \t", getOpCodeName(&instr->getOpCode()));
+      print(pOutFile, instr->getTargetRegister(), TR_WordReg);
+      trfprintf(pOutFile, ", %d", instr->getSourceImmediate());
+      }
+
+   if (instr->getDependencyConditions())
+      print(pOutFile, instr->getDependencyConditions());
+
+   trfflush(_comp->getOutFile());
+   }
+void
 TR_Debug::print(TR::FILE *pOutFile, TR::ARM64ZeroSrc1ImmInstruction *instr)
    {
    printPrefix(pOutFile, instr);
@@ -1212,6 +1985,10 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64ZeroSrc1ImmInstruction *instr)
       trfprintf(pOutFile, "cmpimm%c \t", (op == TR::InstOpCode::subsimmx) ? 'x' : 'w');
       print(pOutFile, instr->getSource1Register(), TR_WordReg);
       trfprintf(pOutFile, ", %d", instr->getSourceImmediate());
+      if (instr->getNbit())
+         {
+         trfprintf(pOutFile, ", LSL #%d", 12);
+         }
       }
    else if (op == TR::InstOpCode::addsimmx || op == TR::InstOpCode::addsimmw)
       {
@@ -1220,6 +1997,10 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64ZeroSrc1ImmInstruction *instr)
       trfprintf(pOutFile, "cmnimm%c \t", (op == TR::InstOpCode::addsimmx) ? 'x' : 'w');
       print(pOutFile, instr->getSource1Register(), TR_WordReg);
       trfprintf(pOutFile, ", %d", instr->getSourceImmediate());
+      if (instr->getNbit())
+         {
+         trfprintf(pOutFile, ", LSL #%d", 12);
+         }
       }
    else if (op == TR::InstOpCode::andsimmx || op == TR::InstOpCode::andsimmw)
       {
@@ -1366,6 +2147,21 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Trg1Src2ExtendedInstruction *instr)
    }
 
 void
+TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Trg1Src2IndexedElementInstruction *instr)
+   {
+   printPrefix(pOutFile, instr);
+   trfprintf(pOutFile, "%s \t", getOpCodeName(&instr->getOpCode()));
+
+   print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
+   print(pOutFile, instr->getSource1Register(), TR_WordReg); trfprintf(pOutFile, ", ");
+   print(pOutFile, instr->getSource2Register(), TR_WordReg);
+
+   TR::InstOpCode::Mnemonic op = instr->getOpCodeValue();
+   trfprintf(pOutFile, ".[%d]", instr->getIndex());
+   trfflush(_comp->getOutFile());
+   }
+
+void
 TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Trg1Src2ZeroInstruction *instr)
    {
    printPrefix(pOutFile, instr);
@@ -1430,6 +2226,41 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64MemInstruction *instr)
    {
    printPrefix(pOutFile, instr);
    trfprintf(pOutFile, "%s \t", getOpCodeName(&instr->getOpCode()));
+   print(pOutFile, instr->getMemoryReference());
+   printMemoryReferenceComment(pOutFile, instr->getMemoryReference());
+   printInstructionComment(pOutFile, 1, instr);
+   trfflush(_comp->getOutFile());
+   }
+
+void
+TR_Debug::print(TR::FILE *pOutFile, TR::ARM64MemImmInstruction *instr)
+   {
+   TR::InstOpCode::Mnemonic op = instr->getOpCodeValue();
+   printPrefix(pOutFile, instr);
+   trfprintf(pOutFile, "%s \t", getOpCodeName(&instr->getOpCode()));
+   if ((op == TR::InstOpCode::prfmoff || op == TR::InstOpCode::prfmimm))
+      {
+      uint32_t immediate = instr->getImmediate();
+      uint32_t typeValue = (immediate >> 3) & 0x3;
+      uint32_t targetValue = (immediate >> 1) & 0x3;
+      if ((typeValue != 3) && (targetValue != 3))
+         {
+         ARM64PrefetchType type = static_cast<ARM64PrefetchType>(typeValue);
+         ARM64PrefetchTarget target = static_cast<ARM64PrefetchTarget>(targetValue);
+         ARM64PrefetchPolicy policy = static_cast<ARM64PrefetchPolicy>(immediate  & 0x1);
+         trfprintf(pOutFile, "%s%s%s, ", (type == ARM64PrefetchType::LOAD) ? "pld" : ((type == ARM64PrefetchType::INSTRUCTION) ? "pli" : "pst"),
+                                         (target == ARM64PrefetchTarget::L1) ? "l1" :  ((target == ARM64PrefetchTarget::L2) ? "l2" : "l3"),
+                                         (policy == ARM64PrefetchPolicy::KEEP) ? "keep" : "strm");
+         }
+      else
+         {
+         trfprintf(pOutFile, "#%d, ", instr->getImmediate());
+         }
+      }
+   else
+      {
+      trfprintf(pOutFile, "#%d, ", instr->getImmediate());
+      }
    print(pOutFile, instr->getMemoryReference());
    printMemoryReferenceComment(pOutFile, instr->getMemoryReference());
    printInstructionComment(pOutFile, 1, instr);
@@ -1533,7 +2364,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::RegisterDependencyConditions *conditions
 void
 TR_Debug::printAssocRegDirective(TR::FILE *pOutFile, TR::Instruction *instr)
    {
-   TR_ARM64RegisterDependencyGroup * depGroup = instr->getDependencyConditions()->getPostConditions();
+   TR::RegisterDependencyGroup * depGroup = instr->getDependencyConditions()->getPostConditions();
 
    printPrefix(pOutFile, instr);
    trfprintf(pOutFile, "%s", getOpCodeName(&instr->getOpCode()));
@@ -1566,7 +2397,23 @@ TR_Debug::print(TR::FILE *pOutFile, TR::MemoryReference *mr)
       }
 
    if (mr->getIndexRegister() != NULL)
+      {
       print(pOutFile, mr->getIndexRegister());
+      TR::ARM64ExtendCode extendCode = mr->getIndexExtendCode();
+      uint8_t scale = mr->getScale();
+
+      if ((extendCode != TR::ARM64ExtendCode::EXT_UXTX) || (scale != 0))
+         {
+         if (extendCode != TR::ARM64ExtendCode::EXT_UXTX)
+            {
+            trfprintf(pOutFile, ", %s %d", ARM64ExtendCodeNames[extendCode], scale);
+            }
+         else
+            {
+            trfprintf(pOutFile, ", lsl %d", scale);
+            }
+         }
+      }
    else
       trfprintf(pOutFile, "%d", mr->getOffset(true));
 
@@ -1601,6 +2448,7 @@ getRegisterName(TR::RealRegister::RegNum num, bool is64bit)
       {
       case TR::RealRegister::NoReg: return "NoReg";
       case TR::RealRegister::SpilledReg: return "SpilledReg";
+      case TR::RealRegister::KillVectorRegs: return "KillVectorRegs";
       case TR::RealRegister::x0: return (is64bit ? "x0" : "w0");
       case TR::RealRegister::x1: return (is64bit ? "x1" : "w1");
       case TR::RealRegister::x2: return (is64bit ? "x2" : "w2");

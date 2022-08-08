@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -21,6 +21,7 @@
 
 #include "optimizer/Optimizer.hpp"
 
+#include "optimizer/Optimizer_inlines.hpp"
 #include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -104,7 +105,6 @@
 #include "optimizer/SinkStores.hpp"
 #include "optimizer/PartialRedundancy.hpp"
 #include "optimizer/OSRDefAnalysis.hpp"
-#include "optimizer/PrefetchInsertion.hpp"
 #include "optimizer/StripMiner.hpp"
 #include "optimizer/FieldPrivatizer.hpp"
 #include "optimizer/ReorderIndexExpr.hpp"
@@ -112,10 +112,6 @@
 #include "optimizer/RecognizedCallTransformer.hpp"
 #include "optimizer/SwitchAnalyzer.hpp"
 #include "env/RegionProfiler.hpp"
-
-#if defined (_MSC_VER) && _MSC_VER < 1900
-#define snprintf _snprintf
-#endif
 
 namespace TR { class AutomaticSymbol; }
 
@@ -444,13 +440,6 @@ const OptimizationStrategy stripMiningOpts[] =
    { endGroup                             }
    };
 
-const OptimizationStrategy prefetchInsertionOpts[] =
-   {
-   { inductionVariableAnalysis            },
-   { prefetchInsertion                    },
-   { endGroup                             }
-   };
-
 const OptimizationStrategy blockManipulationOpts[] =
    {
 //   { generalLoopUnroller,       IfLoops   }, //Unroll Loops
@@ -544,6 +533,7 @@ static const OptimizationStrategy ilgenStrategyOpts[] =
 #ifdef J9_PROJECT_SPECIFIC
    { osrLiveRangeAnalysis,          IfOSR   },
    { osrDefAnalysis,                IfInvoluntaryOSR },
+   { methodHandleTransformer,                      },
    { varHandleTransformer,          MustBeDone     },
    { handleRecompilationOps,        MustBeDone     },
    { unsafeFastPath                                },
@@ -605,7 +595,6 @@ static const OptimizationStrategy omrHotStrategyOpts[] =
    { OMR::globalCopyPropagation,                             },
    { OMR::loopCanonicalizationGroup,                         }, // canonicalize loops (improve fall throughs)
    { OMR::expressionsSimplification,                         },
-   { OMR::prefetchInsertionGroup,                            }, // created IL should not be moved
    { OMR::partialRedundancyEliminationGroup                  },
    { OMR::globalDeadStoreElimination,                        },
    { OMR::inductionVariableAnalysis,                         },
@@ -849,8 +838,6 @@ OMR::Optimizer::Optimizer(TR::Compilation *comp, TR::ResolvedMethodSymbol *metho
       new (comp->allocator()) TR::OptimizationManager(self(), TR_OSRExceptionEdgeRemoval::create, OMR::osrExceptionEdgeRemoval);
    _opts[OMR::regDepCopyRemoval] =
       new (comp->allocator()) TR::OptimizationManager(self(), TR::RegDepCopyRemoval::create, OMR::regDepCopyRemoval);
-   _opts[OMR::prefetchInsertion] =
-      new (comp->allocator()) TR::OptimizationManager(self(), TR_PrefetchInsertion::create, OMR::prefetchInsertion);
    _opts[OMR::stripMining] =
       new (comp->allocator()) TR::OptimizationManager(self(), TR_StripMiner::create, OMR::stripMining);
    _opts[OMR::fieldPrivatization] =
@@ -904,8 +891,6 @@ OMR::Optimizer::Optimizer(TR::Compilation *comp, TR::ResolvedMethodSymbol *metho
       new (comp->allocator()) TR::OptimizationManager(self(), NULL, OMR::veryExpensiveGlobalValuePropagationGroup, veryExpensiveGlobalValuePropagationOpts);
    _opts[OMR::loopSpecializerGroup] =
       new (comp->allocator()) TR::OptimizationManager(self(), NULL, OMR::loopSpecializerGroup, loopSpecializerOpts);
-   _opts[OMR::prefetchInsertionGroup] =
-      new (comp->allocator()) TR::OptimizationManager(self(), NULL, OMR::prefetchInsertionGroup, prefetchInsertionOpts);
    _opts[OMR::lateLocalGroup] =
       new (comp->allocator()) TR::OptimizationManager(self(), NULL, OMR::lateLocalGroup, lateLocalOpts);
    _opts[OMR::eachLocalAnalysisPassGroup] =
@@ -1555,6 +1540,13 @@ int32_t OMR::Optimizer::performOptimization(const OptimizationStrategy *optimiza
             }
          break;
          }
+      case IfVectorAPI:
+         {
+         if (comp()->getMethodSymbol()->hasVectorAPI() &&
+             !comp()->getOption(TR_DisableVectorAPIExpansion))
+            doThisOptimization = true;
+         }
+         break;
       case MarkLastRun:
          doThisOptimization = true;
          TR_ASSERT(optNum < OMR::numOpts ,"No current support for marking groups as last (optNum=%d,numOpt=%d\n",optNum,OMR::numOpts); //make sure we didn't mark groups
@@ -1815,7 +1807,7 @@ int32_t OMR::Optimizer::performOptimization(const OptimizationStrategy *optimiza
 
             LexicalTimer t("use defs (for globals definitely)", comp()->phaseTimer());
             TR::LexicalMemProfiler mp("use defs (for globals definitely)", comp()->phaseMemProfiler());
-            useDefInfo = createUseDefInfo(comp(), 
+            useDefInfo = createUseDefInfo(comp(),
                                    true, // requiresGlobals
                                    false,// prefersGlobals
                                    !manager->getDoesNotRequireLoadsAsDefsInUseDefs(),
@@ -1861,7 +1853,7 @@ int32_t OMR::Optimizer::performOptimization(const OptimizationStrategy *optimiza
 #endif
             LexicalTimer t("use defs (for globals possibly)", comp()->phaseTimer());
             TR::LexicalMemProfiler mp("use defs (for globals possibly)", comp()->phaseMemProfiler());
-            useDefInfo = createUseDefInfo(comp(), 
+            useDefInfo = createUseDefInfo(comp(),
                                                false, // requiresGlobals
                                                manager->getPrefersGlobalsUseDefInfo() || manager->getPrefersGlobalsValueNumbering(),
                                                !manager->getDoesNotRequireLoadsAsDefsInUseDefs(),
@@ -1988,7 +1980,6 @@ int32_t OMR::Optimizer::performOptimization(const OptimizationStrategy *optimiza
 #endif
       LexicalTimer t(manager->name(), comp()->phaseTimer());
       TR::LexicalMemProfiler mp(manager->name(), comp()->phaseMemProfiler());
-      comp()->setAllocatorName(manager->name());
 
       int32_t origSymRefCount = comp()->getSymRefCount();
       int32_t origNodeCount = comp()->getNodeCount();
@@ -2092,7 +2083,6 @@ int32_t OMR::Optimizer::performOptimization(const OptimizationStrategy *optimiza
       if (!isIlGenOpt())
          comp()->invalidateAliasRegion();
       breakForTesting(-optNum);
-      comp()->setAllocatorName(NULL);
 
       if (comp()->compilationShouldBeInterrupted((TR_CallingContext)optNum))
          {
@@ -2106,7 +2096,7 @@ int32_t OMR::Optimizer::performOptimization(const OptimizationStrategy *optimiza
            comp()->reportOptimizationPhaseForSnap(optNum);
 
 
-      if (comp()->getNodeCount() > origNodeCount)
+      if (comp()->getNodeCount() > unsigned(origNodeCount))
          {
          // If nodes were added, invalidate
          //
@@ -2361,7 +2351,6 @@ TR_Hotness OMR::Optimizer::checkMaxHotnessOfInlinedMethods( TR::Compilation *com
 bool OMR::Optimizer::checkNumberOfLoopsAndBasicBlocks( TR::Compilation *comp, TR_Structure *rootStructure)
    {
    TR::CFGNode *node;
-   int32_t index;
    _numBasicBlocksInMethod = 0;
    for (node = comp->getFlowGraph()->getFirstNode(); node; node = node->getNext())
       {
@@ -2435,7 +2424,6 @@ bool OMR::Optimizer::areNodesEquivalent(TR::Node *node1, TR::Node *node2,  TR::C
                   opCode1.getOpCodeValue() == TR::newarray ||
                   opCode1.getOpCodeValue() == TR::anewarray ||
                   opCode1.getOpCodeValue() == TR::multianewarray ||
-                  opCode1.getOpCodeValue() == TR::MergeNew ||
                   opCode1.getOpCodeValue() == TR::monent ||
                   opCode1.getOpCodeValue() == TR::monexit)
             {
@@ -2486,14 +2474,6 @@ bool OMR::Optimizer::areNodesEquivalent(TR::Node *node1, TR::Node *node2,  TR::C
                if (node1->getAddress() != node2->getAddress())
                   return false;
                break;
-            case TR::VectorInt64:
-            case TR::VectorInt32:
-            case TR::VectorInt16:
-            case TR::VectorInt8:
-            case TR::VectorDouble:
-               if (node1->getLiteralPoolOffset() != node2->getLiteralPoolOffset())
-                  return false;
-               break;
 #ifdef J9_PROJECT_SPECIFIC
             case TR::Aggregate:
                if (!areBCDAggrConstantNodesEquivalent(node1, node2, _comp))
@@ -2504,6 +2484,12 @@ bool OMR::Optimizer::areNodesEquivalent(TR::Node *node1, TR::Node *node2,  TR::C
                break;
             default:
                {
+               if (node1->getDataType().isVector())
+                  {
+                  if (node1->getLiteralPoolOffset() != node2->getLiteralPoolOffset())
+                     return false;
+                  break;
+                  }
 #ifdef J9_PROJECT_SPECIFIC
                if (node1->getDataType().isBCD())
                   {
@@ -2520,10 +2506,6 @@ bool OMR::Optimizer::areNodesEquivalent(TR::Node *node1, TR::Node *node2,  TR::C
             return false;
          }
 #ifdef J9_PROJECT_SPECIFIC
-      else if (node1->getType().isDFP() && node1->getOpCode().isModifyPrecision() && node1->getDFPPrecision() != node2->getDFPPrecision())
-         {
-         return false;
-         }
       else if (node1->getType().isBCD())
          {
          if (node1->isDecimalSizeAndShapeEquivalent(node2))
@@ -2624,23 +2606,6 @@ bool OMR::Optimizer::areNodesEquivalent(TR::Node *node1, TR::Node *node2,  TR::C
          for (int i = node1->getCaseIndexUpperBound()-1; i > 1; i--)
             {
             if (!(node1->getChild(i)->getBranchDestination()->getNode() == node2->getChild(i)->getBranchDestination()->getNode()))
-               return false;
-            }
-         }
-      else if (opCode1.getOpCodeValue() == TR::trtLookup)
-         {
-         if (node1->getCaseIndexUpperBound() != node2->getCaseIndexUpperBound())
-             return false;
-
-         for (int i = node1->getCaseIndexUpperBound()-1; i > 1; i--)
-            {
-            TR::Node *child1 = node1->getChild(i);
-            TR::Node *child2 = node2->getChild(i);
-            CASECONST_TYPE caseVal1 = child1->getCaseConstant();
-            CASECONST_TYPE caseVal2 = child2->getCaseConstant();
-
-            if (caseVal1 != caseVal2 ||
-                child1->getBranchDestination()->getNode() != child2->getBranchDestination()->getNode())
                return false;
             }
          }
@@ -2830,8 +2795,6 @@ OMR::Optimizer::valueNumberInfoBuildType()
    return PrePartitionVN;
    }
 
-
-inline
 TR::Optimizer *OMR::Optimizer::self()
    {
    return (static_cast<TR::Optimizer *>(this));

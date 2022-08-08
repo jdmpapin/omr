@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -24,9 +24,20 @@
  * $Revision: 1.64 $
  * $Date: 2012-12-05 05:27:54 $
  */
+#if defined(J9ZOS390)
+#define _UNIX03_SOURCE
+#endif
+
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#if defined(LINUX)
+#include <linux/magic.h>
+#include <sys/vfs.h>
+#include <sched.h>
+#include <fstream>
+#include <regex>
+#endif /* defined(LINUX) */
 #if defined(OMR_OS_WINDOWS)
 #include <direct.h>
 #endif /* defined(OMR_OS_WINDOWS) */
@@ -42,8 +53,7 @@
 #include <sys/resource.h> /* For RLIM_INFINITY */
 #endif /* !defined(OMR_OS_WINDOWS) */
 
-#if defined(J9ZOS390)
-#define _UNIX03_SOURCE
+#if defined(J9ZOS390) && !defined(OMR_EBCDIC)
 #include "atoe.h"
 #endif
 
@@ -850,36 +860,149 @@ TEST(PortSysinfoTest, sysinfo_test_sysinfo_set_limit_CORE_FILE)
 	reportTestExit(OMRPORTLIB, testName);
 }
 
-	/**
-	 *
-	 * Test omrsysinfo_test_sysinfo_set_limit and omrsysinfo_test_sysinfo_get_limit
-	 * with resourceID OMRPORT_RESOURCE_FILE_DESCRIPTORS
-	 *
-	 */
-	TEST(PortSysinfoTest, sysinfo_test_sysinfo_set_limit_FILE_DESCRIPTORS)
-	{
-		OMRPORT_ACCESS_FROM_OMRPORT(portTestEnv->getPortLibrary());
-		const char *testName = "omrsysinfo_test_sysinfo_set_limit_FILE_DESCRIPTORS";
-		uint32_t rc = OMRPORT_LIMIT_UNKNOWN;
-		uint64_t originalSoftLimit = 0;
-		uint64_t finalSoftLimit = 0;
-		uint64_t softSetToHardLimit = 0;
-		uint64_t originalHardLimit = 0;
-		uint64_t currentLimit = 0;
-		const uint64_t descriptorLimit = 256;
+/**
+ *
+ * Test omrsysinfo_test_sysinfo_set_limit and omrsysinfo_test_sysinfo_get_limit
+ * with resourceID OMRPORT_RESOURCE_FILE_DESCRIPTORS
+ *
+ */
+TEST(PortSysinfoTest, sysinfo_test_sysinfo_set_limit_FILE_DESCRIPTORS)
+{
+	OMRPORT_ACCESS_FROM_OMRPORT(portTestEnv->getPortLibrary());
+	const char *testName = "omrsysinfo_test_sysinfo_set_limit_FILE_DESCRIPTORS";
+	uint32_t rc = OMRPORT_LIMIT_UNKNOWN;
+	uint64_t originalSoftLimit = 0;
+	uint64_t softSetToHardLimit = 0;
+	uint64_t originalHardLimit = 0;
+	uint64_t currentLimit = 0;
+	const uint64_t descriptorLimit = 256;
 
-		reportTestEntry(OMRPORTLIB, testName);
+	reportTestEntry(OMRPORTLIB, testName);
 
-		/* save original soft limit */
-		rc = omrsysinfo_get_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS, &originalSoftLimit);
+	/* save original soft limit */
+	rc = omrsysinfo_get_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS, &originalSoftLimit);
+	if (OMRPORT_LIMIT_UNKNOWN == rc) {
+		outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_get_limit FAILED: OMRPORT_LIMIT_UNKNOWN\n");
+		reportTestExit(OMRPORTLIB, testName);
+		return;
+	}
+	portTestEnv->log(LEVEL_ERROR, "originalSoftLimit=%llu\n", originalSoftLimit);
+
+	rc = omrsysinfo_set_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS, descriptorLimit);
+	if (0 != rc) {
+		outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_set_limit FAILED rc=%d\n", rc);
+		reportTestExit(OMRPORTLIB, testName);
+		return;
+	}
+
+	rc = omrsysinfo_get_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS, &currentLimit);
+	if (OMRPORT_LIMIT_UNKNOWN == rc) {
+		outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_get_limit FAILED: OMRPORT_LIMIT_UNKNOWN\n");
+		reportTestExit(OMRPORTLIB, testName);
+		return;
+	}
+	if (descriptorLimit == currentLimit) {
+		portTestEnv->log("omrsysinfo_set_limit set FILE_DESCRIPTORS soft limit successful\n");
+	} else {
+		outputErrorMessage(PORTTEST_ERROR_ARGS,
+				"omrsysinfo_set_limit set FILE_DESCRIPTORS soft limit FAILED originalSoftLimit=%lld Expected=%lld actual==%lld\n",
+				originalSoftLimit, descriptorLimit, currentLimit);
+		reportTestExit(OMRPORTLIB, testName);
+		return;
+	}
+
+	/* save original hard limit */
+	rc = omrsysinfo_get_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS | OMRPORT_LIMIT_HARD, &originalHardLimit);
+	if (OMRPORT_LIMIT_UNKNOWN == rc) {
+		outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_get_limit FAILED: OMRPORT_LIMIT_UNKNOWN\n");
+		reportTestExit(OMRPORTLIB, testName);
+		return;
+	}
+	portTestEnv->log(LEVEL_ERROR, "originalHardLimit=%llu\n", originalHardLimit);
+
+	/* set soft limit to hard limit */
+	rc = omrsysinfo_set_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS, originalHardLimit);
+	if (0 != rc) {
+		outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_set_limit soft = hard FAILED rc=%d\n", rc);
+		reportTestExit(OMRPORTLIB, testName);
+		return;
+	}
+
+	/* get new soft limit */
+	rc = omrsysinfo_get_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS, &softSetToHardLimit);
+	if (OMRPORT_LIMIT_UNKNOWN == rc) {
+		outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_get_limit FAILED: OMRPORT_LIMIT_UNKNOWN\n");
+		reportTestExit(OMRPORTLIB, testName);
+		return;
+	}
+	portTestEnv->log(LEVEL_ERROR, "soft set to hard limit=%llu\n", softSetToHardLimit);
+
+	/* set soft limit to old value */
+	rc = omrsysinfo_set_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS, originalSoftLimit);
+	if (0 != rc) {
+		outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_set_limit reset soft FAILED rc=%d\n", rc);
+		reportTestExit(OMRPORTLIB, testName);
+		return;
+	}
+
+	rc = omrsysinfo_get_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS | OMRPORT_LIMIT_HARD, &currentLimit);
+	if (currentLimit != originalHardLimit) {
+		outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_get_limit FAILED: hard limit changed\n");
+		reportTestExit(OMRPORTLIB, testName);
+		return;
+	}
+
+	/* lowering the hard limit is irreversible unless privileged */
+	if (0 != geteuid()) { /* normal user */
+		/* setting the hard limit from unlimited to a finite value has unpredictable results:
+			* the actual value may be much smaller than requested.
+			* In that case, just try setting it to its current value (softSetToHardLimit) or a value slightly lower.
+			* Ensure that we don't try to set the hard limit to a value less than the current soft limit
+			* (i.e. originalSoftLimit).
+			*/
+		uint64_t newHardLimit =  ((OMRPORT_LIMIT_UNLIMITED == rc) || (originalSoftLimit == softSetToHardLimit))
+				? softSetToHardLimit: softSetToHardLimit - 1;
+
+		rc = omrsysinfo_set_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS | OMRPORT_LIMIT_HARD, newHardLimit);
+		if (0 != rc) {
+			outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_set_limit set hard limit=%lld FAILED rc=%d\n", rc, newHardLimit);
+			reportTestExit(OMRPORTLIB, testName);
+			return;
+		}
+
+		rc = omrsysinfo_get_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS | OMRPORT_LIMIT_HARD, &currentLimit);
 		if (OMRPORT_LIMIT_UNKNOWN == rc) {
 			outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_get_limit FAILED: OMRPORT_LIMIT_UNKNOWN\n");
 			reportTestExit(OMRPORTLIB, testName);
 			return;
 		}
-		portTestEnv->log(LEVEL_ERROR, "originalSoftLimit=%llu\n", originalSoftLimit);
-		finalSoftLimit = originalSoftLimit;
+		if (newHardLimit == currentLimit) {
+			portTestEnv->log("omrsysinfo_set_limit set FILE_DESCRIPTORS hard limit successful\n");
+		} else {
+			outputErrorMessage(PORTTEST_ERROR_ARGS,
+					"omrsysinfo_set_limit set FILE_DESCRIPTORS hard limit FAILED originalHardLimit=%lld Expected=%lld actual==%lld\n",
+					originalHardLimit, newHardLimit, currentLimit);
+			reportTestExit(OMRPORTLIB, testName);
+			return;
+		}
 
+		/* Verify that soft limit is unchanged. */
+		rc = omrsysinfo_get_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS, &currentLimit);
+		if (originalSoftLimit != currentLimit) {
+			outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_get_limit FAILED: soft limit changed\n");
+			reportTestExit(OMRPORTLIB, testName);
+			return;
+		}
+	} else { /* running as root */
+		/* Try setting hard limit below soft limit. This should fail even for root user. */
+		rc = omrsysinfo_set_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS | OMRPORT_LIMIT_HARD, descriptorLimit);
+		if ((0 == rc) && (originalSoftLimit > descriptorLimit)) {
+			outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_set_limit lowered hard limit below soft limit\n");
+			reportTestExit(OMRPORTLIB, testName);
+			return;
+		}
+
+		/* First lower soft limit. */
 		rc = omrsysinfo_set_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS, descriptorLimit);
 		if (0 != rc) {
 			outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_set_limit FAILED rc=%d\n", rc);
@@ -887,139 +1010,45 @@ TEST(PortSysinfoTest, sysinfo_test_sysinfo_set_limit_CORE_FILE)
 			return;
 		}
 
-		rc = omrsysinfo_get_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS, &currentLimit);
+		/* Lower hard limit to soft limit. */
+		rc = omrsysinfo_set_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS | OMRPORT_LIMIT_HARD, descriptorLimit);
+		if (0 != rc) {
+			outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_set_limit FAILED rc=%d\n", rc);
+			reportTestExit(OMRPORTLIB, testName);
+			return;
+		}
+
+		rc = omrsysinfo_get_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS | OMRPORT_LIMIT_HARD, &currentLimit);
 		if (OMRPORT_LIMIT_UNKNOWN == rc) {
 			outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_get_limit FAILED: OMRPORT_LIMIT_UNKNOWN\n");
 			reportTestExit(OMRPORTLIB, testName);
 			return;
 		}
 		if (descriptorLimit == currentLimit) {
-			portTestEnv->log("omrsysinfo_set_limit set FILE_DESCRIPTORS soft limit successful\n");
+			portTestEnv->log("omrsysinfo_set_limit set FILE_DESCRIPTORS hard limit successful\n");
 		} else {
 			outputErrorMessage(PORTTEST_ERROR_ARGS,
-					"omrsysinfo_set_limit set FILE_DESCRIPTORS soft limit FAILED originalSoftLimit=%lld Expected=%lld actual==%lld\n",
-					originalSoftLimit, descriptorLimit, currentLimit);
+				"omrsysinfo_set_limit set FILE_DESCRIPTORS hard max FAILED. Expected=%lld actual=%lld\n",
+				(descriptorLimit + 1), currentLimit);
 			reportTestExit(OMRPORTLIB, testName);
 			return;
 		}
 
-		/* save original hard limit */
-		rc = omrsysinfo_get_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS | OMRPORT_LIMIT_HARD, &originalHardLimit);
-		if (OMRPORT_LIMIT_UNKNOWN == rc) {
-			outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_get_limit FAILED: OMRPORT_LIMIT_UNKNOWN\n");
-			reportTestExit(OMRPORTLIB, testName);
-			return;
-		}
-		portTestEnv->log(LEVEL_ERROR, "originalHardLimit=%llu\n", originalHardLimit);
-
-		/* set soft limit to hard limit */
-		rc = omrsysinfo_set_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS, originalHardLimit);
+		/* restore original hard limit */
+		rc = omrsysinfo_set_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS | OMRPORT_LIMIT_HARD, originalHardLimit);
 		if (0 != rc) {
-			outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_set_limit soft = hard FAILED rc=%d\n", rc);
+			outputErrorMessage(PORTTEST_ERROR_ARGS, "restoring the original hard limit FAILED rc=%d\n", rc);
 			reportTestExit(OMRPORTLIB, testName);
 			return;
 		}
 
-		/* get new soft limit */
-		rc = omrsysinfo_get_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS, &softSetToHardLimit);
-		if (OMRPORT_LIMIT_UNKNOWN == rc) {
-			outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_get_limit FAILED: OMRPORT_LIMIT_UNKNOWN\n");
-			reportTestExit(OMRPORTLIB, testName);
-			return;
-		}
-		portTestEnv->log(LEVEL_ERROR, "soft set to hard limit=%llu\n", softSetToHardLimit);
-
-		/* set soft limit to old value */
+		/* Restore original soft limit. */
 		rc = omrsysinfo_set_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS, originalSoftLimit);
 		if (0 != rc) {
-			outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_set_limit reset soft FAILED rc=%d\n", rc);
+			outputErrorMessage(PORTTEST_ERROR_ARGS, "restoring the original soft limit FAILED rc=%d\n", rc);
 			reportTestExit(OMRPORTLIB, testName);
 			return;
 		}
-
-		rc = omrsysinfo_get_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS | OMRPORT_LIMIT_HARD, &currentLimit);
-		if (currentLimit != originalHardLimit) {
-			outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_get_limit FAILED: hard limit changed\n");
-			reportTestExit(OMRPORTLIB, testName);
-			return;
-		}
-
-		/* lowering the hard limit is irreversible unless privileged */
-		if (0 != geteuid()) { /* normal user */
-			/* setting the hard limit from unlimited to a finite value has unpredictable results:
-			 * the actual value may be much smaller than requested.
-			 * In that case, just try setting it to its current value (softSetToHardLimit) or a value slightly lower.
-			 * Ensure that we don't try to set the hard limit to a value less than the current soft limit
-			 * (i.e. originalSoftLimit).
-			 */
-			uint64_t newHardLimit =  ((OMRPORT_LIMIT_UNLIMITED == rc) || (originalSoftLimit == softSetToHardLimit))
-					? softSetToHardLimit: softSetToHardLimit - 1;
-
-			rc = omrsysinfo_set_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS | OMRPORT_LIMIT_HARD, newHardLimit);
-			if (0 != rc) {
-				outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_set_limit set hard limit=%lld FAILED rc=%d\n", rc, newHardLimit);
-				reportTestExit(OMRPORTLIB, testName);
-				return;
-			}
-
-			rc = omrsysinfo_get_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS | OMRPORT_LIMIT_HARD, &currentLimit);
-			if (OMRPORT_LIMIT_UNKNOWN == rc) {
-				outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_get_limit FAILED: OMRPORT_LIMIT_UNKNOWN\n");
-				reportTestExit(OMRPORTLIB, testName);
-				return;
-			}
-			if (newHardLimit == currentLimit) {
-				portTestEnv->log("omrsysinfo_set_limit set FILE_DESCRIPTORS hard limit successful\n");
-			} else {
-				outputErrorMessage(PORTTEST_ERROR_ARGS,
-						"omrsysinfo_set_limit set FILE_DESCRIPTORS hard limit FAILED originalHardLimit=%lld Expected=%lld actual==%lld\n",
-						originalHardLimit, newHardLimit, currentLimit);
-				reportTestExit(OMRPORTLIB, testName);
-				return;
-			}
-			finalSoftLimit = (originalSoftLimit > newHardLimit)? newHardLimit: originalSoftLimit;
-		} else { /* running as root */
-			const uint64_t newHardLimit = 257;
-			rc = omrsysinfo_set_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS | OMRPORT_LIMIT_HARD, newHardLimit);
-			if (0 != rc) {
-				outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_set_limit FAILED rc=%d\n", rc);
-				reportTestExit(OMRPORTLIB, testName);
-				return;
-			}
-
-			rc = omrsysinfo_get_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS | OMRPORT_LIMIT_HARD, &currentLimit);
-			if (OMRPORT_LIMIT_UNKNOWN == rc) {
-				outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_get_limit FAILED: OMRPORT_LIMIT_UNKNOWN\n");
-				reportTestExit(OMRPORTLIB, testName);
-				return;
-			}
-			if (newHardLimit == currentLimit) {
-				portTestEnv->log("omrsysinfo_set_limit set FILE_DESCRIPTORS hard limit successful\n");
-			} else {
-				outputErrorMessage(PORTTEST_ERROR_ARGS,
-					"omrsysinfo_set_limit set FILE_DESCRIPTORS hard max FAILED. Expected=%lld actual=%lld\n",
-					(descriptorLimit + 1), currentLimit);
-				reportTestExit(OMRPORTLIB, testName);
-				return;
-			}
-
-			/* restore original hard limit */
-			rc = omrsysinfo_set_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS | OMRPORT_LIMIT_HARD, originalHardLimit);
-			if (0 != rc) {
-				outputErrorMessage(PORTTEST_ERROR_ARGS, "restoring the original hard limit FAILED rc=%d\n", rc);
-				reportTestExit(OMRPORTLIB, testName);
-				return;
-			}
-		}
-
-	/* restore original soft limit
-	   The soft limit is always <= the hard limit. If the hard limit is lowered to below the soft limit and
-	   then raised again the soft limit isn't automatically raised. */
-	rc = omrsysinfo_set_limit(OMRPORT_RESOURCE_FILE_DESCRIPTORS, finalSoftLimit);
-	if (0 != rc) {
-		outputErrorMessage(PORTTEST_ERROR_ARGS, "restoring the original soft limit FAILED rc=%d\n", rc);
-		reportTestExit(OMRPORTLIB, testName);
-		return;
 	}
 
 	reportTestExit(OMRPORTLIB, testName);
@@ -1769,11 +1798,11 @@ TEST(PortSysinfoTest, sysinfo_test_get_tmp3)
 	const char *utf8 = "/tmp/test/";
 	const char *utf8_file = "/tmp/test/test.txt";
 	char *origEnvRef = getenv("TMPDIR");
-#if defined(J9ZOS390)
+#if defined(J9ZOS390) && !defined(OMR_EBCDIC)
 	char *envVarInEbcdic = a2e_string("TMPDIR");
 	char *origEnvInEbcdic = NULL;
 	char *utf8InEbcdic = a2e_string(utf8);
-#endif /* defined(J9ZOS390) */
+#endif /* defined(J9ZOS390) && !defined(OMR_EBCDIC) */
 
 	reportTestEntry(OMRPORTLIB, testName);
 
@@ -1781,17 +1810,17 @@ TEST(PortSysinfoTest, sysinfo_test_get_tmp3)
 		origEnv = (char *)omrmem_allocate_memory(strlen(origEnvRef) + 1, OMRMEM_CATEGORY_PORT_LIBRARY);
 		if (NULL != origEnv) {
 			strcpy(origEnv, origEnvRef);
-#if defined(J9ZOS390)
+#if defined(J9ZOS390) && !defined(OMR_EBCDIC)
 			origEnvInEbcdic = a2e_string(origEnv);
-#endif /* defined(J9ZOS390) */
+#endif /* defined(J9ZOS390) && !defined(OMR_EBCDIC) */
 		}
 	}
 
-#if defined(J9ZOS390)
+#if defined(J9ZOS390) && !defined(OMR_EBCDIC)
 	rc = setenv(envVarInEbcdic, utf8InEbcdic, 1);
-#else /* defined(J9ZOS390) */
+#else /* defined(J9ZOS390)  && !defined(OMR_EBCDIC) */
 	rc = setenv("TMPDIR", (const char *)utf8, 1);
-#endif /* defined(J9ZOS390) */
+#endif /* defined(J9ZOS390)  && !defined(OMR_EBCDIC) */
 
 #endif /* defined(OMR_OS_WINDOWS) */
 
@@ -1845,21 +1874,21 @@ TEST(PortSysinfoTest, sysinfo_test_get_tmp3)
 	if (NULL != origEnv) {
 #if defined(OMR_OS_WINDOWS)
 		_wputenv_s(L"TMP", origEnv);
-#elif defined(J9ZOS390) /* defined(OMR_OS_WINDOWS) */
+#elif defined(J9ZOS390) && !defined(OMR_EBCDIC)  /* defined(OMR_OS_WINDOWS) */
 		setenv(envVarInEbcdic, origEnvInEbcdic, 1);
-#else /* defined(J9ZOS390) */
+#else /* defined(J9ZOS390) && !defined(OMR_EBCDIC) */
 		setenv("TMPDIR", origEnv, 1);
 #endif /* defined(OMR_OS_WINDOWS) */
 		omrmem_free_memory(origEnv);
 	} else {
 #if defined(OMR_OS_WINDOWS)
 		_wputenv_s(L"TMP", L"");
-#elif !defined(J9ZOS390) /* defined(OMR_OS_WINDOWS) */
+#elif !defined(J9ZOS390) && !defined(OMR_EBCDIC) /* defined(OMR_OS_WINDOWS) */
 		unsetenv("TMPDIR");
 #endif /* defined(OMR_OS_WINDOWS) */
 	}
 
-#if defined(J9ZOS390)
+#if defined(J9ZOS390) && !defined(OMR_EBCDIC)
 	if (NULL != envVarInEbcdic) {
 		free(envVarInEbcdic);
 	}
@@ -1869,7 +1898,7 @@ TEST(PortSysinfoTest, sysinfo_test_get_tmp3)
 	if (NULL != utf8InEbcdic) {
 		free(utf8InEbcdic);
 	}
-#endif /* defined(J9ZOS390) */
+#endif /* defined(J9ZOS390) && !defined(OMR_EBCDIC) */
 
 	if (NULL != buffer) {
 		omrmem_free_memory(buffer);
@@ -1891,11 +1920,11 @@ TEST(PortSysinfoTest, sysinfo_test_get_tmp4)
 	char *oldTmpDir = NULL;
 	char *oldTmpDirValue = NULL;
 	const char *modifiedTmpDir = "omrsysinfo_test_get_tmp4_dir";
-#if defined(J9ZOS390)
+#if defined(J9ZOS390) && !defined(OMR_EBCDIC)
 	char *envVarInEbcdic = a2e_string(envVar);
 	char *oldTmpDirValueInEbcdic = NULL;
 	char *modifiedTmpDirInEbcdic = a2e_string(modifiedTmpDir);
-#endif /* defined(J9ZOS390) */
+#endif /* defined(J9ZOS390) && !defined(OMR_EBCDIC) */
 
 	reportTestEntry(OMRPORTLIB, testName);
 
@@ -1904,17 +1933,17 @@ TEST(PortSysinfoTest, sysinfo_test_get_tmp4)
 		oldTmpDirValue = (char *)omrmem_allocate_memory(strlen(oldTmpDir) + 1, OMRMEM_CATEGORY_PORT_LIBRARY);
 		if (NULL != oldTmpDirValue) {
 			strcpy(oldTmpDirValue, oldTmpDir);
-#if defined(J9ZOS390)
+#if defined(J9ZOS390) && !defined(OMR_EBCDIC)
 			oldTmpDirValueInEbcdic = a2e_string(oldTmpDirValue);
-#endif /* defined(J9ZOS390) */
+#endif /* defined(J9ZOS390) && !defined(OMR_EBCDIC) */
 		}
 	}
 
-#if defined(J9ZOS390)
+#if defined(J9ZOS390) && !defined(OMR_EBCDIC)
 	rc = setenv(envVarInEbcdic, modifiedTmpDirInEbcdic, 1);
-#else /* defined(J9ZOS390) */
+#else /* defined(J9ZOS390) && !defined(OMR_EBCDIC) */
 	rc = setenv(envVar, modifiedTmpDir, 1);
-#endif /* defined(J9ZOS390) */
+#endif /* defined(J9ZOS390) && !defined(OMR_EBCDIC) */
 	if (0 != rc) {
 		outputErrorMessage(PORTTEST_ERROR_ARGS, "error in updating environment variable TMPDIR, rc: %zd\n", rc);
 	}
@@ -1960,7 +1989,7 @@ TEST(PortSysinfoTest, sysinfo_test_get_tmp4)
 	}
 
 	/* restore TMPDIR */
-#if defined(J9ZOS390)
+#if defined(J9ZOS390) && !defined(OMR_EBCDIC)
 	if (NULL != oldTmpDirValue) {
 		setenv(envVarInEbcdic, oldTmpDirValueInEbcdic, 1);
 		omrmem_free_memory(oldTmpDirValue);
@@ -1974,14 +2003,14 @@ TEST(PortSysinfoTest, sysinfo_test_get_tmp4)
 	if (NULL != modifiedTmpDirInEbcdic) {
 		free(modifiedTmpDirInEbcdic);
 	}
-#else /* defined(J9ZOS390) */
+#else /* defined(J9ZOS390) && !defined(OMR_EBCDIC) */
 	if (NULL != oldTmpDirValue) {
 		setenv(envVar, oldTmpDirValue, 1);
 		omrmem_free_memory(oldTmpDirValue);
 	} else {
 		unsetenv(envVar);
 	}
-#endif /* defined(J9ZOS390) */
+#endif /* defined(J9ZOS390) && !defined(OMR_EBCDIC) */
 
 	reportTestExit(OMRPORTLIB, testName);
 }
@@ -2340,29 +2369,373 @@ exit:
 	return;
 }
 
+/* Cgroup tests depend on std::regex, which was fully implemented in gcc-4.9. Disable these tests if the gcc
+ * version is lower than 4.9. Ref: https://gcc.gnu.org/onlinedocs/cpp/Common-Predefined-Macros.html
+ */
+#if !defined(LINUX) || (GTEST_GCC_VER_ >= 40900)
+class CgroupTest : public ::testing::Test {
+protected:
+#if defined(LINUX) && !defined(OMRZTPF)
+	static bool isRunningInContainer;
+	static bool isV1Available;
+	static bool isV2Available;
+	static std::string memCgroup;
+	static std::string cpuCgroup;
+	static std::string cpusetCgroup;
+	const static std::map<std::string, uint64_t> supportedSubsystems;
+	constexpr static char CGROUP_MOUNT_POINT[] = "/sys/fs/cgroup";
+	static uint64_t available;
+	static uint64_t memLimit;
+	static std::string memLimitString;
+	static int64_t cpuQuota;
+	static std::string cpuQuotaString;
+	static uint64_t cpuPeriod;
+	static bool setUpSucceeded;
+
+	/* Initialize static vars. */
+	static void
+	SetUpTestCase()
+	{
+		char *omrRunningInDocker = getenv("OMR_RUNNING_IN_DOCKER");
+		if ((NULL != omrRunningInDocker) && (0 == strcmp(omrRunningInDocker, "1"))) {
+			isRunningInContainer = true;
+		}
+
+		isV1Available = isCgroupV1Available();
+		isV2Available = isCgroupV2Available();
+		ASSERT_TRUE(isV1Available != isV2Available);
+
+		std::string path(std::string("/proc/") + std::to_string(getpid()) + std::string("/cgroup"));
+		std::ifstream cgroupFile(path);
+		std::string line;
+		ASSERT_TRUE(cgroupFile.is_open()) << "Failed to open file: " << path;
+		if (isV1Available) {
+			while ((bool)std::getline(cgroupFile, line)) {
+				std::regex v1Regex(R"(^[0-9]+:([^:]*):(.+)$)");
+				std::smatch sm;
+
+				portTestEnv->log(LEVEL_ERROR, "/proc/self/cgroup line:\n  %s\n", line.c_str());
+				ASSERT_TRUE(std::regex_match(line, sm, v1Regex));
+				ASSERT_EQ(sm[2].str().at(0), '/');
+				if (0 != sm[1].length()) {
+					std::stringstream ss(sm[1].str());
+					std::vector<std::string> subsystems;
+
+					while (ss.good()) {
+						std::string subsystem;
+						std::getline(ss, subsystem, ',');
+						subsystems.push_back(subsystem);
+					}
+					for (auto s : subsystems) {
+						auto it = supportedSubsystems.find(s);
+						if (supportedSubsystems.end() != it) {
+							available |= it->second;
+							switch(it->second) {
+							case OMR_CGROUP_SUBSYSTEM_CPU:
+								if (isRunningInContainer) {
+									cpuCgroup = "/";
+								} else {
+									cpuCgroup = sm[2].str();
+								}
+								break;
+							case OMR_CGROUP_SUBSYSTEM_MEMORY:
+								if (isRunningInContainer) {
+									memCgroup = "/";
+								} else {
+									memCgroup = sm[2].str();
+								}
+								break;
+							case OMR_CGROUP_SUBSYSTEM_CPUSET:
+								if (isRunningInContainer) {
+									cpusetCgroup = "/";
+								} else {
+									cpusetCgroup = sm[2].str();
+								}
+								break;
+							default:
+								FAIL() << "Unsupported subsystem";
+							}
+						}
+					}
+				}
+			}
+
+			if (OMR_ARE_ANY_BITS_SET(available, OMR_CGROUP_SUBSYSTEM_MEMORY)) {
+				std::ifstream memLimitFile(CGROUP_MOUNT_POINT + std::string("/memory") + memCgroup + "/memory.limit_in_bytes");
+				ASSERT_TRUE(memLimitFile >> memLimit);
+			}
+
+			if (OMR_ARE_ANY_BITS_SET(available, OMR_CGROUP_SUBSYSTEM_CPU)) {
+				std::ifstream cpuQuotaFile(CGROUP_MOUNT_POINT + std::string("/cpu") + cpuCgroup + "/cpu.cfs_quota_us");
+				ASSERT_TRUE(cpuQuotaFile >> cpuQuota);
+				std::ifstream cpuPeriodFile(CGROUP_MOUNT_POINT + std::string("/cpu") + cpuCgroup + "/cpu.cfs_period_us");
+				ASSERT_TRUE(cpuPeriodFile >> cpuPeriod);
+			}
+		} else {
+			ASSERT_TRUE((bool)std::getline(cgroupFile, line));
+			std::regex v2Regex(R"(^0::(.+)$)");
+			std::smatch sm;
+
+			portTestEnv->log(LEVEL_ERROR, "/proc/self/cgroup line:\n  %s\n", line.c_str());
+			ASSERT_TRUE(std::regex_match(line, sm, v2Regex));
+
+			cpuCgroup = sm[1].str();
+			memCgroup = cpuCgroup;
+			cpusetCgroup = cpuCgroup;
+			ASSERT_EQ(cpuCgroup.at(0), '/');
+			std::ifstream controllerFile(CGROUP_MOUNT_POINT + cpuCgroup + "/cgroup.controllers");
+			std::string s;
+			while (controllerFile >> s) {
+				auto it = supportedSubsystems.find(s);
+				if (supportedSubsystems.end() != it) {
+					available |= it->second;
+				}
+			}
+
+			if (OMR_ARE_ANY_BITS_SET(available, OMR_CGROUP_SUBSYSTEM_MEMORY)) {
+				std::ifstream memLimitFile(CGROUP_MOUNT_POINT + memCgroup + "/memory.max");
+				ASSERT_TRUE(memLimitFile >> memLimitString);
+			}
+
+			if (OMR_ARE_ANY_BITS_SET(available, OMR_CGROUP_SUBSYSTEM_CPU)) {
+				std::ifstream cpuMaxFile(CGROUP_MOUNT_POINT + cpuCgroup + "/cpu.max");
+				ASSERT_TRUE(cpuMaxFile >> cpuQuotaString);
+				ASSERT_TRUE(cpuMaxFile >> cpuPeriod);
+			}
+		}
+		setUpSucceeded = true;
+	}
+
+	void
+	SetUp() override
+	{
+		/* Skip CgroupTests if setup failed. */
+		ASSERT_TRUE(setUpSucceeded);
+	}
+
+	static bool
+	isCgroupV1Available(void)
+	{
+		struct statfs buf = {0};
+		int32_t rc = 0;
+		bool result = true;
+
+		/* If tmpfs is mounted on /sys/fs/cgroup, then it indicates cgroup v1 system is available */
+		rc = statfs("/sys/fs/cgroup", &buf);
+		if (0 != rc) {
+			result = false;
+		} else if (TMPFS_MAGIC != buf.f_type) {
+			result = false;
+		}
+
+		return result;
+	}
+
+	static bool
+	isCgroupV2Available(void)
+	{
+		bool result = false;
+
+		/* If the cgroup.controllers file exists at the root cgroup, then v2 is available. */
+		if (0 == access("/sys/fs/cgroup/cgroup.controllers", F_OK)) {
+			result = true;
+		}
+
+		return result;
+	}
+#endif /* defined(LINUX) && !defined(OMRZTPF) */
+};
+
+#if defined(LINUX) && !defined(OMRZTPF)
+bool CgroupTest::isRunningInContainer = false;
+bool CgroupTest::isV1Available = false;
+bool CgroupTest::isV2Available = false;
+std::string CgroupTest::memCgroup;
+std::string CgroupTest::cpuCgroup;
+std::string CgroupTest::cpusetCgroup;
+const std::map<std::string, uint64_t> CgroupTest::supportedSubsystems = {
+	{"cpu", OMR_CGROUP_SUBSYSTEM_CPU},
+	{"memory", OMR_CGROUP_SUBSYSTEM_MEMORY},
+	{"cpuset", OMR_CGROUP_SUBSYSTEM_CPUSET}
+};
+constexpr char CgroupTest::CGROUP_MOUNT_POINT[];
+uint64_t CgroupTest::available = 0;
+uint64_t CgroupTest::memLimit = 0;
+std::string CgroupTest::memLimitString;
+int64_t CgroupTest::cpuQuota = 0;
+std::string CgroupTest::cpuQuotaString;
+uint64_t CgroupTest::cpuPeriod = 0;
+bool CgroupTest::setUpSucceeded = false;
+#endif /* defined(LINUX) && !defined(OMRZTPF) */
+
+/**
+ * Test omrsysinfo_cgroup_is_system_available.
+ */
+TEST(PortSysinfoTest, sysinfo_cgroup_is_system_available)
+{
+	OMRPORT_ACCESS_FROM_OMRPORT(portTestEnv->getPortLibrary());
+	const char *testName = "omrsysinfo_cgroup_is_system_available";
+	BOOLEAN result = FALSE;
+
+	reportTestEntry(OMRPORTLIB, testName);
+
+	result = omrsysinfo_cgroup_is_system_available();
+
+#if defined(LINUX) && !defined(OMRZTPF)
+	if (FALSE == result) {
+		outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_cgroup_is_system_available returned FALSE on Linux\n");
+	}
+#else /* defined(LINUX) && !defined(OMRZTPF) */
+	if (TRUE == result) {
+		outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_cgroup_is_system_available returned TRUE on non-Linux\n");
+	}
+#endif /* defined(LINUX) && !defined(OMRZTPF) */
+
+	reportTestExit(OMRPORTLIB, testName);
+	return;
+}
+
+/**
+ * Test omrsysinfo_cgroup_get_available_subsystems.
+ */
+TEST_F(CgroupTest, sysinfo_cgroup_get_available_subsystems)
+{
+	OMRPORT_ACCESS_FROM_OMRPORT(portTestEnv->getPortLibrary());
+	const char *testName = "omrsysinfo_cgroup_get_available_subsystems";
+	uint64_t available = 0;
+
+	reportTestEntry(OMRPORTLIB, testName);
+
+	available = omrsysinfo_cgroup_get_available_subsystems();
+
+#if defined(LINUX) && !defined(OMRZTPF)
+	ASSERT_EQ(available, CgroupTest::available);
+#else /* defined(LINUX) && !defined(OMRZTPF) */
+	if (0 != available) {
+		outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_cgroup_get_available_subsystems returned nonzero on non-Linux\n");
+	}
+#endif /* defined(LINUX) && !defined(OMRZTPF) */
+
+	reportTestExit(OMRPORTLIB, testName);
+	return;
+}
+
+/**
+ * Test omrsysinfo_cgroup_are_subsystems_available.
+ */
+TEST_F(CgroupTest, sysinfo_cgroup_are_subsystems_available)
+{
+	OMRPORT_ACCESS_FROM_OMRPORT(portTestEnv->getPortLibrary());
+	const char *testName = "omrsysinfo_cgroup_are_subsystems_available";
+
+	reportTestEntry(OMRPORTLIB, testName);
+
+#if defined(LINUX) && !defined(OMRZTPF)
+	EXPECT_EQ(omrsysinfo_cgroup_are_subsystems_available(OMR_CGROUP_SUBSYSTEM_CPU), CgroupTest::available & OMR_CGROUP_SUBSYSTEM_CPU);
+	EXPECT_EQ(omrsysinfo_cgroup_are_subsystems_available(OMR_CGROUP_SUBSYSTEM_MEMORY), CgroupTest::available & OMR_CGROUP_SUBSYSTEM_MEMORY);
+	EXPECT_EQ(omrsysinfo_cgroup_are_subsystems_available(OMR_CGROUP_SUBSYSTEM_CPUSET), CgroupTest::available & OMR_CGROUP_SUBSYSTEM_CPUSET);
+
+	EXPECT_EQ(
+			omrsysinfo_cgroup_are_subsystems_available(OMR_CGROUP_SUBSYSTEM_CPU | OMR_CGROUP_SUBSYSTEM_MEMORY),
+			CgroupTest::available & (OMR_CGROUP_SUBSYSTEM_CPU | OMR_CGROUP_SUBSYSTEM_MEMORY));
+	EXPECT_EQ(
+			omrsysinfo_cgroup_are_subsystems_available(OMR_CGROUP_SUBSYSTEM_MEMORY | OMR_CGROUP_SUBSYSTEM_CPUSET),
+			CgroupTest::available & (OMR_CGROUP_SUBSYSTEM_MEMORY | OMR_CGROUP_SUBSYSTEM_CPUSET));
+	EXPECT_EQ(
+			omrsysinfo_cgroup_are_subsystems_available(OMR_CGROUP_SUBSYSTEM_CPUSET | OMR_CGROUP_SUBSYSTEM_CPU),
+			CgroupTest::available & (OMR_CGROUP_SUBSYSTEM_CPUSET | OMR_CGROUP_SUBSYSTEM_CPU));
+
+	EXPECT_EQ(
+			omrsysinfo_cgroup_are_subsystems_available(OMR_CGROUP_SUBSYSTEM_ALL),
+			CgroupTest::available & (OMR_CGROUP_SUBSYSTEM_ALL));
+#else /* defined(LINUX) && !defined(OMRZTPF) */
+	if (0 != omrsysinfo_cgroup_are_subsystems_available(OMR_CGROUP_SUBSYSTEM_ALL)) {
+		outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_cgroup_are_subsystems_available returned nonzero on non-Linux\n");
+	}
+#endif /* defined(LINUX) && !defined(OMRZTPF) */
+
+	reportTestExit(OMRPORTLIB, testName);
+	return;
+}
+
+/**
+ * Test omrsysinfo_cgroup_get_enabled_subsystems, omrsysinfo_cgroup_enable_subsystems,
+ * and omrsysinfo_cgroup_are_subsystems_enabled.
+ */
+TEST_F(CgroupTest, sysinfo_cgroup_enable)
+{
+	OMRPORT_ACCESS_FROM_OMRPORT(portTestEnv->getPortLibrary());
+	const char *testName = "sysinfo_cgroup_enable";
+
+	reportTestEntry(OMRPORTLIB, testName);
+
+#if defined(LINUX) && !defined(OMRZTPF)
+	uint64_t enabled = 0;
+	/* Clear enabled subsystems. */
+	ASSERT_EQ(omrsysinfo_cgroup_enable_subsystems(0), (uint64_t)0);
+	ASSERT_EQ(omrsysinfo_cgroup_get_enabled_subsystems(), (uint64_t)0);
+	ASSERT_EQ(
+			omrsysinfo_cgroup_are_subsystems_enabled(OMR_CGROUP_SUBSYSTEM_ALL),
+			(uint64_t)0);
+
+	enabled = CgroupTest::available & OMR_CGROUP_SUBSYSTEM_CPU;
+	EXPECT_EQ(omrsysinfo_cgroup_enable_subsystems(OMR_CGROUP_SUBSYSTEM_CPU), enabled);
+	EXPECT_EQ(omrsysinfo_cgroup_get_enabled_subsystems(), enabled);
+	EXPECT_EQ(omrsysinfo_cgroup_are_subsystems_enabled(OMR_CGROUP_SUBSYSTEM_CPU), enabled);
+	EXPECT_NE(omrsysinfo_cgroup_are_subsystems_enabled(OMR_CGROUP_SUBSYSTEM_MEMORY), OMR_CGROUP_SUBSYSTEM_MEMORY);
+	EXPECT_EQ(
+			omrsysinfo_cgroup_are_subsystems_enabled(OMR_CGROUP_SUBSYSTEM_CPU | OMR_CGROUP_SUBSYSTEM_CPUSET),
+			enabled);
+
+	/* This disables cpu subsystem. */
+	enabled = CgroupTest::available & (OMR_CGROUP_SUBSYSTEM_MEMORY | OMR_CGROUP_SUBSYSTEM_CPUSET);
+	EXPECT_EQ(
+			omrsysinfo_cgroup_enable_subsystems(OMR_CGROUP_SUBSYSTEM_MEMORY | OMR_CGROUP_SUBSYSTEM_CPUSET),
+			enabled);
+	EXPECT_EQ(
+			omrsysinfo_cgroup_get_enabled_subsystems(),
+			enabled);
+	EXPECT_EQ(omrsysinfo_cgroup_are_subsystems_enabled(OMR_CGROUP_SUBSYSTEM_MEMORY), CgroupTest::available & OMR_CGROUP_SUBSYSTEM_MEMORY);
+	EXPECT_EQ(
+			omrsysinfo_cgroup_are_subsystems_enabled(OMR_CGROUP_SUBSYSTEM_ALL),
+			enabled);
+
+	/* This disables cpu and memory subsystems. */
+	enabled = CgroupTest::available & OMR_CGROUP_SUBSYSTEM_CPUSET;
+	EXPECT_EQ(omrsysinfo_cgroup_enable_subsystems(OMR_CGROUP_SUBSYSTEM_CPUSET), enabled);
+	EXPECT_EQ(omrsysinfo_cgroup_get_enabled_subsystems(), enabled);
+	EXPECT_EQ(omrsysinfo_cgroup_are_subsystems_enabled(OMR_CGROUP_SUBSYSTEM_CPUSET), enabled);
+	EXPECT_NE(omrsysinfo_cgroup_are_subsystems_enabled(OMR_CGROUP_SUBSYSTEM_MEMORY), OMR_CGROUP_SUBSYSTEM_MEMORY);
+	EXPECT_EQ(
+			omrsysinfo_cgroup_are_subsystems_enabled(OMR_CGROUP_SUBSYSTEM_CPU | OMR_CGROUP_SUBSYSTEM_CPUSET),
+			enabled);
+#else /* defined(LINUX) && !defined(OMRZTPF) */
+	ASSERT_EQ(omrsysinfo_cgroup_get_enabled_subsystems(), (uint64_t)0);
+	ASSERT_EQ(omrsysinfo_cgroup_enable_subsystems(OMR_CGROUP_SUBSYSTEM_ALL), (uint64_t)0);
+	ASSERT_EQ(
+			omrsysinfo_cgroup_are_subsystems_enabled(OMR_CGROUP_SUBSYSTEM_ALL),
+			(uint64_t)0);
+#endif /* defined(LINUX) && !defined(OMRZTPF) */
+
+	reportTestExit(OMRPORTLIB, testName);
+	return;
+}
+
 /**
  * Test omrsysinfo_cgroup_get_memlimit.
  */
-TEST(PortSysinfoTest, sysinfo_cgroup_get_memlimit)
+TEST_F(CgroupTest, sysinfo_cgroup_get_memlimit)
 {
 	OMRPORT_ACCESS_FROM_OMRPORT(portTestEnv->getPortLibrary());
 	const char *testName = "omrsysinfo_cgroup_get_memlimit";
 	uint64_t cgroupMemLimit = 0;
 	int32_t rc = 0;
-	uint64_t enabledSubsystems = 0;
-	
+
 	reportTestEntry(OMRPORTLIB, testName);
 
-	rc = omrsysinfo_cgroup_get_memlimit(&cgroupMemLimit);
-
-#if !defined(LINUX)
-	if (OMRPORT_ERROR_SYSINFO_CGROUP_UNSUPPORTED_PLATFORM != rc) {
-		outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_cgroup_get_memlimit returned %d, expected %d on platform that does not support cgroups\n", rc, OMRPORT_ERROR_SYSINFO_CGROUP_UNSUPPORTED_PLATFORM);
-	}
-#endif
-
+#if defined(LINUX) && !defined(OMRZTPF)
 	/* Compare sysinfo_get_physical_memory and sysinfo_cgroup_get_memlimit after enabling memory subsystem */
-	enabledSubsystems = omrsysinfo_cgroup_enable_subsystems(OMR_CGROUP_SUBSYSTEM_MEMORY);
+	uint64_t enabledSubsystems = omrsysinfo_cgroup_enable_subsystems(OMR_CGROUP_SUBSYSTEM_MEMORY);
 	if (OMR_ARE_ALL_BITS_SET(enabledSubsystems, OMR_CGROUP_SUBSYSTEM_MEMORY)) {
 		rc = omrsysinfo_cgroup_get_memlimit(&cgroupMemLimit);
 		if ((0 != rc) && (OMRPORT_ERROR_SYSINFO_CGROUP_MEMLIMIT_NOT_SET != rc)) {
@@ -2375,11 +2748,341 @@ TEST(PortSysinfoTest, sysinfo_cgroup_get_memlimit)
 				outputErrorMessage(PORTTEST_ERROR_ARGS, "Expected omrsysinfo_cgroup_get_memlimit and omrsysinfo_get_physical_memory to return same value, but omrsysinfo_cgroup_get_memlimit returned %ld and omrsysinfo_get_physical_memory returned %ld\n", cgroupMemLimit, physicalMemLimit);
 			}
 		}
+
+		if (CgroupTest::isV1Available) {
+			if (OMRPORT_ERROR_SYSINFO_CGROUP_MEMLIMIT_NOT_SET == rc) {
+				EXPECT_GT(CgroupTest::memLimit, omrsysinfo_get_physical_memory()) << "Cgroup memory is set but omrsysinfo_cgroup_get_memlimit returned not set";
+			} else if (0 == rc) {
+				EXPECT_EQ(CgroupTest::memLimit, cgroupMemLimit);
+			}
+		} else {
+			/* CgroupTest::isV2Available */
+			if (OMRPORT_ERROR_SYSINFO_CGROUP_MEMLIMIT_NOT_SET == rc) {
+				EXPECT_EQ(CgroupTest::memLimitString, "max") << "Cgroup memory is set but omrsysinfo_cgroup_get_memlimit returned not set";
+			} else if (0 == rc) {
+				EXPECT_EQ(std::stoull(CgroupTest::memLimitString), cgroupMemLimit);
+			}
+		}
+	}
+#else /* defined(LINUX) && !defined(OMRZTPF) */
+	rc = omrsysinfo_cgroup_get_memlimit(&cgroupMemLimit);
+	if (OMRPORT_ERROR_SYSINFO_CGROUP_UNSUPPORTED_PLATFORM != rc) {
+		outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_cgroup_get_memlimit returned %d, expected %d on platform that does not support cgroups\n", rc, OMRPORT_ERROR_SYSINFO_CGROUP_UNSUPPORTED_PLATFORM);
+	}
+#endif /* defined(LINUX) && !defined(OMRZTPF) */
+
+	reportTestExit(OMRPORTLIB, testName);
+	return;
+}
+
+/**
+ * Test omrsysinfo_cgroup_is_memlimit_set.
+ */
+TEST_F(CgroupTest, sysinfo_cgroup_is_memlimit_set)
+{
+	OMRPORT_ACCESS_FROM_OMRPORT(portTestEnv->getPortLibrary());
+	const char *testName = "omrsysinfo_cgroup_is_memlimit_set";
+	BOOLEAN result = FALSE;
+
+	reportTestEntry(OMRPORTLIB, testName);
+
+	result = omrsysinfo_cgroup_is_memlimit_set();
+
+#if defined(LINUX) && !defined(OMRZTPF)
+	uint64_t enabledSubsystems = omrsysinfo_cgroup_enable_subsystems(OMR_CGROUP_SUBSYSTEM_MEMORY);
+	if (OMR_ARE_ALL_BITS_SET(enabledSubsystems, OMR_CGROUP_SUBSYSTEM_MEMORY)) {
+		if (CgroupTest::isV1Available) {
+			EXPECT_EQ(result, CgroupTest::memLimit <= omrsysinfo_get_physical_memory());
+		} else {
+			/* CgroupTest::isV2Available */
+			EXPECT_EQ(result, CgroupTest::memLimitString != "max");
+		}
+	}
+#else /* defined(LINUX) && !defined(OMRZTPF) */
+	if (FALSE != result) {
+		outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_cgroup_is_memlimit_set returned TRUE on non-Linux");
+	}
+#endif /* defined(LINUX) && !defined(OMRZTPF) */
+
+	reportTestExit(OMRPORTLIB, testName);
+	return;
+}
+
+/**
+ * Test omrsysinfo_get_cgroup_subsystem_list.
+ */
+TEST_F(CgroupTest, sysinfo_get_cgroup_subsystem_list)
+{
+	OMRPORT_ACCESS_FROM_OMRPORT(portTestEnv->getPortLibrary());
+	const char *testName = "omrsysinfo_get_cgroup_subsystem_list";
+
+	reportTestEntry(OMRPORTLIB, testName);
+
+#if defined(LINUX) && !defined(OMRZTPF)
+	OMRCgroupEntry *entries = omrsysinfo_get_cgroup_subsystem_list();
+	OMRCgroupEntry *temp = entries;
+
+	if (NULL == temp) {
+		EXPECT_EQ(CgroupTest::available, (uint64_t)0);
+	} else {
+		do {
+			EXPECT_EQ(CgroupTest::available & temp->flag, temp->flag);
+			switch(temp->flag) {
+			case OMR_CGROUP_SUBSYSTEM_CPU:
+				EXPECT_EQ(temp->cgroup, cpuCgroup);
+				EXPECT_STREQ(temp->subsystem, "cpu");
+				break;
+			case OMR_CGROUP_SUBSYSTEM_MEMORY:
+				EXPECT_EQ(temp->cgroup, memCgroup);
+				EXPECT_STREQ(temp->subsystem, "memory");
+				break;
+			case OMR_CGROUP_SUBSYSTEM_CPUSET:
+				EXPECT_EQ(temp->cgroup, cpusetCgroup);
+				EXPECT_STREQ(temp->subsystem, "cpuset");
+				break;
+			default:
+				FAIL() << "Unsupported subsystem";
+			}
+			temp = temp->next;
+		} while (temp != entries);
+	}
+#else /* defined(LINUX) && !defined(OMRZTPF) */
+	if (NULL != omrsysinfo_get_cgroup_subsystem_list()) {
+		outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_get_cgroup_subsystem_list returned not null on non-Linux\n");
+	}
+#endif /* defined(LINUX) && !defined(OMRZTPF) */
+
+	reportTestExit(OMRPORTLIB, testName);
+	return;
+}
+
+#if defined(LINUX) && !defined(OMRZTPF)
+/**
+ * Test omrsysinfo_get_number_CPUs_by_type for the OMRPORT_CPU_BOUND type (specifically, fetching
+ * and calculating the number of cpus allocated to this process via cgroup).
+ */
+TEST_F(CgroupTest, sysinfo_get_number_CPUs_cgroup)
+{
+	OMRPORT_ACCESS_FROM_OMRPORT(portTestEnv->getPortLibrary());
+	const char *testName = "omrsysinfo_get_number_CPUs_cgroup";
+	uint64_t enabledSubsystems = 0;
+
+	reportTestEntry(OMRPORTLIB, testName);
+
+	enabledSubsystems = omrsysinfo_cgroup_enable_subsystems(OMR_CGROUP_SUBSYSTEM_CPU);
+	if (OMR_ARE_ALL_BITS_SET(enabledSubsystems, OMR_CGROUP_SUBSYSTEM_CPU)) {
+		uintptr_t result = omrsysinfo_get_number_CPUs_by_type(OMRPORT_CPU_BOUND);
+		uintptr_t testResult = 0;
+
+		cpu_set_t cpuSet;
+		int32_t error = 0;
+		size_t size = sizeof(cpuSet);
+		pid_t mainProcess = getpid();
+		memset(&cpuSet, 0, size);
+
+		error = sched_getaffinity(mainProcess, size, &cpuSet);
+
+		if (0 == error) {
+			testResult = CPU_COUNT(&cpuSet);
+		} else {
+			if (EINVAL == errno) {
+				/* Too many CPUs for the fixed cpu_set_t structure. */
+				int32_t numCPUs = sysconf(_SC_NPROCESSORS_CONF);
+				cpu_set_t *allocatedCpuSet = CPU_ALLOC(numCPUs);
+				if (NULL != allocatedCpuSet) {
+					size = CPU_ALLOC_SIZE(numCPUs);
+					CPU_ZERO_S(size, allocatedCpuSet);
+					error = sched_getaffinity(mainProcess, size, allocatedCpuSet);
+					if (0 == error) {
+						testResult = CPU_COUNT_S(size, allocatedCpuSet);
+					}
+					CPU_FREE(allocatedCpuSet);
+				}
+			}
+		}
+
+		ASSERT_NE(testResult, (uintptr_t)0);
+		if (CgroupTest::isV1Available) {
+			int32_t numCpusQuota = (int32_t)(((double)CgroupTest::cpuQuota / cpuPeriod) + 0.5);
+
+			if ((CgroupTest::cpuQuota <= 0) || (numCpusQuota >= (int32_t)testResult)) {
+				ASSERT_EQ(result, testResult);
+			} else {
+				if (0 == numCpusQuota) {
+					ASSERT_EQ(result, (uintptr_t)1);
+				} else {
+					std::cout << "result: " << result << "\n";
+					ASSERT_EQ(result, (uintptr_t)numCpusQuota);
+				}
+			}
+		} else {
+			/* Cgroup::isV2Available */
+			if (CgroupTest::cpuQuotaString == "max") {
+				ASSERT_EQ(result, testResult);
+			} else {
+				int32_t numCpusQuota = (int32_t)((std::stod(CgroupTest::cpuQuotaString) / cpuPeriod) + 0.5);
+
+				if (numCpusQuota >= (int32_t)testResult) {
+					ASSERT_EQ(result, testResult);
+				} else {
+					if (0 == numCpusQuota) {
+						ASSERT_EQ(result, (uintptr_t)1);
+					} else {
+						ASSERT_EQ(result, (uintptr_t)numCpusQuota);
+					}
+				}
+			}
+		}
 	}
 
 	reportTestExit(OMRPORTLIB, testName);
 	return;
 }
+#endif /* defined(LINUX) && !defined(OMRZTPF) */
+
+/**
+ * Test omrsysinfo_is_running_in_container.
+ */
+TEST_F(CgroupTest, sysinfo_is_running_in_container)
+{
+	OMRPORT_ACCESS_FROM_OMRPORT(portTestEnv->getPortLibrary());
+	const char *testName = "omrsysinfo_is_running_in_container";
+
+	reportTestEntry(OMRPORTLIB, testName);
+
+	BOOLEAN runningInContainer = omrsysinfo_is_running_in_container();
+
+#if defined(LINUX) && !defined(OMRZTPF)
+	/* If the following fails, check that the env var OMR_RUNNING_IN_DOCKER is either set to 1 for a containerized
+	 * run or 0 or unset for a non-containerized run.
+	 */
+	ASSERT_EQ(runningInContainer, CgroupTest::isRunningInContainer);
+#else /* defined(LINUX) && !defined(OMRZTPF) */
+	if (runningInContainer) {
+		outputErrorMessage(PORTTEST_ERROR_ARGS, "omrsysinfo_is_running_in_container returned TRUE on non-Linux\n");
+	}
+#endif /* defined(LINUX) && !defined(OMRZTPF) */
+
+	reportTestExit(OMRPORTLIB, testName);
+	return;
+}
+
+/**
+ * Test omrsysinfo_cgroup_subsystem_iterator_* functions.
+ */
+TEST_F(CgroupTest, sysinfo_cgroup_subsystem_iterator)
+{
+	OMRPORT_ACCESS_FROM_OMRPORT(portTestEnv->getPortLibrary());
+	const char *testName = "omrsysinfo_cgroup_subsystem_iterator";
+
+	reportTestEntry(OMRPORTLIB, testName);
+
+#if defined(LINUX) && !defined(OMRZTPF)
+	const OMRCgroupEntry *entryHead = omrsysinfo_get_cgroup_subsystem_list();
+	OMRCgroupEntry *cgEntry = (OMRCgroupEntry *)entryHead;
+	if (NULL != cgEntry) {
+		do {
+			OMRCgroupMetricIteratorState cgroupState = {0};
+			int32_t rc = omrsysinfo_cgroup_subsystem_iterator_init(cgEntry->flag, &cgroupState);
+			ASSERT_EQ(rc, 0);
+			ASSERT_EQ(cgroupState.count, (uint32_t)0);
+			ASSERT_EQ(cgroupState.subsystemid, cgEntry->flag);
+			ASSERT_EQ(cgroupState.fileMetricCounter, 0);
+			ASSERT_GT(cgroupState.numElements, (uint32_t)0);
+
+			int32_t count = 0;
+			while (omrsysinfo_cgroup_subsystem_iterator_hasNext(&cgroupState)) {
+				const char *metricKey = NULL;
+				OMRCgroupMetricElement metricElement = {0};
+				rc = omrsysinfo_cgroup_subsystem_iterator_metricKey(&cgroupState, &metricKey);
+				ASSERT_EQ(rc, 0);
+				rc = omrsysinfo_cgroup_subsystem_iterator_next(&cgroupState, &metricElement);
+				if (0 == rc) {
+					/* Verify a few important metrics. */
+					if (omrsysinfo_cgroup_are_subsystems_available(OMR_CGROUP_SUBSYSTEM_MEMORY)) {
+						if (0 == strcmp(metricKey, "Memory Limit")) {
+							if (CgroupTest::isV1Available) {
+								if (omrsysinfo_cgroup_is_memlimit_set()) {
+									EXPECT_EQ(strtoull(metricElement.value, NULL, 10), CgroupTest::memLimit);
+									EXPECT_STREQ(metricElement.units, "bytes");
+								} else {
+									EXPECT_STREQ(metricElement.value, "Not Set");
+									EXPECT_EQ(metricElement.units, nullptr);
+								}
+							} else {
+								/* CgroupTest::isV2Available */
+								if (omrsysinfo_cgroup_is_memlimit_set()) {
+									EXPECT_STREQ(metricElement.value, CgroupTest::memLimitString.c_str());
+									EXPECT_STREQ(metricElement.units, "bytes");
+								} else {
+									EXPECT_STREQ(metricElement.value, "Not Set");
+									EXPECT_EQ(metricElement.units, nullptr);
+								}
+							}
+						}
+					}
+					if (omrsysinfo_cgroup_are_subsystems_available(OMR_CGROUP_SUBSYSTEM_CPU)) {
+						if (0 == strcmp(metricKey, "CPU Quota")) {
+							if (CgroupTest::isV1Available) {
+								if (-1 != CgroupTest::cpuQuota) {
+									EXPECT_EQ(strtoll(metricElement.value, NULL, 10), CgroupTest::cpuQuota);
+									EXPECT_STREQ(metricElement.units, "microseconds");
+								} else {
+									EXPECT_STREQ(metricElement.value, "Not Set");
+									EXPECT_EQ(metricElement.units, nullptr);
+								}
+							} else {
+								/* CgroupTest::isV2Available */
+								if ("max" != CgroupTest::cpuQuotaString) {
+									EXPECT_STREQ(metricElement.value, CgroupTest::cpuQuotaString.c_str());
+									EXPECT_STREQ(metricElement.units, "microseconds");
+								} else {
+									EXPECT_STREQ(metricElement.value, "Not Set");
+									EXPECT_EQ(metricElement.units, nullptr);
+								}
+							}
+						} else if (0 == strcmp(metricKey, "CPU Period")) {
+							EXPECT_EQ(strtoull(metricElement.value, NULL, 10), CgroupTest::cpuPeriod);
+							EXPECT_STREQ(metricElement.units, "microseconds");
+						}
+					}
+				} else {
+					/* Swap memory files may not be present under certain conditions, e.g.
+					 * swap memory not configured.
+					 */
+					std::string metricString(metricKey);
+					EXPECT_EQ(cgroupState.subsystemid, OMR_CGROUP_SUBSYSTEM_MEMORY)
+							<< "omrsysinfo_cgroup_subsystem_iterator_next failed for non-memory subsystem, rc=" << rc;
+					EXPECT_EQ(rc, OMRPORT_ERROR_FILE_NOENT);
+					/* Check that metricKey contains "swap" (indicates metric is related to swap memory). */
+					EXPECT_TRUE(
+							(std::string::npos != metricString.find("Swap"))
+							|| (std::string::npos != metricString.find("swap"))
+							) << "omrsysinfo_cgroup_subsystem_iterator_next failed for non-swap memory metric: "
+								<< metricString << ", rc=" << rc;
+				}
+				count += 1;
+			}
+			ASSERT_GT(count, 0);
+
+			omrsysinfo_cgroup_subsystem_iterator_destroy(&cgroupState);
+			cgEntry = cgEntry->next;
+		} while (cgEntry != entryHead);
+	}
+#else /* defined(LINUX) && !defined(OMRZTPF) */
+	OMRCgroupMetricIteratorState cgroupState = {0};
+	ASSERT_EQ(omrsysinfo_cgroup_subsystem_iterator_init(0, &cgroupState), OMRPORT_ERROR_SYSINFO_CGROUP_UNSUPPORTED_PLATFORM);
+	ASSERT_EQ(omrsysinfo_cgroup_subsystem_iterator_hasNext(&cgroupState), FALSE);
+	ASSERT_EQ(omrsysinfo_cgroup_subsystem_iterator_metricKey(&cgroupState, NULL), OMRPORT_ERROR_SYSINFO_CGROUP_SUBSYSTEM_METRIC_NOT_AVAILABLE);
+	ASSERT_EQ(omrsysinfo_cgroup_subsystem_iterator_next(&cgroupState, NULL), OMRPORT_ERROR_SYSINFO_CGROUP_UNSUPPORTED_PLATFORM);
+#endif /* defined(LINUX) && !defined(OMRZTPF) */
+
+	reportTestExit(OMRPORTLIB, testName);
+	return;
+}
+#else /* !defined(LINUX) || (GTEST_GCC_VER_ >= 40900) */
+#pragma message("Cgroup tests are disabled due to an unsupported compiler.")
+#endif /* !defined(LINUX) || (GTEST_GCC_VER_ >= 40900) */
 
 /**
  * Test GetProcessorDescription.

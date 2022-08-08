@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2015 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -32,11 +32,14 @@
 #include "MemoryPoolAddressOrderedListBase.hpp"
 #include "HeapRegionDescriptor.hpp"
 #include "EnvironmentBase.hpp"
+#include "AtomicOperations.hpp"
 
 class MM_AllocateDescription;
 #if defined(OMR_GC_CONCURRENT_SWEEP)
 class MM_ConcurrentSweepScheme;
 #endif /* OMR_GC_CONCURRENT_SWEEP */
+
+#define FREE_ENTRY_END ((MM_HeapLinkedFreeHeader *)OMRPORT_VMEM_MAX_ADDRESS)
 
 /**
  * @todo Provide class documentation
@@ -60,6 +63,11 @@ private:
 	
 	MM_LargeObjectAllocateStats *_largeObjectCollectorAllocateStats;  /**< Same as _largeObjectAllocateStats except specifically for collector allocates */
 
+	MM_HeapLinkedFreeHeader *_firstCardUnalignedFreeEntry; /**< it is only for Balanced GC copyforward and non empty survivor region */
+	MM_HeapLinkedFreeHeader *_prevCardUnalignedFreeEntry;
+
+	void *_parallelGCAlignmentBase; /**< Base address of the region where the pool resides */
+	uintptr_t _parallelGCAlignmentSize; /**<  Fixed Size used to determine boundaries for alignment. */
 protected:
 public:
 	
@@ -75,9 +83,38 @@ private:
 	void updateHintsBeyondEntry(MM_HeapLinkedFreeHeader *freeEntry);
 	void *internalAllocate(MM_EnvironmentBase *env, uintptr_t sizeInBytesRequired, bool lockingRequired, MM_LargeObjectAllocateStats *largeObjectAllocateStats);
 	bool internalAllocateTLH(MM_EnvironmentBase *env, uintptr_t maximumSizeInBytesRequired, void * &addrBase, void * &addrTop, bool lockingRequired, MM_LargeObjectAllocateStats *largeObjectAllocateStats);
+	uintptr_t getConsumedSizeForTLH(MM_EnvironmentBase *env, MM_HeapLinkedFreeHeader *freeEntry, uintptr_t maximumSizeInBytesRequired);
 
-	bool recycleHeapChunk(void *addrBase, void *addrTop, MM_HeapLinkedFreeHeader *previousFreeEntry, MM_HeapLinkedFreeHeader *nextFreeEntry);	
-	
+	/* Align a TLH to meet boundary restrictions. Certain phases of some GCs may require that TLHs not span heap chunks for parallel processing. */
+	bool alignTLHForParallelGC(MM_EnvironmentBase *env, MM_HeapLinkedFreeHeader *freeEntry, uintptr_t *consumedSize);
+
+	MMINLINE bool isAlignmentForParallelGCRequired() {
+		return (NULL != _parallelGCAlignmentBase);
+	}
+
+	MMINLINE bool doesNeedCardAlignment(MM_EnvironmentBase *env, MM_HeapLinkedFreeHeader *freeEntry)
+	{
+#if defined(OMR_ENV_DATA64)
+		return (freeEntry >= _firstCardUnalignedFreeEntry);
+#else
+		return false;
+#endif /* OMR_ENV_DATA64 */
+	}
+
+	MMINLINE void updatePrevCardUnalignedFreeEntry(MM_HeapLinkedFreeHeader *entryNext, MM_HeapLinkedFreeHeader *value) {
+		if (entryNext == _firstCardUnalignedFreeEntry) {
+			_prevCardUnalignedFreeEntry = value;
+		}
+	}
+
+	/**
+	 * Just aligns entries from _firstCardUnalignedFreeEntry to lastFreeEntryToAlign (Therefore, it incrementally aligns the pool, as we progress with allocation)
+	 * It does not make decisions which free entry to use to satisfy the allocate (the caller does it), and therefore does not try to find an alternate free entry if the aligned variant is not big enough
+	 * @param lastFreeEntryToAlign the last FreeEntry to be aligned for this call
+	 * @return aligned variant of lastFreeEntryToAlign, or null if its aligned variant is not big enough
+	 */
+	MM_HeapLinkedFreeHeader *doFreeEntryCardAlignmentUpTo(MM_EnvironmentBase *env, MM_HeapLinkedFreeHeader *lastFreeEntryToAlign);
+
 protected:
 public:
 	static MM_MemoryPoolAddressOrderedList *newInstance(MM_EnvironmentBase *env, uintptr_t minimumFreeEntrySize); 
@@ -113,7 +150,12 @@ public:
 	virtual void expandWithRange(MM_EnvironmentBase *env, uintptr_t expandSize, void *lowAddress, void *highAddress, bool canCoalesce);
 	virtual void *contractWithRange(MM_EnvironmentBase *env, uintptr_t contractSize, void *lowAddress, void *highAddress);
 
-	bool recycleHeapChunk(void* chunkBase, void* chunkTop);
+	bool recycleHeapChunk(void* chunkBase, void* chunkTop)
+	{
+		return recycleHeapChunk(NULL, chunkBase, chunkTop);
+	}
+	bool recycleHeapChunk(MM_EnvironmentBase *env, void* chunkBase, void* chunkTop);
+	bool recycleHeapChunk(void *addrBase, void *addrTop, MM_HeapLinkedFreeHeader *previousFreeEntry, MM_HeapLinkedFreeHeader *nextFreeEntry);
 
 	virtual void *findFreeEntryEndingAtAddr(MM_EnvironmentBase *env, void *addr);
 	virtual uintptr_t getAvailableContractionSizeForRangeEndingAt(MM_EnvironmentBase *env, MM_AllocateDescription *allocDescription, void *lowAddr, void *highAddr);
@@ -137,6 +179,8 @@ public:
 	
 	virtual bool initializeSweepPool(MM_EnvironmentBase *env);
 	
+	virtual void setSubSpace(MM_MemorySubSpace *subSpace);
+
 	/**
 	 * Recalculate the memory pool statistics by actually examining the contents of the pool.
 	 */
@@ -146,6 +190,65 @@ public:
 	virtual uintptr_t releaseFreeMemoryPages(MM_EnvironmentBase* env);
 #endif
 
+	void setParallelGCAlignment(MM_EnvironmentBase *env, bool alignmentEnabled);
+
+	/**
+	 * remove a free entry from freelist
+	 */
+	void removeFromFreeList(void *addrBase, void *addrTop, MM_HeapLinkedFreeHeader *previousFreeEntry, MM_HeapLinkedFreeHeader *nextFreeEntry)
+	{
+		bool const compressed = compressObjectReferences();
+		uintptr_t freeEntrySize = ((uintptr_t)addrTop) - ((uintptr_t)addrBase);
+		MM_HeapLinkedFreeHeader::fillWithHoles(addrBase, freeEntrySize, compressed);
+		if (previousFreeEntry) {
+			previousFreeEntry->setNext(nextFreeEntry, compressed);
+		}else {
+			_heapFreeList = nextFreeEntry;
+		}
+	}
+
+	void fillWithHoles(void *addrBase, void *addrTop)
+	{
+		bool const compressed = compressObjectReferences();
+		MM_HeapLinkedFreeHeader::fillWithHoles(addrBase, ((uintptr_t)addrTop) - ((uintptr_t)addrBase), compressed);
+	}
+
+	MMINLINE uintptr_t getAdjustedBytesForCardAlignment()
+	{
+		return _adjustedBytesForCardAlignment;
+	}
+
+	MMINLINE void setAdjustedBytesForCardAlignment(uintptr_t adjustedbytes, bool needSync)
+	{
+		if (needSync) {
+			MM_AtomicOperations::add(&(_adjustedBytesForCardAlignment), adjustedbytes);
+		} else {
+			_adjustedBytesForCardAlignment += adjustedbytes;
+		}
+	}
+
+	MMINLINE void initialFirstUnalignedFreeEntry()
+	{
+		_firstCardUnalignedFreeEntry = (NULL == _heapFreeList) ? FREE_ENTRY_END : _heapFreeList;
+		_prevCardUnalignedFreeEntry =  FREE_ENTRY_END;
+	}
+
+	MMINLINE void resetFirstUnalignedFreeEntry()
+	{
+		_firstCardUnalignedFreeEntry =  FREE_ENTRY_END;
+		_prevCardUnalignedFreeEntry =  FREE_ENTRY_END;
+	}
+
+	MMINLINE virtual uintptr_t getDarkMatterBytes()
+	{
+		return _darkMatterBytes + _adjustedBytesForCardAlignment;
+	}
+
+	MMINLINE virtual uintptr_t getActualFreeMemorySize()
+	{
+		return _freeMemorySize - _adjustedBytesForCardAlignment;
+	}
+
 	/**
 	 * Create a MemoryPoolAddressOrderedList object.
 	 */
@@ -153,6 +256,10 @@ public:
 		MM_MemoryPoolAddressOrderedListBase(env, minimumFreeEntrySize)
 		,_heapFreeList(NULL)
 		,_largeObjectCollectorAllocateStats(NULL)
+		,_firstCardUnalignedFreeEntry(FREE_ENTRY_END)
+		,_prevCardUnalignedFreeEntry(FREE_ENTRY_END)
+		,_parallelGCAlignmentBase(NULL)
+		,_parallelGCAlignmentSize(0)
 	{
 		_typeId = __FUNCTION__;
 	};
@@ -161,6 +268,10 @@ public:
 		MM_MemoryPoolAddressOrderedListBase(env, minimumFreeEntrySize, name)
 		,_heapFreeList(NULL)
 		,_largeObjectCollectorAllocateStats(NULL)
+		,_firstCardUnalignedFreeEntry(FREE_ENTRY_END)
+		,_prevCardUnalignedFreeEntry(FREE_ENTRY_END)
+		,_parallelGCAlignmentBase(NULL)
+		,_parallelGCAlignmentSize(0)
 	{
 		_typeId = __FUNCTION__;
 	};

@@ -127,7 +127,7 @@ TR_Debug::addFilter(char * & filterString, int32_t scanningExclude, int32_t opti
          TR_VerboseLog::writeLineLocked(TR_Vlog_FAILURE, "Bad regular expression at --> '%s'", filterCursor);
          return 0;
          }
-      nameLength = filterCursor - filterString;
+      nameLength = static_cast<int32_t>(filterCursor - filterString);
       filterBST->setRegex(regex);
       filterBST->setNext(filters->hasRegexFilter()? filters->filterRegexList : NULL);
       filters->filterRegexList = filterBST;
@@ -215,90 +215,6 @@ TR_Debug::addExcludedMethodFilter(bool loadLimit)
       _compilationFilters->excludedMethodFilter = filterBST;
       }
    return filterBST;
-   }
-
-bool
-TR_Debug::addSamplingPoint(char * filterString, TR_FilterBST * & lastSamplingPoint, bool loadLimit)
-   {
-   char *p;
-   int32_t tickCount;
-   if (1 != sscanf(filterString, "(%d) ", &tickCount))
-      return false;
-   uint32_t type;
-   for (p = filterString; *p && *p != '\t'; p++)
-      {}
-   p++;
-   if (*p == 'C')
-      {
-      type = TR_FILTER_SAMPLE_COMPILED;
-      p += 9;
-      }
-   else if (*p == 'I')
-      {
-      type = TR_FILTER_SAMPLE_INTERPRETED;
-      p += 12;
-      }
-   else
-      return false;
-
-   //  Skip the method name and scan the rest of the string to see if the
-   // sampling point did anything
-   //
-   char *methodName = p;
-   //for (p++; *p && *p != '>'; p++) // WILL CATCH <init>
-   //   {}
-   //if (!*p)
-   //   return false;
-   p = strstr(p, "-->");
-   if (!p)
-      return false;
-   p += 2;
-
-   TR::CompilationFilters *filters = findOrCreateFilters(loadLimit);
-   TR_FilterBST * filterBST = new (TR::Compiler->regionAllocator) TR_FilterBST(type, tickCount);
-   if (!scanFilterName(methodName, filterBST))
-      return false;
-
-   // Make sure a full method signature was specified on the sampling log line
-   // and then reset the filter type to the proper value
-   //
-   if (filterBST->getFilterType() != TR_FILTER_SPECIFIC_METHOD)
-      return false;
-   filterBST->setFilterType(type);
-
-   // Set up the rest of the information in the filter and add it to the
-   // sampling point list.
-   int32_t count;
-   if (type == TR_FILTER_SAMPLE_INTERPRETED)
-      {
-      // Pick up new invocation count
-      //
-      if (1 != sscanf(p, "> %d", &count))
-         return false;
-      filterBST->setSampleCount(count);
-      }
-   else
-      {
-      // Pick up new compilation level, Use the top bit as a "profiled" tag bit.
-      //
-      if (1 != sscanf(p, "> recompile at level %d", &count))
-         return false;
-      filterBST->setSampleLevel(count);
-      if (strstr(p+21,", profiled"))
-         filterBST->setSampleProfiled(1);
-      else
-         filterBST->setSampleProfiled(0);
-      }
-
-   // Add the filter to the sampling point list
-   //
-   if (lastSamplingPoint)
-      lastSamplingPoint->setNext(filterBST);
-   else
-      filters->samplingPoints = filterBST;
-
-   lastSamplingPoint = filterBST;
-   return true;
    }
 
 bool
@@ -417,7 +333,7 @@ TR_Debug::inlinefileOption(char *option, void *base, TR::OptionTable *entry, TR:
    for (; *endOpt && *endOpt != ','; endOpt++)
       {}
 
-   int32_t len = endOpt - name;
+   int32_t len = static_cast<int32_t>(endOpt - name);
    if (!len)
       return option;
 
@@ -507,7 +423,7 @@ TR_Debug::limitfileOption(char *option, void *base, TR::OptionTable *entry, TR::
 
    for (; *endOpt && *endOpt != ','; endOpt++)
       {}
-   int32_t len = endOpt - name;
+   int32_t len = static_cast<int32_t>(endOpt - name);
    if (!len)
       return option;
 
@@ -533,8 +449,7 @@ TR_Debug::limitfileOption(char *option, void *base, TR::OptionTable *entry, TR::
    if (limitFile)
       {
       TR::CompilationFilters * filters = findOrCreateFilters(loadLimit);
-      if (!cmdLineOptions->getOption(TR_OrderCompiles))
-         filters->setDefaultExclude(true);
+      filters->setDefaultExclude(true);
 
       char          limitReadBuffer[1024];
       bool          limitFileError = false;
@@ -623,10 +538,10 @@ TR_Debug::limitfileOption(char *option, void *base, TR::OptionTable *entry, TR::
 
             bool isNegative = false;
             if (*(p) == '-')
-              {
-	      p++;
-	      isNegative = true;
-	      }
+               {
+               p++;
+               isNegative = true;
+               }
 
             int32_t randNum;
             while (isdigit(p[0]))
@@ -636,21 +551,23 @@ TR_Debug::limitfileOption(char *option, void *base, TR::OptionTable *entry, TR::
                   ++p;
 
                if (isNegative)
- 		  randNum = -1*randNum;
+                  randNum = -1*randNum;
 
                if ((curPseudoRandomListElem == NULL) ||
                    (curIndex == PSEUDO_RANDOM_NUMBERS_SIZE))
-		  {
-		  int32_t sz = sizeof(TR_PseudoRandomNumbersListElement);
-		  TR_PseudoRandomNumbersListElement *newPseudoRandomListElem = (TR_PseudoRandomNumbersListElement *)(TR::Compiler->regionAllocator.allocate(sz));
+                  {
+                  int32_t sz = sizeof(TR_PseudoRandomNumbersListElement);
+                  TR_PseudoRandomNumbersListElement *newPseudoRandomListElem = (TR_PseudoRandomNumbersListElement *)(TR::Compiler->regionAllocator.allocate(sz));
                   newPseudoRandomListElem->_next = NULL;
                   curIndex = 0;
+
                   if (curPseudoRandomListElem == NULL)
-		     *pseudoRandomListHeadPtr = newPseudoRandomListElem;
+                     *pseudoRandomListHeadPtr = newPseudoRandomListElem;
                   else
                      curPseudoRandomListElem->_next =  newPseudoRandomListElem;
+
                   curPseudoRandomListElem =  newPseudoRandomListElem;
-		  }
+                  }
 
                if (curPseudoRandomListElem == NULL)
                   {
@@ -662,7 +579,7 @@ TR_Debug::limitfileOption(char *option, void *base, TR::OptionTable *entry, TR::
                curPseudoRandomListElem->_curIndex = curIndex;
 
                if (*p == PSEUDO_RANDOM_SUFFIX)
-		  break;
+                  break;
 
                if (*(p++) != ' ')
                   {
@@ -672,18 +589,11 @@ TR_Debug::limitfileOption(char *option, void *base, TR::OptionTable *entry, TR::
 
                isNegative = false;
                if (*(p) == '-')
-		  {
-		  p++;
-	          isNegative = true;
-		  }
-	       }
-            }
-         else if (limitReadBuffer[0] == '(' && cmdLineOptions->getOption(TR_OrderCompiles))
-            {
-            // Recognize new sampling point
-            //
-            static TR_FilterBST *lastSamplingPoint = NULL;
-            addSamplingPoint(limitReadBuffer, lastSamplingPoint, loadLimit);
+                  {
+                  p++;
+                      isNegative = true;
+                  }
+               }
             }
          }
       if (limitFileError)
@@ -707,12 +617,12 @@ TR_Debug::limitOption(char *option, void *base, TR::OptionTable *entry, TR::Opti
    char *p = option;
 
    // this use the old interface
-   TR_FilterBST *filter = addFilter(p, entry->parm1, 0, 0, loadLimit);
+   TR_FilterBST *filter = addFilter(p, static_cast<int32_t>(entry->parm1), 0, 0, loadLimit);
 
    if (!filter)
       return option;
 
-   int32_t len = p - option;
+   int32_t len = static_cast<int32_t>(p - option);
    char *limitName = (char *)(TR::Compiler->regionAllocator.allocate(len+1));
    memcpy(limitName, option, len);
    limitName[len] = 0;
@@ -817,12 +727,12 @@ TR_FilterBST *TR_FilterBST::find(const char *methodName, int32_t methodNameLen, 
          {
          rc = strncmp(methodClass, node->getClass(), methodClassLen);
          if (rc == 0)
-            rc = methodClassLen - strlen(node->getClass());
+            rc = methodClassLen - static_cast<int32_t>(strlen(node->getClass()));
          if (rc == 0)
             {
             rc = strncmp(methodSignature, node->getSignature(), methodSignatureLen);
             if (rc == 0)
-               rc = methodSignatureLen - strlen(node->getSignature());
+               rc = methodSignatureLen - static_cast<int32_t>(strlen(node->getSignature()));
             if (rc == 0)
                break;
             }
@@ -876,6 +786,7 @@ void TR_FilterBST::insert(TR_FilterBST *node)
 void
 TR_Debug::print(TR_FilterBST * filter)
    {
+   TR_VerboseLog::CriticalSection vlogLock;
    /*
    if (filter->_optionSet)
       TR_VerboseLog::write("   {%d}", filter->_optionSet);
@@ -883,7 +794,6 @@ TR_Debug::print(TR_FilterBST * filter)
    if (filter->_lineNumber)
       TR_VerboseLog::write("   [%d]", filter->_lineNumber);
    */
-   TR_VerboseLog::vlogAcquire();
 
    switch (filter->_filterType)
       {
@@ -951,8 +861,6 @@ TR_Debug::print(TR_FilterBST * filter)
          printFilters(filter->subGroup);
          TR_VerboseLog::write("   ]\n");
          }
-      
-      TR_VerboseLog::vlogRelease();
    }
 
 void
@@ -985,7 +893,7 @@ TR_Debug::printFilters(TR::CompilationFilters * filters)
 void
 TR_Debug::printFilters()
    {
-   TR_VerboseLog::vlogAcquire();
+   TR_VerboseLog::CriticalSection vlogLock;
    TR_VerboseLog::writeLine("<compilationFilters>");
    printFilters(_compilationFilters);
    TR_VerboseLog::writeLine("</compilationFilters>");
@@ -997,7 +905,6 @@ TR_Debug::printFilters()
    TR_VerboseLog::writeLine("<inlineFilters>");
    printFilters(_inlineFilters);
    TR_VerboseLog::writeLine("</inlineFilters>");
-   TR_VerboseLog::vlogRelease();
    }
 
 void
@@ -1008,33 +915,6 @@ TR_Debug::printFilterTree(TR_FilterBST *root)
    print(root);
    if (root->getChild(1))
       printFilterTree(root->getChild(1));
-   }
-
-void
-TR_Debug::printSamplingPoints()
-   {
-   TR_VerboseLog::vlogAcquire();
-   for (TR_FilterBST *filter=_compilationFilters->samplingPoints; filter; filter = filter->getNext())
-      {
-      if (filter->getFilterType() == TR_FILTER_SAMPLE_INTERPRETED)
-         {
-         TR_VerboseLog::writeLine("(%d)\tInterpreted %s.%s%s\tcount=%d",
-            filter->getTickCount(),
-            filter->getClass(), filter->getName(), filter->getSignature(),
-            filter->getSampleCount()
-            );
-         }
-      else
-         {
-         TR_VerboseLog::writeLine("(%d)\tCompiled %s.%s%s\tlevel=%d%s",
-            filter->getTickCount(),
-            filter->getClass(), filter->getName(), filter->getSignature(),
-            filter->getSampleLevel(),
-            (filter->getSampleProfiled() ? ", profiled": "")
-            );
-         }
-      }
-   TR_VerboseLog::vlogRelease();
    }
 
 int32_t
@@ -1201,12 +1081,12 @@ TR_Debug::methodSigCanBeFound(const char *methodSig, TR::CompilationFilters * fi
          {
          methodClass = methodSig;
          methodSignature = strchr(methodSig, ':');
-         methodClassLen = methodSignature - methodClass;
+         methodClassLen = static_cast<uint32_t>(methodSignature - methodClass);
          methodSignature++;
          methodName = strchr(methodSignature, ':');
-         methodSignatureLen = methodName - methodSignature;
+         methodSignatureLen = static_cast<uint32_t>(methodName - methodSignature);
          methodName++;
-         methodNameLen = strlen(methodName);
+         methodNameLen = static_cast<uint32_t>(strlen(methodName));
          }
       else
          {
@@ -1214,7 +1094,7 @@ TR_Debug::methodSigCanBeFound(const char *methodSig, TR::CompilationFilters * fi
          methodClassLen = 0;
          methodSignature = "";
          methodSignatureLen = 0;
-         methodNameLen = strlen(methodName);
+         methodNameLen = static_cast<uint32_t>(strlen(methodName));
          }
       }
    else
@@ -1223,22 +1103,22 @@ TR_Debug::methodSigCanBeFound(const char *methodSig, TR::CompilationFilters * fi
          {
          methodClass = methodSig;
          methodSignature = strchr(methodSig, ':');
-         methodClassLen = methodSignature - methodClass;
+         methodClassLen = static_cast<uint32_t>(methodSignature - methodClass);
          methodSignature++;
          methodName = strchr(methodSignature, ':');
-         methodSignatureLen = methodName - methodSignature;
+         methodSignatureLen = static_cast<uint32_t>(methodName - methodSignature);
          methodName++;
-         methodNameLen = strlen(methodName);
+         methodNameLen = static_cast<uint32_t>(strlen(methodName));
          }
       else
          {
          methodName  = strchr(methodSig, '.');
-         methodClassLen = methodName - methodClass;
+         methodClassLen = static_cast<uint32_t>(methodName - methodClass);
          methodName++;
          methodSignature = strchr(methodName, '(');
-         methodSignatureLen = strlen(methodSignature);
+         methodSignatureLen = static_cast<uint32_t>(strlen(methodSignature));
          TR_ASSERT(methodSignature, "unable to pattern match java method signature");
-         methodNameLen = methodSignature - methodName;
+         methodNameLen = static_cast<uint32_t>(methodSignature - methodName);
          }
       }
 
@@ -1283,7 +1163,7 @@ TR_Debug::methodSigCanBeFound(const char *methodSig, TR::CompilationFilters * fi
          filter = filter->findRegex(methodSig);
       }
 
-   bool excluded = filters->defaultExclude();
+   bool excluded = filters->defaultExclude() != 0;
    if (filter)
       {
       switch (filter->getFilterType())
@@ -1367,7 +1247,7 @@ TR_Debug::methodCanBeRelocated(TR_Memory *trMemory, TR_ResolvedMethod *method, T
 int32_t *
 TR_Debug::loadCustomStrategy(char *fileName)
    {
-   TR_VerboseLog::vlogAcquire();
+   TR_VerboseLog::CriticalSection vlogLock;
    int32_t *customStrategy = NULL;
    FILE *optFile = fopen(fileName, "r");
    if (optFile)
@@ -1389,7 +1269,7 @@ TR_Debug::loadCustomStrategy(char *fileName)
             continue;
 
          char *name = strchr(lineBuffer, ':') + 2; // 2 moves past the colon and the space
-         int32_t nameLen = strcspn(name, " \n");
+         int32_t nameLen = static_cast<int32_t>(strcspn(name, " \n"));
 
          int32_t optNum;
          for (optNum = 0; optNum < OMR::numOpts; optNum++)
@@ -1425,6 +1305,5 @@ TR_Debug::loadCustomStrategy(char *fileName)
       {
       TR_VerboseLog::writeLine(TR_Vlog_INFO, "optFile not found: '%s'", fileName);
       }
-   TR_VerboseLog::vlogRelease();
    return customStrategy;
    }

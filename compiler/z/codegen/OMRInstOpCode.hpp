@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -318,13 +318,14 @@ namespace Z
 #define   VRRg_FORMAT   83
 #define   VRRh_FORMAT   84
 #define   VRRi_FORMAT   85
-#define   VRSa_FORMAT   86
-#define   VRSb_FORMAT   87
-#define   VRSc_FORMAT   88
-#define   VRSd_FORMAT   89
-#define   VRV_FORMAT    90
-#define   VRX_FORMAT    91
-#define   VSI_FORMAT    92
+#define   VRRk_FORMAT   86
+#define   VRSa_FORMAT   87
+#define   VRSb_FORMAT   88
+#define   VRSc_FORMAT   89
+#define   VRSd_FORMAT   90
+#define   VRV_FORMAT    91
+#define   VRX_FORMAT    92
+#define   VSI_FORMAT    93
 
 /* Instruction Properties (One hot encoding) */
 #define S390OpProp_None                   static_cast<uint64_t>(0x0000000000000000ull)
@@ -397,7 +398,7 @@ class InstOpCode: public OMR::InstOpCode
    {
    protected:
 
-   InstOpCode():  OMR::InstOpCode(BAD)  {}
+   InstOpCode():  OMR::InstOpCode(bad)  {}
    InstOpCode(Mnemonic m): OMR::InstOpCode(m)  {}
 
    public:
@@ -609,7 +610,7 @@ class InstOpCode: public OMR::InstOpCode
    uint64_t readsFPC() {return metadata[_mnemonic].properties & S390OpProp_ReadsFPC; }
    uint64_t setsFPC() {return metadata[_mnemonic].properties & S390OpProp_SetsFPC; }
 
-   uint64_t isLabel() {return _mnemonic == LABEL;}
+   uint64_t isLabel() {return _mnemonic == label;}
 
    uint64_t usesM3() {return metadata[_mnemonic].properties & S390OpProp_UsesM3;}
    uint64_t usesM4() {return metadata[_mnemonic].properties & S390OpProp_UsesM4;}
@@ -674,6 +675,7 @@ class InstOpCode: public OMR::InstOpCode
    static Mnemonic getAddThreeRegOpCode();
    static Mnemonic getAddLogicalThreeRegOpCode();
    static Mnemonic getAddLogicalImmOpCode();
+   static Mnemonic getAddImmOpCode();
    static Mnemonic getAddLogicalRegRegImmediateOpCode();
    static Mnemonic getSubstractOpCode();
    static Mnemonic getSubstractRegOpCode();

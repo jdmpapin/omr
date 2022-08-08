@@ -1,7 +1,7 @@
 #! /usr/bin/env python
 
 ###############################################################################
-# Copyright (c) 2018, 2020 IBM Corp. and others
+# Copyright (c) 2018, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -471,7 +471,7 @@ class CppGenerator:
             writer.write("{fname} = clientObj_{fname};\n".format(fname=field.name()))
 
         for callback in class_desc.callbacks():
-            fmt = "{impl_cast}->{registrar}(reinterpret_cast<void*>(&{thunk}));\n"
+            fmt = "{impl_cast}->{registrar}((void*)(&{thunk}));\n"
             registrar = callback_setter_name(callback)
             thunk = self.callback_thunk_name(class_desc, callback)
             writer.write(fmt.format(impl_cast=impl_cast,registrar=registrar,thunk=thunk))
@@ -603,7 +603,7 @@ class CppGenerator:
         writer.write("{t}* {arg} = new {t}[{num}];\n".format(t=vararg_type,arg=vararg.name(),num=vararg.array_len()))
         writer.write("va_list vararg;\n")
         writer.write("va_start(vararg, {num});\n".format(num=vararg.array_len()))
-        writer.write("for (int i = 0; i < {num}; ++i) {{ {arg}[i] = va_arg(vararg, {t}); }}\n".format(num=vararg.array_len(),arg=vararg.name(),t=vararg_type))
+        writer.write("for (auto i = 0U; i < unsigned({num}); ++i) {{ {arg}[i] = va_arg(vararg, {t}); }}\n".format(num=vararg.array_len(),arg=vararg.name(),t=vararg_type))
         writer.write("va_end(vararg);\n")
         get_ret = "" if "none" == desc.return_type().name() else "{rtype} ret = ".format(rtype=rtype)
         writer.write("{get_ret}{name}({args});\n".format(get_ret=get_ret,name=name,args=args))

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -19,9 +19,11 @@
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
+#if defined(J9ZOS390)
 #pragma csect(CODE,"TRCGBase#C")
 #pragma csect(STATIC,"TRCGBase#S")
 #pragma csect(TEST,"TRCGBase#T")
+#endif
 
 #include "codegen/CodeGenerator.hpp"
 
@@ -66,7 +68,6 @@
 #include "env/CompilerEnv.hpp"
 #include "env/IO.hpp"
 #include "env/PersistentInfo.hpp"
-#include "env/StackMemoryRegion.hpp"
 #include "env/TRMemory.hpp"
 #include "env/jittypes.h"
 #include "il/AliasSetInterface.hpp"
@@ -111,35 +112,69 @@
 #include "stdarg.h"
 #include "OMR/Bytes.hpp"
 
+#if defined(OSX) && defined(AARCH64)
+#include <pthread.h> // for pthread_jit_write_protect_np
+#endif
+
 namespace TR { class Optimizer; }
 namespace TR { class RegisterDependencyConditions; }
 
+OMR::TreeEvaluatorFunctionPointerTable OMR::CodeGenerator::_nodeToInstrEvaluators;
 
-#if defined(TR_TARGET_X86) || defined(TR_TARGET_POWER)
-   #define butestEvaluator badILOpEvaluator
-   #define sutestEvaluator badILOpEvaluator
-   #define iucmpEvaluator badILOpEvaluator
-   #define icmpEvaluator badILOpEvaluator
-#endif
-#ifdef TR_TARGET_X86  //x86 only
-    #define bucmpEvaluator badILOpEvaluator
-    #define bcmpEvaluator badILOpEvaluator
-    #define sucmpEvaluator badILOpEvaluator
-    #define scmpEvaluator badILOpEvaluator
-#endif
-#if defined(TR_TARGET_AMD64) || defined(TR_TARGET_POWER) //ppc and amd64
-    #define zccAddSubEvaluator badILOpEvaluator
-#endif
-
-TR_TreeEvaluatorFunctionPointer
-OMR::CodeGenerator::_nodeToInstrEvaluators[] =
+OMR::TreeEvaluatorFunctionPointer
+OMR::TreeEvaluatorFunctionPointerTable::table[] =
    {
-   #include "codegen/TreeEvaluatorTable.hpp"
+#define OPCODE_MACRO(\
+   opcode, \
+   name, \
+   prop1, \
+   prop2, \
+   prop3, \
+   prop4, \
+   dataType, \
+   typeProps, \
+   childProps, \
+   swapChildrenOpcode, \
+   reverseBranchOpcode, \
+   boolCompareOpcode, \
+   ifCompareOpcode, \
+   ...) TR::TreeEvaluator::opcode ## Evaluator,
+
+   TR::TreeEvaluator::BadILOpEvaluator,
+
+#include "il/Opcodes.enum"
+#undef OPCODE_MACRO
+
+#define VECTOR_OPERATION_MACRO(\
+   operation, \
+   name, \
+   prop1, \
+   prop2, \
+   prop3, \
+   prop4, \
+   dataType, \
+   typeProps, \
+   childProps, \
+   swapChildrenOpcode, \
+   reverseBranchOpcode, \
+   boolCompareOpcode, \
+   ifCompareOpcode, \
+   ...) TR::TreeEvaluator::operation ## Evaluator,
+
+   TR::TreeEvaluator::BadILOpEvaluator,
+
+#include "il/VectorOperations.enum"
+#undef VECTOR_OPERATION_MACRO
    };
 
-static_assert(TR::NumIlOps ==
-              (sizeof(OMR::CodeGenerator::_nodeToInstrEvaluators) / sizeof(OMR::CodeGenerator::_nodeToInstrEvaluators[0])),
-              "NodeToInstrEvaluators is not the correct size");
+
+void OMR::TreeEvaluatorFunctionPointerTable::checkTableSize()
+   {
+   static_assert((TR::NumScalarIlOps + TR::NumVectorOperations) ==
+              (sizeof(table) / sizeof(table[0])),
+              "OMR::TreeEvaluatorFunctionPointerTable::table is not the correct size");
+   }
+
 
 #define OPT_DETAILS "O^O CODE GENERATION: "
 
@@ -168,7 +203,6 @@ OMR::CodeGenerator::CodeGenerator(TR::Compilation *comp) :
       _implicitExceptionPoint(0),
       _localsThatAreStored(NULL),
       _numLocalsWhenStoreAnalysisWasDone(-1),
-      _ialoadUnneeded(comp->trMemory()),
       _symRefTab(comp->getSymRefTab()),
       _vmThreadRegister(NULL),
       _stackAtlas(NULL),
@@ -217,8 +251,12 @@ OMR::CodeGenerator::CodeGenerator(TR::Compilation *comp) :
       _spill4FreeList(getTypedAllocator<TR_BackingStore*>(comp->allocator())),
       _spill8FreeList(getTypedAllocator<TR_BackingStore*>(comp->allocator())),
       _spill16FreeList(getTypedAllocator<TR_BackingStore*>(comp->allocator())),
+      _spill32FreeList(getTypedAllocator<TR_BackingStore*>(comp->allocator())),
+      _spill64FreeList(getTypedAllocator<TR_BackingStore*>(comp->allocator())),
       _internalPointerSpillFreeList(getTypedAllocator<TR_BackingStore*>(comp->allocator())),
+      _firstTimeLiveOOLRegisterList(NULL),
       _spilledRegisterList(NULL),
+      _afterRA(false),
       _referencedRegistersList(NULL),
       _variableSizeSymRefPendingFreeList(getTypedAllocator<TR::SymbolReference*>(comp->allocator())),
       _variableSizeSymRefFreeList(getTypedAllocator<TR::SymbolReference*>(comp->allocator())),
@@ -245,7 +283,10 @@ OMR::CodeGenerator::CodeGenerator(TR::Compilation *comp) :
       _codeGenPhase(self()),
       _symbolDataTypeMap(comp->allocator()),
       _lmmdFailed(false),
-      _objectFormat(NULL)
+      _objectFormat(NULL),
+      _snippetsToBePatchedOnClassUnload(getTypedAllocator<TR::Snippet*>(comp->allocator())),
+      _methodSnippetsToBePatchedOnClassUnload(getTypedAllocator<TR::Snippet*>(comp->allocator())),
+      _snippetsToBePatchedOnClassRedefinition(getTypedAllocator<TR::Snippet*>(comp->allocator()))
    {
    }
 
@@ -274,7 +315,7 @@ OMR::CodeGenerator::initialize()
    for (i = 0 ; i < TR_NumLinkages; ++i)
       _linkages[i] = NULL;
 
-   _maxObjectSizeGuaranteedNotToOverflow = (maxSize > UINT_MAX) ? UINT_MAX : maxSize;
+   _maxObjectSizeGuaranteedNotToOverflow = static_cast<uint32_t>((maxSize > UINT_MAX) ? UINT_MAX : maxSize);
 
    if (comp->getDebug())
       {
@@ -619,8 +660,6 @@ OMR::CodeGenerator::doInstructionSelection()
    {
    TR::Compilation *comp = self()->comp();
 
-   self()->setNextAvailableBlockIndex(comp->getFlowGraph()->getNextNodeNumber() + 1);
-
    // Set default value for pre-prologue size
    //
    self()->setPrePrologueSize(0);
@@ -637,9 +676,6 @@ OMR::CodeGenerator::doInstructionSelection()
 
    self()->beginInstructionSelection();
 
-   {
-   TR::StackMemoryRegion stackMemoryRegion(*self()->trMemory());
-
    TR_BitVector *liveLocals = self()->getLiveLocals();
    TR_BitVector nodeChecklistBeforeDump(comp->getNodeCount(), self()->trMemory(), stackAlloc, growable);
 
@@ -655,7 +691,6 @@ OMR::CodeGenerator::doInstructionSelection()
          {
          TR::Block *block = node->getBlock();
          self()->setCurrentEvaluationBlock(block);
-         self()->setCurrentBlockIndex(block->getNumber());
 
          if (!block->isExtensionOfPreviousBlock())
             {
@@ -816,7 +851,6 @@ OMR::CodeGenerator::doInstructionSelection()
    //
    self()->insertInstructionPrefetches();
 #endif
-   } // scope of the stack memory region
 
    if (comp->getOption(TR_TraceCG) || debug("traceGRA"))
       {
@@ -833,6 +867,71 @@ OMR::CodeGenerator::doInstructionSelection()
    if (comp->getOption(TR_TraceCG))
       {
       diagnostic("</selection>\n");
+      }
+   }
+
+void
+OMR::CodeGenerator::doRegisterAssignment(TR_RegisterKinds kindsToAssign)
+   {
+   TR::Instruction *prevInstr = NULL;
+   TR::Instruction *currInstr = self()->getAppendInstruction();
+
+   if (!self()->isOutOfLineColdPath())
+      {
+      auto *firstTimeLiveOOLRegisterList = new (self()->trHeapMemory()) TR::list<TR::Register*>(getTypedAllocator<TR::Register*>(self()->comp()->allocator()));
+      self()->setFirstTimeLiveOOLRegisterList(firstTimeLiveOOLRegisterList);
+
+      auto *spilledRegisterList = new (self()->trHeapMemory()) TR::list<TR::Register*>(getTypedAllocator<TR::CFGEdge*>(self()->comp()->allocator()));
+      self()->setSpilledRegisterList(spilledRegisterList);
+      }
+
+   if (self()->getDebug())
+      {
+      self()->getDebug()->startTracingRegisterAssignment();
+      }
+
+   while (currInstr)
+      {
+      prevInstr = currInstr->getPrev();
+
+      self()->tracePreRAInstruction(currInstr);
+
+      if (currInstr->getNode()->getOpCodeValue() == TR::BBEnd)
+         {
+         self()->comp()->setCurrentBlock(currInstr->getNode()->getBlock());
+         }
+
+      // Main register assignment procedure
+      currInstr->assignRegisters(TR_GPR);
+
+      if (currInstr->isLabel())
+         {
+         if (currInstr->getLabelSymbol() != NULL)
+            {
+            if (currInstr->getLabelSymbol()->isStartInternalControlFlow())
+               {
+               self()->decInternalControlFlowNestingDepth();
+               }
+            if (currInstr->getLabelSymbol()->isEndInternalControlFlow())
+               {
+               self()->incInternalControlFlowNestingDepth();
+               }
+            }
+         }
+
+      self()->freeUnlatchedRegisters();
+      self()->buildGCMapsForInstructionAndSnippet(currInstr);
+
+      self()->tracePostRAInstruction(currInstr);
+
+      currInstr = prevInstr;
+      }
+
+   _afterRA = true;
+
+   if (self()->getDebug())
+      {
+      self()->getDebug()->stopTracingRegisterAssignment();
       }
    }
 
@@ -1090,6 +1189,12 @@ OMR::CodeGenerator::needRelocationsForPersistentInfoData()
    }
 
 bool
+OMR::CodeGenerator::needRelocationsForPersistentProfileInfoData()
+   {
+   return self()->comp()->compileRelocatableCode();
+   }
+
+bool
 OMR::CodeGenerator::needRelocationsForCurrentMethodPC()
    {
    return self()->comp()->compileRelocatableCode();
@@ -1112,9 +1217,10 @@ OMR::CodeGenerator::isGlobalVRF(TR_GlobalRegisterNumber n)
 bool
 OMR::CodeGenerator::supportsMergingGuards()
    {
-   return self()->getSupportsVirtualGuardNOPing() &&
-          self()->comp()->performVirtualGuardNOPing() &&
-          !self()->comp()->compileRelocatableCode();
+   return !self()->comp()->getOption(TR_DisableOSRGuardMerging) &&
+            self()->getSupportsVirtualGuardNOPing() &&
+            self()->comp()->performVirtualGuardNOPing() &&
+            !self()->comp()->compileRelocatableCode();
    }
 
 bool
@@ -1946,10 +2052,9 @@ OMR::CodeGenerator::processRelocations()
    while(iterator != _relocationList.end())
       {
       // Traverse the non-AOT/non-external labels first
-	  (*iterator)->apply(self());
+      (*iterator)->apply(self());
       ++iterator;
       }
-   //TR_ASSERTC(missedSite == -1, comp(), "Site %d is missing relocation\n", missedSite);
    }
 
 #if defined(TR_HOST_ARM)
@@ -2017,7 +2122,7 @@ OMR::CodeGenerator::compute32BitMagicValues(
          *s = div32BitMagicValues[mid][2];
          return;
          }
-      else if (d > div32BitMagicValues[mid][0])
+      else if (unsigned(d) > div32BitMagicValues[mid][0])
          {
          first = mid+1;
          }
@@ -2160,7 +2265,7 @@ OMR::CodeGenerator::computeUnsigned64BitMagicValues(uint64_t d, int32_t* s, int3
    uint64_t nc, delta, q1, r1, q2, r2;
 
    *a = 0; /* initialize "add" indicator */
-   nc = -1 - (-d)%d;
+   nc = -1 - ((~d) + 1)%d;
    p = 63; /* initialize p */
    q1 = 0x8000000000000000ull/nc; /* initialize 2**p/nc */
    r1 = 0x8000000000000000ull- q1*nc; /* initialize rem(2**p,nc) */
@@ -2224,7 +2329,7 @@ OMR::CodeGenerator::alignBinaryBufferCursor()
 
       alignedBinaryBufferCursor -= offset;
       _binaryBufferCursor = alignedBinaryBufferCursor;
-      self()->setJitMethodEntryPaddingSize(_binaryBufferCursor - _binaryBufferStart);
+      self()->setJitMethodEntryPaddingSize(static_cast<uint32_t>(_binaryBufferCursor - _binaryBufferStart));
       memset(_binaryBufferStart, 0, self()->getJitMethodEntryPaddingSize());
       }
 
@@ -2246,8 +2351,6 @@ OMR::CodeGenerator::getJitMethodEntryAlignmentBoundary()
 int32_t
 OMR::CodeGenerator::setEstimatedLocationsForSnippetLabels(int32_t estimatedSnippetStart)
    {
-   TR::Snippet *cursor;
-
    self()->setEstimatedSnippetStart(estimatedSnippetStart);
 
    for (auto iterator = _snippetList.begin(); iterator != _snippetList.end(); ++iterator)
@@ -2270,15 +2373,19 @@ OMR::CodeGenerator::emitSnippets()
    uint8_t *codeOffset;
    uint8_t *retVal;
 
+#if defined(OSX) && defined(AARCH64)
+   pthread_jit_write_protect_np(0);
+#endif
+
    for (auto iterator = _snippetList.begin(); iterator != _snippetList.end(); ++iterator)
       {
       codeOffset = (*iterator)->emitSnippet();
       if (codeOffset != NULL)
          {
-         TR_ASSERT((*iterator)->getLength(self()->getBinaryBufferCursor()-self()->getBinaryBufferStart()) + self()->getBinaryBufferCursor() >= codeOffset,
+         TR_ASSERT((*iterator)->getLength(static_cast<int32_t>(self()->getBinaryBufferCursor()-self()->getBinaryBufferStart())) + self()->getBinaryBufferCursor() >= codeOffset,
                  "%s length estimate must be conservatively large (snippet @ " POINTER_PRINTF_FORMAT ", estimate=%d, actual=%d)",
                  self()->getDebug()->getName(*iterator), *iterator,
-                 (*iterator)->getLength(self()->getBinaryBufferCursor()-self()->getBinaryBufferStart()),
+                 (*iterator)->getLength(static_cast<int32_t>(self()->getBinaryBufferCursor()-self()->getBinaryBufferStart())),
                  codeOffset - self()->getBinaryBufferCursor());
          self()->setBinaryBufferCursor(codeOffset);
          }
@@ -2292,6 +2399,10 @@ OMR::CodeGenerator::emitSnippets()
       {
       self()->emitDataSnippets();
       }
+
+#if defined(OSX) && defined(AARCH64)
+   pthread_jit_write_protect_np(1);
+#endif
 
    return retVal;
    }
@@ -2365,8 +2476,7 @@ OMR::CodeGenerator::treeContainsCall(TR::TreeTop * treeTop)
        l1OpCode == TR::New             ||
        l1OpCode == TR::newarray        ||
        l1OpCode == TR::anewarray       ||
-       l1OpCode == TR::multianewarray  ||
-       l1OpCode == TR::MergeNew)
+       l1OpCode == TR::multianewarray)
       return true;
 
    return(node->getNumChildren()!=0 && node->getFirstChild()->getOpCode().isCall() &&
@@ -2442,36 +2552,36 @@ bool OMR::CodeGenerator::areMergeableGuards(TR::Instruction *earlierGuard, TR::I
           && (!earlierGuard->getNode()->isStopTheWorldGuard() || laterGuard->getNode()->isStopTheWorldGuard());
    }
 
-TR::Instruction *OMR::CodeGenerator::getVirtualGuardForPatching(TR::Instruction *vgdnop)
+TR::Instruction *OMR::CodeGenerator::getVirtualGuardForPatching(TR::Instruction *vgnop)
    {
-   TR_ASSERT(vgdnop->isVirtualGuardNOPInstruction(),
-      "getGuardForPatching called with non VirtualGuardNOPInstruction [%p] - this only works for guards!", vgdnop);
+   TR_ASSERT(vgnop->isVirtualGuardNOPInstruction(),
+      "getGuardForPatching called with non VirtualGuardNOPInstruction [%p] - this only works for guards!", vgnop);
 
-   if (!vgdnop->isMergeableGuard())
-      return vgdnop;
+   if (!vgnop->isMergeableGuard())
+      return vgnop;
 
    // If there are no previous instructions the instruction must be the patch point
    // as there is nothing to merge with
-   if (!vgdnop->getPrev())
-      return vgdnop;
+   if (!vgnop->getPrev())
+      return vgnop;
 
    // Guard merging is only done when the guard trees are consecutive in treetop order
    // only separated by BBStart and BBEnd trees Skip back to the BBStart since we need
-   // to get the block for vgdnop
-   if (vgdnop->getPrev()->getNode()->getOpCodeValue() != TR::BBStart)
-      return vgdnop;
+   // to get the block for vgnop
+   if (vgnop->getPrev()->getNode()->getOpCodeValue() != TR::BBStart)
+      return vgnop;
 
    // there could be local RA generated reg-reg movs between guards so we resort to checking the
    // trees and making sure that the guards are in treetop order
    // we only merge blocks in the same extended blocks - virtual guard head merger will
    // arrange for this to happen when possible for guards
-   TR::Instruction *toReturn = vgdnop;
-   TR::Block *extendedBlockStart = vgdnop->getPrev()->getNode()->getBlock()->startOfExtendedBlock();
-   for (TR::Instruction *prevI = vgdnop->getPrev(); prevI; prevI = prevI->getPrev())
+   TR::Instruction *toReturn = vgnop;
+   TR::Block *extendedBlockStart = vgnop->getPrev()->getNode()->getBlock()->startOfExtendedBlock();
+   for (TR::Instruction *prevI = vgnop->getPrev(); prevI; prevI = prevI->getPrev())
       {
       if (prevI->isVirtualGuardNOPInstruction())
          {
-         if (self()->areMergeableGuards(prevI, vgdnop))
+         if (self()->areMergeableGuards(prevI, vgnop))
             {
             toReturn = prevI;
             }
@@ -2483,7 +2593,7 @@ TR::Instruction *OMR::CodeGenerator::getVirtualGuardForPatching(TR::Instruction 
       else
          {
          if (prevI->isMergeableGuard() &&
-             prevI->getNode()->getBranchDestination() == vgdnop->getNode()->getBranchDestination())
+             prevI->getNode()->getBranchDestination() == vgnop->getNode()->getBranchDestination())
             {
             // instruction tied to an acceptable guard so do nothing and continue
             }
@@ -2500,31 +2610,31 @@ TR::Instruction *OMR::CodeGenerator::getVirtualGuardForPatching(TR::Instruction 
             }
          }
       }
-   if (toReturn != vgdnop)
+   if (toReturn != vgnop)
       {
       TR::DebugCounter::incStaticDebugCounter(self()->comp(), TR::DebugCounter::debugCounterName(self()->comp(), "guardMerge/(%s)", self()->comp()->signature()));
       if (self()->comp()->getOption(TR_TraceCG))
-         traceMsg(self()->comp(), "vgdnop instruction [%p] begins scanning for patch instructions for mergeable guard [%p]\n", vgdnop, toReturn);
+         traceMsg(self()->comp(), "vgnop instruction [%p] begins scanning for patch instructions for mergeable guard [%p]\n", vgnop, toReturn);
       }
    return toReturn;
    }
 
 TR::Instruction
-*OMR::CodeGenerator::getInstructionToBePatched(TR::Instruction *vgdnop)
+*OMR::CodeGenerator::getInstructionToBePatched(TR::Instruction *vgnop)
    {
    TR::Instruction   * nextI;
    TR::Node          *firstBBEnd = NULL;
 
-   for (nextI=self()->getVirtualGuardForPatching(vgdnop)->getNext(); nextI!=NULL; nextI=nextI->getNext())
+   for (nextI=self()->getVirtualGuardForPatching(vgnop)->getNext(); nextI!=NULL; nextI=nextI->getNext())
       {
       if (nextI->isVirtualGuardNOPInstruction())
          {
-         if (!self()->areMergeableGuards(vgdnop, nextI))
+         if (!self()->areMergeableGuards(vgnop, nextI))
             return NULL;
          continue;
          }
 
-      if (nextI->isPatchBarrier() || self()->comp()->isPICSite(nextI))
+      if (nextI->isPatchBarrier(self()) || self()->comp()->isPICSite(nextI))
          return NULL;
 
       if (nextI->getEstimatedBinaryLength() > 0)
@@ -2552,9 +2662,9 @@ TR::Instruction
 
 
 int32_t
-OMR::CodeGenerator::sizeOfInstructionToBePatched(TR::Instruction *vgdnop)
+OMR::CodeGenerator::sizeOfInstructionToBePatched(TR::Instruction *vgnop)
    {
-   TR::Instruction *instToBePatched = self()->getInstructionToBePatched(vgdnop);
+   TR::Instruction *instToBePatched = self()->getInstructionToBePatched(vgnop);
    if (instToBePatched)
       return instToBePatched->getBinaryLengthLowerBound();
    else
@@ -2562,22 +2672,22 @@ OMR::CodeGenerator::sizeOfInstructionToBePatched(TR::Instruction *vgdnop)
    }
 
 int32_t
-OMR::CodeGenerator::sizeOfInstructionToBePatchedHCRGuard(TR::Instruction *vgdnop)
+OMR::CodeGenerator::sizeOfInstructionToBePatchedHCRGuard(TR::Instruction *vgnop)
    {
    TR::Instruction   *nextI;
    TR::Node          *firstBBEnd = NULL;
    int32_t             accumulatedSize = 0;
 
-   for (nextI=self()->getInstructionToBePatched(vgdnop); nextI!=NULL; nextI=nextI->getNext())
+   for (nextI=self()->getInstructionToBePatched(vgnop); nextI!=NULL; nextI=nextI->getNext())
       {
       if (nextI->isVirtualGuardNOPInstruction())
          {
-         if (!self()->areMergeableGuards(vgdnop, nextI))
+         if (!self()->areMergeableGuards(vgnop, nextI))
             break;
          continue;
          }
 
-      if (nextI->isPatchBarrier() || self()->comp()->isPICSite(nextI))
+      if (nextI->isPatchBarrier(self()) || self()->comp()->isPICSite(nextI))
          break;
 
       accumulatedSize += nextI->getBinaryLengthLowerBound();
@@ -2658,7 +2768,7 @@ int32_t leadingZeroes (int64_t inputWord)
       testWord = inputWord & byteMask;
       if (testWord != 0)
          {
-         byteValue = testWord >> (56 - bitCount);
+         byteValue = static_cast<uint8_t>(testWord >> (56 - bitCount));
          return bitCount + CS2::BitManipulator::LeadingZeroes(byteValue);
          }
       byteMask >>= 8;
@@ -3184,9 +3294,12 @@ OMR::CodeGenerator::isInMemoryInstructionCandidate(TR::Node * node)
    // 2) valueChild
    // 3) address under valueChild
 
-   if (node->getFirstChild()->isSingleRefUnevaluated() &&
-       valueChild->isSingleRefUnevaluated() &&
-       valueChild->getFirstChild()->isSingleRefUnevaluated())
+   if (node->getFirstChild()->getReferenceCount() == 1 &&
+       node->getFirstChild()->getRegister() == NULL &&
+       valueChild->getReferenceCount() == 1 &&
+       valueChild->getRegister() == NULL &&
+       valueChild->getFirstChild()->getReferenceCount() == 1 &&
+       valueChild->getFirstChild()->getRegister() == NULL)
       {
       }
    else

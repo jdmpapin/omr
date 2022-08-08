@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2020 IBM Corp. and others
+ * Copyright (c) 2019, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -77,7 +77,40 @@ class RVMemoryArgument
 #define FloatReturn                 0x08
 #define FloatArgument               0x10
 #define CallerAllocatesBackingStore 0x20
-#define RV_Reserved              0x40
+#define RV_Reserved                 0x40
+
+#define FOR_EACH_REGISTER(machine, block)                                        \
+   for (auto regNum = TR::RealRegister::FirstGPR; regNum <= TR::RealRegister::LastGPR; regNum++) \
+      {                                                                          \
+      TR::RealRegister *reg                                                      \
+                   = machine->getRealRegister(regNum);                           \
+      { block; }                                                                 \
+      }                                                                          \
+   for (auto regNum = TR::RealRegister::FirstFPR; regNum <= TR::RealRegister::FirstFPR; regNum++) \
+      {                                                                          \
+      TR::RealRegister *reg                                                      \
+                   = machine->getRealRegister(regNum);                           \
+      { block; }                                                                 \
+      }
+
+#define FOR_EACH_RESERVED_REGISTER(machine, props, block)                        \
+   FOR_EACH_REGISTER(machine,                                                    \
+   if (props._registerFlags[regNum] & RV_Reserved)                               \
+      { block; }                                                                 \
+   )
+
+#define FOR_EACH_CALLEE_SAVED_REGISTER(machine, props, block)                    \
+   FOR_EACH_REGISTER(machine,                                                    \
+   if (props._registerFlags[regNum] == Preserved)                                \
+      { block; }                                                                 \
+   )
+
+#define FOR_EACH_ASSIGNED_CALLEE_SAVED_REGISTER(machine, props, block)           \
+   FOR_EACH_CALLEE_SAVED_REGISTER(machine, props,                                \
+   if (reg->getHasBeenAssignedInMethod())                                        \
+      { block; }                                                                 \
+   )
+
 
 struct RVLinkageProperties
    {
@@ -96,7 +129,10 @@ struct RVLinkageProperties
    TR::RealRegister::RegNum _methodMetaDataRegister;
    TR::RealRegister::RegNum _stackPointerRegister;
    TR::RealRegister::RegNum _framePointerRegister;
-   uint8_t _numberOfDependencyGPRegisters;
+   TR::RealRegister::RegNum _computedCallTargetRegister; // for icallVMprJavaSendPatchupVirtual
+   TR::RealRegister::RegNum _vtableIndexArgumentRegister; // for icallVMprJavaSendPatchupVirtual
+   TR::RealRegister::RegNum _j9methodArgumentRegister; // for icallVMprJavaSendStatic
+   uint8_t _numberOfDependencyRegisters;
    int8_t _offsetToFirstLocal;
 
    uint32_t getNumIntArgRegs() const {return _numIntegerArgumentRegisters;}
@@ -223,6 +259,10 @@ struct RVLinkageProperties
       {
       return _methodMetaDataRegister;
       }
+   TR::RealRegister::RegNum getVMThreadRegister() const
+       {
+       return _methodMetaDataRegister;
+       }
 
    TR::RealRegister::RegNum getStackPointerRegister() const
       {
@@ -234,12 +274,32 @@ struct RVLinkageProperties
       return _framePointerRegister;
       }
 
+   TR::RealRegister::RegNum getComputedCallTargetRegister() const
+      {
+      return _computedCallTargetRegister;
+      }
+
+   TR::RealRegister::RegNum getVTableIndexArgumentRegister() const
+      {
+      return _vtableIndexArgumentRegister;
+      }
+
+   TR::RealRegister::RegNum getJ9MethodArgumentRegister() const
+      {
+      return _j9methodArgumentRegister;
+      }
+
    int32_t getOffsetToFirstLocal() const {return _offsetToFirstLocal;}
 
-   uint32_t getNumberOfDependencyGPRegisters() const {return _numberOfDependencyGPRegisters;}
-   };
+   uint32_t getNumberOfDependencyRegisters() const {return _numberOfDependencyRegisters;}
 
-}
+   /**
+    * @brief Initialize derived properties from register flags. This *must* be called
+    * after _registerFlags are populated.
+    */
+   void initialize();
+   }; // struct RVLinkageProperties
+}; // namespace TR
 
 namespace OMR
 {
@@ -255,12 +315,6 @@ class OMR_EXTENSIBLE Linkage : public OMR::Linkage
     */
    Linkage (TR::CodeGenerator *cg) : OMR::Linkage(cg) {}
 
-   /**
-    * @brief Parameter has to be on stack or not
-    * @param[in] parm : parameter symbol
-    * @return true if the parameter has to be on stack, false otherwise
-    */
-   virtual bool hasToBeOnStack(TR::ParameterSymbol *parm);
    /**
     * @brief Maps symbols to locations on stack
     * @param[in] method : method for which symbols are mapped on stack
@@ -280,12 +334,13 @@ class OMR_EXTENSIBLE Linkage : public OMR::Linkage
    /**
     * @brief Returns a MemoryReference for an outgoing argument
     * @param[in] argMemReg : register pointing to address for the outgoing argument
+    * @param[in] offset : offset from argMemReg in bytes
     * @param[in] argReg : register for the argument
     * @param[in] opCode : instruction OpCode for store to memory
     * @param[out] memArg : struct holding memory argument information
     * @return MemoryReference for the argument
     */
-   virtual TR::MemoryReference *getOutgoingArgumentMemRef(TR::Register *argMemReg, TR::Register *argReg, TR::InstOpCode::Mnemonic opCode, TR::RVMemoryArgument &memArg);
+   virtual TR::MemoryReference *getOutgoingArgumentMemRef(TR::Register *argMemReg, int32_t offset, TR::Register *argReg, TR::InstOpCode::Mnemonic opCode, TR::RVMemoryArgument &memArg);
 
    /**
     * @brief Saves arguments
@@ -361,11 +416,23 @@ class OMR_EXTENSIBLE Linkage : public OMR::Linkage
     * @param[in] node : caller node
     */
    virtual TR::Register *buildDirectDispatch(TR::Node *callNode) = 0;
+
    /**
     * @brief Builds indirect dispatch to method
     * @param[in] node : caller node
     */
    virtual TR::Register *buildIndirectDispatch(TR::Node *callNode) = 0;
+
+   /**
+    * @brief Stores parameters passed in linkage registers to the stack where the
+    *        method body expects to find them.
+    *
+    * @param[in] cursor : the instruction cursor to begin inserting copy instructions
+    * @param[in] parmsHaveBeenStored : true if the parameters have been stored to the stack
+    *
+    * @return The instruction cursor after copies inserted.
+    */
+   TR::Instruction *copyParametersToHomeLocation(TR::Instruction *cursor, bool parmsHaveBeenStored = false);
 
    };
 } // RV

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -56,9 +56,6 @@
 #include "ras/LogTracer.hpp"
 
 
-#define MIN_PROFILED_CALL_FREQUENCY (.65f) // lowered this from .80f since opportunities were being missed in WAS; in those cases getting rid of the call even in 65% of the cases was beneficial probably due to the improved icache impact
-#define TWO_CALL_PROFILED_FREQUENCY (.30f)
-#define MAX_FAN_IN (.60f)
 const float SECOND_BEST_MIN_CALL_FREQUENCY = .2275f; //65% of 35%
 
 #define partialTrace(r, ...) \
@@ -88,7 +85,7 @@ namespace TR { class ResolvedMethodSymbol; }
 namespace TR { class Symbol; }
 namespace TR { class SymbolReference; }
 namespace TR { class TreeTop; }
-struct TR_CallSite;
+class TR_CallSite;
 struct TR_CallTarget;
 struct TR_ParameterMapping;
 struct TR_VirtualGuardSelection;
@@ -110,7 +107,7 @@ class TR_InlinerTracer : public TR_LogTracer
       TR_PersistentMemory * trPersistentMemory(){ return _trMemory->trPersistentMemory(); }
 
       // determine the tracing level
-      bool partialLevel() 
+      bool partialLevel()
          {
          static const bool enableTracePartialInlining = feGetEnv("TR_EnableTracePartialInlining") != NULL;
          return enableTracePartialInlining;
@@ -131,7 +128,6 @@ class TR_InlinerTracer : public TR_LogTracer
       void dumpCallStack (TR_CallStack *, const char *fmt, ...);
       void dumpCallSite (TR_CallSite *, const char *fmt, ...);
       void dumpCallTarget (TR_CallTarget *, const char *fmt, ...);
-      void dumpInline (TR_LinkHead<TR_CallTarget> *targets, const char *fmt, ...);
       void dumpPartialInline (TR_InlineBlocks *partialInline);
 
       void dumpDeadCalls(TR_LinkHead<TR_CallSite> *sites);
@@ -554,6 +550,7 @@ class OMR_InlinerUtil : public TR::OptimizationUtil, public OMR_InlinerHelper
       virtual TR_PrexArgInfo *computePrexInfo(TR_CallTarget *target);
       virtual TR_PrexArgInfo *computePrexInfo(TR_CallTarget *target, TR_PrexArgInfo *callerArgInfo);
       virtual void clearArgInfoForNonInvariantArguments(TR_CallTarget *target, TR_InlinerTracer* tracer);
+      virtual void clearArgInfoForNonInvariantArguments(TR_PrexArgInfo* argInfo, TR::ResolvedMethodSymbol* methodSymbol, TR_InlinerTracer* tracer);
       virtual void collectCalleeMethodClassInfo(TR_ResolvedMethod *calleeMethod);
       /*
        * Implemented by down stream projects to request for certain optimizations based on \parm target
@@ -614,6 +611,7 @@ class OMR_InlinerPolicy : public TR::OptimizationPolicy, public OMR_InlinerHelpe
       bool aggressiveSmallAppOpts() { return comp()->getOption(TR_AggressiveOpts); }
       virtual bool willBeInlinedInCodeGen(TR::RecognizedMethod method);
       virtual bool canInlineMethodWhileInstrumenting(TR_ResolvedMethod *method);
+      virtual bool shouldRemoveDifferingTargets(TR::Node *callNode);
 
       /** \brief
        *     Determines whether to skip generation of HCR guards for a particular callee during inlining.

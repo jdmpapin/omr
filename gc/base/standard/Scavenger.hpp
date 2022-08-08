@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -70,6 +70,15 @@ class MM_Scavenger : public MM_Collector
 	/*
 	 * Data members
 	 */
+public:
+	struct {
+		/* The following start/end times record total cycle and cycle increment durations, done only by main thread. */
+		uint64_t cycleStart;
+		uint64_t cycleEnd;
+		uint64_t incrementStart;
+		uint64_t incrementEnd;
+	} _cycleTimes;
+
 private:
 	MM_ScavengerDelegate _delegate;
 
@@ -100,6 +109,7 @@ private:
 	bool _cachedSemiSpaceResizableFlag;
 	uintptr_t _minTenureFailureSize;
 	uintptr_t _minSemiSpaceFailureSize;
+	uintptr_t _recommendedThreads; /** Number of threads recommended to the dispatcher for the Scavenge task */
 
 	MM_CycleState _cycleState;  /**< Embedded cycle state to be used as the main cycle state for GC activity */
 	MM_CollectionStatisticsStandard _collectionStatistics;  /** Common collect stats (memory, time etc.) */
@@ -259,7 +269,22 @@ public:
 
 	MMINLINE bool copyAndForward(MM_EnvironmentStandard *env, volatile omrobjectptr_t *objectPtrIndirect);
 
+	/**
+	 * Handle the path after a failed attempt to forward an object:
+	 * try to reuse or abandon reserved memory for this threads destination object candidate.
+	 * Infrequent path, hence not inlined.
+	 */
+	void forwardingFailed(MM_EnvironmentStandard *env, MM_ForwardedHeader* forwardedHeader, omrobjectptr_t destinationObjectPtr, MM_CopyScanCacheStandard *copyCache);
+	
+	/**
+	 * Handle the path after a succeesful attempt to forward an object:
+	 * Update the alloc pointer and update various stats.
+	 * Frequent path, hence inlined.
+	 */	
+	MMINLINE void forwardingSucceeded(MM_EnvironmentStandard *env, MM_CopyScanCacheStandard *copyCache, void *newCacheAlloc, uintptr_t oldObjectAge, uintptr_t objectCopySizeInBytes, uintptr_t objectReserveSizeInBytes);
+
 	MMINLINE omrobjectptr_t copy(MM_EnvironmentStandard *env, MM_ForwardedHeader* forwardedHeader);
+	template <bool variant> omrobjectptr_t copyForVariant(MM_EnvironmentStandard *env, MM_ForwardedHeader* forwardedHeader);
 	
 	/* Flush remaining Copy Scan updates which would otherwise be discarded 
 	 * @param majorFlush last thread to flush updates should perform a major flush (push accumulated updates to history record) 
@@ -326,8 +351,7 @@ public:
 		/* Check last few LSB of the object address for probability 1/16 */
 		return (0 == ((uintptr_t)objectPtr & 0x78)); 
 	}
-	
-	
+
 	void deepScanOutline(MM_EnvironmentStandard *env, omrobjectptr_t objectPtr, uintptr_t priorityFieldOffset1, uintptr_t priorityFieldOffset2);
 
 	MMINLINE bool scavengeRememberedObject(MM_EnvironmentStandard *env, omrobjectptr_t objectPtr);
@@ -555,6 +579,15 @@ public:
 	bool canCalcGCStats(MM_EnvironmentStandard *env);
 	void calcGCStats(MM_EnvironmentStandard *env);
 
+	/**
+	 * The implementation of Adaptive Threading. This routine is called at the
+	 * end of each successful scavenge to determine the optimal number of threads for
+	 * the subsequent cycle. This is based on the completed cycle's stall/busy stats (adaptive model).
+	 * This function set's _recommendedThreads, which in turn get's used when dispatching
+	 * the next cycle's scavege task.
+	 */
+	void calculateRecommendedWorkingThreads(MM_EnvironmentStandard *env);
+
 	void scavenge(MM_EnvironmentBase *env);
 	bool scavengeCompletedSuccessfully(MM_EnvironmentStandard *env);
 	virtual	void mainThreadGarbageCollect(MM_EnvironmentBase *env, MM_AllocateDescription *allocDescription, bool initMarkMap = false, bool rebuildMarkBits = false);
@@ -742,11 +775,6 @@ public:
 		return concurrent_phase_idle != _concurrentPhase;
 	}
 	
-	/* TODO: remove once downstream projects start using isConcurrentCycleInProgress/isCurrentPhaseConcurrent */
-	bool isConcurrentInProgress() {
-		return concurrent_phase_idle != _concurrentPhase;
-	}
-	
 	bool isMutatorThreadInSyncWithCycle(MM_EnvironmentBase *env) {
 		return (env->_concurrentScavengerSwitchCount == _concurrentScavengerSwitchCount);
 	}
@@ -880,6 +908,7 @@ public:
 
 	MM_Scavenger(MM_EnvironmentBase *env, MM_HeapRegionManager *regionManager) :
 		MM_Collector()
+		, _cycleTimes()
 		, _delegate(env)
 		, _objectAlignmentInBytes(env->getObjectAlignmentInBytes())
 		, _isRememberedSetInOverflowAtTheBeginning(false)
@@ -901,6 +930,7 @@ public:
 		, _expandTenureOnFailedAllocate(true)
 		, _minTenureFailureSize(UDATA_MAX)
 		, _minSemiSpaceFailureSize(UDATA_MAX)
+		, _recommendedThreads(UDATA_MAX)
 		, _cycleState()
 		, _collectionStatistics()
 		, _cachedEntryCount(0)
@@ -923,7 +953,7 @@ public:
 		, _currentPhaseConcurrent(false)
 		, _concurrentScavengerSwitchCount(0)
 		, _shouldYield(false)
-		, _concurrentPhaseStats()
+		, _concurrentPhaseStats(OMR_GC_CYCLE_TYPE_SCAVENGE)
 #endif /* #if defined(OMR_GC_CONCURRENT_SCAVENGER) */
 
 		, _omrVM(env->getOmrVM())

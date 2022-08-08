@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -1125,7 +1125,7 @@ void OMR::Power::MemoryReference::mapOpCode(TR::Instruction *currentInstruction)
             break;
          }
       }
-   else if ((self()->getOffset() < LOWER_IMMED || self()->getOffset() > UPPER_IMMED || self()->getLabel()) && currentInstruction->cg()->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P10))
+   else if ((self()->getUnresolvedSnippet() == NULL) && (self()->getOffset() < LOWER_IMMED || self()->getOffset() > UPPER_IMMED || self()->getLabel()) && currentInstruction->cg()->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P10))
       {
       switch (currentInstruction->getOpCodeValue())
          {
@@ -1545,10 +1545,10 @@ void OMR::Power::MemoryReference::accessStaticItem(TR::Node *node, TR::SymbolRef
    bool isStaticField = isStatic && (ref->getCPIndex() > 0) && !symbol->isClassObject();
    bool isClass = isStatic && symbol->isClassObject();
    bool isPicSite = isClass;
-   if (isPicSite && !cg->comp()->compileRelocatableCode()
+   if (isPicSite
+       && !cg->comp()->compileRelocatableCode()
        && cg->wantToPatchClassPointer((TR_OpaqueClassBlock*)symbol->getStaticSymbol()->getStaticAddress(), node))
       {
-      TR_ASSERT(!comp->getOption(TR_AOT), "HCR: AOT is currently no supported");
       TR::Register *reg = _baseRegister = cg->allocateRegister();
       intptr_t address = (intptr_t)symbol->getStaticSymbol()->getStaticAddress();
       loadAddressConstantInSnippet(cg, node ? node : cg->getCurrentEvaluationTreeTop()->getNode(), address, reg, NULL, isStore?TR::InstOpCode::Op_st :TR::InstOpCode::Op_load, false, NULL);
@@ -1619,6 +1619,18 @@ void OMR::Power::MemoryReference::accessStaticItem(TR::Node *node, TR::SymbolRef
          {
          TR::Register *reg = _baseRegister = cg->allocateRegister();
          loadAddressConstant(cg, true, nodeForSymbol, (intptr_t)ref, reg, NULL, false, TR_ClassAddress);
+         return;
+         }
+      else if (symbol->isBlockFrequency() && cg->needRelocationsForPersistentProfileInfoData())
+         {
+         TR::Register *reg = _baseRegister = cg->allocateRegister();
+         loadAddressConstant(cg, true, nodeForSymbol, 1, reg, NULL, false, TR_BlockFrequency);
+         return;
+         }
+      else if (symbol->isRecompQueuedFlag() && cg->needRelocationsForPersistentProfileInfoData())
+         {
+         TR::Register *reg = _baseRegister = cg->allocateRegister();
+         loadAddressConstant(cg, true, nodeForSymbol, 1, reg, NULL, false, TR_RecompQueuedFlag);
          return;
          }
       else
@@ -1753,6 +1765,19 @@ void OMR::Power::MemoryReference::accessStaticItem(TR::Node *node, TR::SymbolRef
          loadAddressConstant(cg, true, nodeForSymbol, 1, reg, NULL, false, TR_DataAddress);
          return;
          }
+      else if (cg->needRelocationsForPersistentProfileInfoData() && symbol->isBlockFrequency())
+         {
+         TR::Register *reg = _baseRegister = cg->allocateRegister();
+         loadAddressConstant(cg, true, nodeForSymbol, 1, reg, NULL, false, TR_BlockFrequency);
+         return;
+         }
+      else if (cg->needRelocationsForPersistentProfileInfoData() && symbol->isRecompQueuedFlag())
+         {
+         TR::Register *reg = _baseRegister = cg->allocateRegister();
+         loadAddressConstant(cg, true, nodeForSymbol, 1, reg, NULL, false, TR_RecompQueuedFlag);
+         return;
+         }
+
       else if (refIsUnresolved || useUnresSnippetToAvoidRelo)
          {
          self()->setUnresolvedSnippet(new (cg->trHeapMemory()) TR::UnresolvedDataSnippet(cg, node, ref, isStore, false));

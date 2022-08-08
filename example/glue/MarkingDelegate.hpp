@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2020 IBM Corp. and others
+ * Copyright (c) 2017, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -150,11 +150,13 @@ public:
 	 * that would not be discovered in the subsequent traversal of the object reference graph depending from the
 	 * root set.
 	 *
-	 * For each root object identified, MM_MarkingScheme::scanObject() must be called via _markingScheme.
+	 * For each root object identified, MM_MarkingScheme::markObject() must be called via _markingScheme.
+	 * MM_MarkingScheme::markObject() besides marking the object as live (if already not marked by another root)
+	 * pushes the object onto the working stack for further scanning.
 	 *
 	 * @param env The environment for the calling thread
 	 */
-	void scanRoots(MM_EnvironmentBase *env);
+	void scanRoots(MM_EnvironmentBase *env, bool processLists = true);
 
 	/**
 	 * This method is called for every live object discovered during marking. It must return an object scanner instance that

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -69,6 +69,7 @@
 #include "infra/CfgEdge.hpp"
 #include "infra/CfgNode.hpp"
 #include "infra/ILWalk.hpp"
+#include "infra/String.hpp"
 #include "optimizer/Dominators.hpp"
 #include "optimizer/LocalAnalysis.hpp"
 #include "optimizer/LoopCanonicalizer.hpp"
@@ -90,10 +91,6 @@
 #include "runtime/J9Profiler.hpp"
 #include "env/PersistentCHTable.hpp"
 #include "env/VMJ9.h"
-#endif
-
-#if defined (_MSC_VER) && (_MSC_VER < 1900)
-#define snprintf _snprintf
 #endif
 
 #define DEFAULT_LOOP_LIMIT 100000000
@@ -394,7 +391,22 @@ int32_t TR_LoopVersioner::performWithoutDominators()
       //   break;
       //else
       //   _counter++;
+
       TR_RegionStructure *naturalLoop = nextWhileLoop->asRegion();
+
+      // HCR guard versioning removes edges from the CFG immediately (unlike
+      // versioning of regular conditionals/virtual guards, which leaves a
+      // trivially foldable conditional tree in place). The removal of
+      // particular edges can change loops into acyclic regions, so skip any
+      // region that is no longer a loop.
+      //
+      // (OSR guard versioning also removes edges immediately, but the targets
+      // of those edges are not within any loop, so their removal can't change
+      // loops into acyclic regions.)
+      //
+      if (!naturalLoop->isNaturalLoop())
+         continue;
+
       TR::Block *entryBlock = naturalLoop->getEntryBlock();
       if (!loopIsWorthVersioning(naturalLoop))
          continue;
@@ -996,7 +1008,6 @@ bool TR_LoopVersioner::detectInvariantArrayStoreChecks(List<TR::TreeTop> *arrayS
       bool sourceInvariant = false;
       if (arrayNode && valueNode)
          {
-         vcount_t visitCount;
          //visitCount = comp()->incVisitCount();
          //sourceInvariant = isExprInvariant(valueNode, visitCount);
 
@@ -1182,7 +1193,7 @@ TR::Node *TR_LoopVersioner::findCallNodeInBlockForGuard(TR::Node *node)
             int16_t callerIndex = ttNode->getInlinedSiteIndex();
             int16_t inlinedCallIndex = node->getInlinedSiteIndex();
 
-            if (inlinedCallIndex < comp()->getNumInlinedCallSites())
+            if (unsigned(inlinedCallIndex) < comp()->getNumInlinedCallSites())
                {
                TR_InlinedCallSite & ics = comp()->getInlinedCallSite(inlinedCallIndex);
                if ((ics._byteCodeInfo.getByteCodeIndex() == bcIndex) &&
@@ -1397,6 +1408,7 @@ bool TR_LoopVersioner::detectInvariantTrees(TR_RegionStructure *whileLoop, List<
              && (thisChild || nextRealNode)
              && node->isTheVirtualGuardForAGuardedInlinedCall()
              && !node->isHCRGuard()
+             && !node->isDirectMethodGuard()
              && !node->isBreakpointGuard())
             {
             if (!guardInfo)
@@ -1467,7 +1479,7 @@ bool TR_LoopVersioner::detectInvariantTrees(TR_RegionStructure *whileLoop, List<
                   }
                }
             }
-         else if (!node->isHCRGuard() && !node->isBreakpointGuard())
+         else if (!node->isHCRGuard() && !node->isDirectMethodGuard() && !node->isBreakpointGuard())
             {
             for (int32_t childNum=0;childNum < node->getNumChildren(); childNum++)
                {
@@ -1507,7 +1519,6 @@ bool TR_LoopVersioner::detectInvariantTrees(TR_RegionStructure *whileLoop, List<
                         }
                      else
                         {
-                        TR_InductionVariable *v;
                         bool isInductionVar=false;
                         int32_t symRefNum = child->getSymbolReference()->getReferenceNumber();
                         ListElement<int32_t> *versionableInductionVar = _versionableInductionVariables.getListHead();
@@ -1645,7 +1656,7 @@ TR::Node *TR_LoopVersioner::isDependentOnInvariant(TR::Node *useNode)
    cursor.SetToFirstOne();
 
    //int32_t defnIndex=cursor;
-   if(cursor<useDefInfo->getFirstRealDefIndex())
+   if(cursor<unsigned(useDefInfo->getFirstRealDefIndex()))
       return NULL;
 
    TR_ValueNumberInfo *valueNumberInfo = optimizer()->getValueNumberInfo();
@@ -1774,7 +1785,6 @@ bool TR_LoopVersioner::isVersionableArrayAccess(TR::Node * indexChild)
    bool mulNodeFound=false;
    bool addNodeFound=false;
    bool goodAccess=true;
-   vcount_t visitCount;
    if(!indexChild->getOpCode().hasSymbolReference())
       {
       while (indexChild->getOpCode().isAdd() || indexChild->getOpCode().isSub() ||
@@ -2449,12 +2459,22 @@ bool opCodeIsHoistable(TR::Node *node, TR::Compilation *comp)
 bool TR_LoopVersioner::isExprInvariant(TR::Node *node, bool ignoreHeapificationStore)
    {
    _visitedNodes.empty();
-	   return isExprInvariantRecursive(node, ignoreHeapificationStore);
-	   }
+   return isExprInvariantRecursive(node, ignoreHeapificationStore);
+   }
 
-	bool TR_LoopVersioner::isExprInvariantRecursive(TR::Node *node, bool ignoreHeapificationStore)
+bool TR_LoopVersioner::isExprInvariantRecursive(TR::Node *node, bool ignoreHeapificationStore)
    {
    static const bool paranoid = feGetEnv("TR_paranoidVersioning") != NULL;
+
+   // Do not attempt to privatize BCD type nodes because doing so can result in creating direct loads of BCD types which are currently
+   // not handled correctly within Java. BCDCHK IL will attempt to recreate a call to the original Java API for the corresponding BCD
+   // IL and it needs to be able to materialize the node representing the original byte array object. This is not possible if the byte
+   // array is stored on the stack.
+#ifdef J9_PROJECT_SPECIFIC
+   if (node->getType().isBCD())
+      return false;
+#endif
+
    if (paranoid && requiresPrivatization(node))
       return false;
 
@@ -2634,7 +2654,7 @@ int32_t *computeCallsiteCounts(TR_ScratchList<TR::Block> *loopBlocks, TR::Compil
 
 bool TR_LoopVersioner::checkProfiledGuardSuitability(TR_ScratchList<TR::Block> *loopBlocks, TR::Node *guardNode, TR::SymbolReference *callSymRef, TR::Compilation *comp)
    {
-   bool disableLoopCodeRatioCheck = feGetEnv("TR_DisableLoopCodeRatioCheck") != NULL;
+   static const bool disableLoopCodeRatioCheck = feGetEnv("TR_DisableLoopCodeRatioCheck") != NULL;
    bool risky = false;
    if (comp->getMethodHotness() >= hot && callSymRef)
       {
@@ -2651,7 +2671,7 @@ bool TR_LoopVersioner::checkProfiledGuardSuitability(TR_ScratchList<TR::Block> *
             TR::MethodSymbol *method = callSymRef->getSymbol()->castToMethodSymbol();
             TR_ResolvedMethod *owningMethod = callSymRef->getOwningMethod(comp);
             int32_t len = method->getMethod()->classNameLength();
-            char *s = classNameToSignature(method->getMethod()->classNameChars(), len, comp);
+            char *s = TR::Compiler->cls.classNameToSignature(method->getMethod()->classNameChars(), len, comp);
             TR_OpaqueClassBlock *classOfMethod = comp->fe()->getClassFromSignature(s, len, owningMethod, true);
             traceMsg(comp, "Found profiled gaurd %p is on interface %s\n", guardNode, TR::Compiler->cls.classNameChars(comp, classOfMethod, len));
             }
@@ -3174,7 +3194,6 @@ void TR_LoopVersioner::updateDefinitionsAndCollectProfiledExprs(TR::Node *parent
          _containsCall = true;
       }
 
-   static char *profileLongParms = feGetEnv("TR_ProfileLongParms");
    if (TR_LocalAnalysis::isSupportedOpCode(node->getOpCode(), comp()))
       {
       if (node->getType().isInt32() ||
@@ -3182,27 +3201,7 @@ void TR_LoopVersioner::updateDefinitionsAndCollectProfiledExprs(TR::Node *parent
            node->getOpCode().isLoadVar() &&
            node->getSymbolReference()->getSymbol()->isAutoOrParm()))
           {
-          if (profileLongParms &&
-              comp()->getMethodHotness() == hot &&
-              comp()->getRecompilationInfo())
-             {
-             if (node->getType().isInt64())
-                {
-                if (node->getSymbolReference()->getSymbol()->isParm())
-                   {
-                   // Switch this compile to profiling compilation in case a
-                   // potential opportunity is seen for specializing long parms (which are
-                   // usually invariant) is seen
-                   //
-                   optimizer()->switchToProfiling();
-                   //printf("Profiling longs in %s from LVE\n", comp()->signature());
-                   }
-                }
-             }
-
-          if (/* comp()->getRecompilationInfo() && */ collectProfiledExprs &&
-              ((!node->getType().isInt64()) ||
-               (profileLongParms /* && (valueInfo->getTopValue() == 0) */)))
+          if (collectProfiledExprs && !node->getType().isInt64())
              {
 #ifdef J9_PROJECT_SPECIFIC
              TR_ValueInfo *valueInfo = static_cast<TR_ValueInfo*>(TR_ValueProfileInfoManager::getProfiledValueInfo(node, comp(), ValueInfo));
@@ -3215,8 +3214,7 @@ void TR_LoopVersioner::updateDefinitionsAndCollectProfiledExprs(TR::Node *parent
                     // Only collect nodes from unspecialized blocks to avoid specializing the same nodes twice
                     !block->isSpecialized())
                    {
-                   if ((!node->getType().isInt64()) ||
-                       (profileLongParms && (valueInfo->getTopValue() == 0)))
+                   if (!node->getType().isInt64())
                       {
 
                      // Zero length contiguous array lengths mean further profiling is necessary
@@ -3611,7 +3609,7 @@ void TR_LoopVersioner::versionNaturalLoop(TR_RegionStructure *whileLoop, List<TR
                      }
                   }
 
-               TR_BlockStructure *newGotoBlockStructure = new (_cfg->structureRegion()) TR_BlockStructure(comp(), newGotoBlock->getNumber(), newGotoBlock);
+               TR_BlockStructure *newGotoBlockStructure = new (_cfg->structureMemoryRegion()) TR_BlockStructure(comp(), newGotoBlock->getNumber(), newGotoBlock);
                newGotoBlockStructure->setCreatedByVersioning(true);
                if (!_neitherLoopCold)
                   {
@@ -4095,8 +4093,6 @@ void TR_LoopVersioner::versionNaturalLoop(TR_RegionStructure *whileLoop, List<TR
          TR::TreeTop *tt = search.currentTreeTop();
          TR::Node *ttNode = tt->getNode();
          culprit = ttNode;
-         if (removedNodes.contains(ttNode))
-            continue;
 
          if (ttNode->isHCRGuard())
             {
@@ -4104,6 +4100,9 @@ void TR_LoopVersioner::versionNaturalLoop(TR_RegionStructure *whileLoop, List<TR
             removedNodes.add(ttNode); // Don't search the taken side.
             continue;
             }
+
+         if (removedNodes.contains(ttNode))
+            continue;
 
          // There is no need to identify the call nodes corresponding to HCR
          // guards. Typically none will be found by this search, but even if
@@ -4490,7 +4489,7 @@ void TR_LoopVersioner::versionNaturalLoop(TR_RegionStructure *whileLoop, List<TR
          endTree = gotoBlockExitTree;
          //_cfg->addEdge(TR::CFGEdge::createEdge(comparisonBlock,  newGotoBlock, trMemory()));
          //_cfg->addEdge(TR::CFGEdge::createEdge(newGotoBlock,  clonedLoopInvariantBlock, trMemory()));
-         TR_BlockStructure *newGotoBlockStructure = new (_cfg->structureRegion()) TR_BlockStructure(comp(), newGotoBlock->getNumber(), newGotoBlock);
+         TR_BlockStructure *newGotoBlockStructure = new (_cfg->structureMemoryRegion()) TR_BlockStructure(comp(), newGotoBlock->getNumber(), newGotoBlock);
          newGotoBlockStructure->setCreatedByVersioning(true);
          if (!_neitherLoopCold)
             {
@@ -4669,20 +4668,20 @@ void TR_LoopVersioner::versionNaturalLoop(TR_RegionStructure *whileLoop, List<TR
    whileLoop->setVersionedLoop(clonedWhileLoop);
 
    TR_BlockStructure *invariantBlockStructure = invariantBlock->getStructureOf();
-   TR_BlockStructure *clonedInvariantBlockStructure = new (_cfg->structureRegion()) TR_BlockStructure(comp(), clonedLoopInvariantBlock->getNumber(), clonedLoopInvariantBlock);
+   TR_BlockStructure *clonedInvariantBlockStructure = new (_cfg->structureMemoryRegion()) TR_BlockStructure(comp(), clonedLoopInvariantBlock->getNumber(), clonedLoopInvariantBlock);
    clonedInvariantBlockStructure->setCreatedByVersioning(true);
 
    if (!_neitherLoopCold)
       clonedInnerWhileLoops->deleteAll();
    clonedInvariantBlockStructure->setAsLoopInvariantBlock(true);
    TR_RegionStructure *parentStructure = whileLoop->getParent()->asRegion();
-   TR_RegionStructure *properRegion = new (_cfg->structureRegion()) TR_RegionStructure(comp(), chooserBlock->getNumber());
+   TR_RegionStructure *properRegion = new (_cfg->structureMemoryRegion()) TR_RegionStructure(comp(), chooserBlock->getNumber());
    parentStructure->replacePart(invariantBlockStructure, properRegion);
 
-   TR_StructureSubGraphNode *clonedWhileNode = new (_cfg->structureRegion()) TR_StructureSubGraphNode(clonedWhileLoop);
-   TR_StructureSubGraphNode *whileNode = new (_cfg->structureRegion()) TR_StructureSubGraphNode(whileLoop);
-   TR_StructureSubGraphNode *invariantNode = new (_cfg->structureRegion()) TR_StructureSubGraphNode(invariantBlockStructure);
-   TR_StructureSubGraphNode *clonedInvariantNode = new (_cfg->structureRegion()) TR_StructureSubGraphNode(clonedInvariantBlockStructure);
+   TR_StructureSubGraphNode *clonedWhileNode = new (_cfg->structureMemoryRegion()) TR_StructureSubGraphNode(clonedWhileLoop);
+   TR_StructureSubGraphNode *whileNode = new (_cfg->structureMemoryRegion()) TR_StructureSubGraphNode(whileLoop);
+   TR_StructureSubGraphNode *invariantNode = new (_cfg->structureMemoryRegion()) TR_StructureSubGraphNode(invariantBlockStructure);
+   TR_StructureSubGraphNode *clonedInvariantNode = new (_cfg->structureMemoryRegion()) TR_StructureSubGraphNode(clonedInvariantBlockStructure);
 
    properRegion->addSubNode(whileNode);
    properRegion->addSubNode(clonedWhileNode);
@@ -4705,9 +4704,9 @@ void TR_LoopVersioner::versionNaturalLoop(TR_RegionStructure *whileLoop, List<TR
       bool isTest =
          !actualComparisonBlock->getLastRealTreeTop()->getNode()->getOpCode().isStore();
 
-      TR_BlockStructure *comparisonBlockStructure = new (_cfg->structureRegion()) TR_BlockStructure(comp(), actualComparisonBlock->getNumber(), actualComparisonBlock);
+      TR_BlockStructure *comparisonBlockStructure = new (_cfg->structureMemoryRegion()) TR_BlockStructure(comp(), actualComparisonBlock->getNumber(), actualComparisonBlock);
       comparisonBlockStructure->setCreatedByVersioning(true);
-      TR_StructureSubGraphNode *comparisonNode = new (_cfg->structureRegion()) TR_StructureSubGraphNode(comparisonBlockStructure);
+      TR_StructureSubGraphNode *comparisonNode = new (_cfg->structureMemoryRegion()) TR_StructureSubGraphNode(comparisonBlockStructure);
       properRegion->addSubNode(comparisonNode);
 
       if (prevComparisonNode)
@@ -4726,7 +4725,7 @@ void TR_LoopVersioner::versionNaturalLoop(TR_RegionStructure *whileLoop, List<TR
          {
          if (currCriticalEdgeBlock != NULL)
             {
-            TR_StructureSubGraphNode *criticalEdgeNode = new (_cfg->structureRegion()) TR_StructureSubGraphNode(currCriticalEdgeBlock->getData()->getStructureOf());
+            TR_StructureSubGraphNode *criticalEdgeNode = new (_cfg->structureMemoryRegion()) TR_StructureSubGraphNode(currCriticalEdgeBlock->getData()->getStructureOf());
             properRegion->addSubNode(criticalEdgeNode);
             TR::CFGEdge::createEdge(prevComparisonNode,  criticalEdgeNode, trMemory());
             TR::CFGEdge::createEdge(criticalEdgeNode,  clonedInvariantNode, trMemory());
@@ -4834,7 +4833,7 @@ void TR_LoopVersioner::versionNaturalLoop(TR_RegionStructure *whileLoop, List<TR
    TR_BlockStructure *newGotoBlockStructure;
    for (newGotoBlockStructure = newGotoBlockStructuresIt.getCurrent(); newGotoBlockStructure; newGotoBlockStructure = newGotoBlockStructuresIt.getNext())
       {
-      TR_StructureSubGraphNode *newGotoBlockNode = new (_cfg->structureRegion()) TR_StructureSubGraphNode(newGotoBlockStructure);
+      TR_StructureSubGraphNode *newGotoBlockNode = new (_cfg->structureMemoryRegion()) TR_StructureSubGraphNode(newGotoBlockStructure);
       properRegion->addSubNode(newGotoBlockNode);
       TR::CFGEdge::createEdge(clonedWhileNode,  newGotoBlockNode, trMemory());
       }
@@ -5905,7 +5904,7 @@ void TR_LoopVersioner::buildConditionalTree(
                TR::Node *storeNode = _storeTrees[indexNode->getSymbolReference()->getReferenceNumber()]->getNode();
                //int32_t exitValue = exitValue = storeNode->getFirstChild()->getSecondChild()->getInt();
 
-               loopLimit = _loopTestTree->getNode()->getSecondChild()->duplicateTree(comp());
+               loopLimit = _loopTestTree->getNode()->getSecondChild()->duplicateTree();
                if(isAddition)
                   {
                   range = TR::Node::create(TR::isub, 2, loopLimit,entryNode);
@@ -5989,7 +5988,7 @@ void TR_LoopVersioner::buildConditionalTree(
                TR_ASSERT(parent, "Parent shouldn't be null\n");
 
                TR_ASSERT(indexChildIndex>=0, "Index child index should be valid at this point\n");
-               duplicateIndexNode = conditionalNode->getChild(indexChildIndex)->duplicateTree(comp());
+               duplicateIndexNode = conditionalNode->getChild(indexChildIndex)->duplicateTree();
 
                int visitCount = comp()->incVisitCount();
                int32_t indexSymRefNum = loopDrivingSymRef->getReferenceNumber();
@@ -6012,24 +6011,24 @@ void TR_LoopVersioner::buildConditionalTree(
             if(indexNodeOccursAsSecondChild)
                {
                if (!reverseBranch)
-                  duplicateComparisonNode = TR::Node::createif(conditionalNode->getOpCodeValue(), conditionalNode->getFirstChild()->duplicateTree(comp()),duplicateIndexNode, _exitGotoTarget);
+                  duplicateComparisonNode = TR::Node::createif(conditionalNode->getOpCodeValue(), conditionalNode->getFirstChild()->duplicateTree(),duplicateIndexNode, _exitGotoTarget);
                else
-                  duplicateComparisonNode = TR::Node::createif(conditionalNode->getOpCode().getOpCodeForReverseBranch(), conditionalNode->getFirstChild()->duplicateTree(comp()), duplicateIndexNode, _exitGotoTarget);
+                  duplicateComparisonNode = TR::Node::createif(conditionalNode->getOpCode().getOpCodeForReverseBranch(), conditionalNode->getFirstChild()->duplicateTree(), duplicateIndexNode, _exitGotoTarget);
                }
             else
                {
                if (!reverseBranch)
-                  duplicateComparisonNode = TR::Node::createif(conditionalNode->getOpCodeValue(),duplicateIndexNode, conditionalNode->getSecondChild()->duplicateTree(comp()), _exitGotoTarget);
+                  duplicateComparisonNode = TR::Node::createif(conditionalNode->getOpCodeValue(),duplicateIndexNode, conditionalNode->getSecondChild()->duplicateTree(), _exitGotoTarget);
                else
-                  duplicateComparisonNode = TR::Node::createif(conditionalNode->getOpCode().getOpCodeForReverseBranch(), duplicateIndexNode, conditionalNode->getSecondChild()->duplicateTree(comp()), _exitGotoTarget);
+                  duplicateComparisonNode = TR::Node::createif(conditionalNode->getOpCode().getOpCodeForReverseBranch(), duplicateIndexNode, conditionalNode->getSecondChild()->duplicateTree(), _exitGotoTarget);
                }
             }
          else
             {
             if (!reverseBranch)
-               duplicateComparisonNode = TR::Node::createif(conditionalNode->getOpCodeValue(), conditionalNode->getFirstChild()->duplicateTree(comp()), conditionalNode->getSecondChild()->duplicateTree(comp()), _exitGotoTarget);
+               duplicateComparisonNode = TR::Node::createif(conditionalNode->getOpCodeValue(), conditionalNode->getFirstChild()->duplicateTree(), conditionalNode->getSecondChild()->duplicateTree(), _exitGotoTarget);
             else
-               duplicateComparisonNode = TR::Node::createif(conditionalNode->getOpCode().getOpCodeForReverseBranch(), conditionalNode->getFirstChild()->duplicateTree(comp()), conditionalNode->getSecondChild()->duplicateTree(comp()), _exitGotoTarget);
+               duplicateComparisonNode = TR::Node::createif(conditionalNode->getOpCode().getOpCodeForReverseBranch(), conditionalNode->getFirstChild()->duplicateTree(), conditionalNode->getSecondChild()->duplicateTree(), _exitGotoTarget);
             }
 
          if (duplicateComparisonNode->getFirstChild()->getOpCodeValue() == TR::instanceof)
@@ -6187,7 +6186,6 @@ void TR_LoopVersioner::buildSpineCheckComparisonsTree(List<TR::TreeTop> *spineCh
    {
    ListElement<TR::TreeTop> *nextTree = spineCheckTrees->getListHead();
 
-   bool isAddition;
    while (nextTree)
       {
       // NOTE: It could be a BNDCHKwithSpineCHK, since at this point no bound
@@ -7988,7 +7986,7 @@ bool TR_LoopVersioner::depsForLoopEntryPrep(
       TR::Node *childInRequiredForm = NULL;
       TR::Node *indexNode = NULL;
 
-      int32_t headerSize = TR::Compiler->om.contiguousArrayHeaderSizeInBytes();
+      int32_t headerSize = static_cast<int32_t>(TR::Compiler->om.contiguousArrayHeaderSizeInBytes());
       static struct temps
          {
          TR::ILOpCodes addOp;
@@ -8095,8 +8093,8 @@ bool TR_LoopVersioner::depsForLoopEntryPrep(
       //
       TR::Node *divisor = node->getSecondChild();
       bool divisorIsNonzeroConstant =
-         divisor->getOpCodeValue() == TR::lconst && divisor->getLongInt() != 0
-         || divisor->getOpCodeValue() == TR::iconst && divisor->getInt() != 0;
+         (divisor->getOpCodeValue() == TR::lconst && divisor->getLongInt() != 0)
+         || (divisor->getOpCodeValue() == TR::iconst && divisor->getInt() != 0);
 
       if (!divisorIsNonzeroConstant)
          {
@@ -8559,7 +8557,7 @@ int32_t TR_LoopVersioner::detectCanonicalizedPredictableLoops(TR_Structure *loop
    ncount_t nodeCount;
    nodeCount = comp()->getAccurateNodeCount();
 
-   if ((nodeCount/(MAX_SIZE_INCREASE_FACTOR/hotnessFactor)) > (_origNodeCount/nodeCountFactor))
+   if ((nodeCount/(MAX_SIZE_INCREASE_FACTOR/hotnessFactor)) > unsigned((_origNodeCount/nodeCountFactor)))
       {
       if (trace())
          traceMsg(comp(), "Failing node count %d orig %d factor %d\n", nodeCount, _origNodeCount, nodeCountFactor);
@@ -9065,8 +9063,7 @@ bool TR_LoopVersioner::guardOkForExpr(TR::Node *node, bool onlySearching)
    if (allowEnv != NULL || forbidEnv != NULL)
       {
       char needle[32];
-      int needleLen = snprintf(needle, sizeof (needle), ",%d:%d,", (int)kind, (int)test);
-      TR_ASSERT_FATAL(0 <= needleLen && needleLen < sizeof (needle), "needle buffer is too small");
+      TR::snprintfNoTrunc(needle, sizeof (needle), ",%d:%d,", (int)kind, (int)test);
 
       if (allowEnv != NULL && containsCommaSeparated(allowEnv, needle))
          return true;
@@ -9156,6 +9153,8 @@ bool TR_LoopVersioner::guardOkForExpr(TR::Node *node, bool onlySearching)
             node,
             (int)kind);
       }
+
+   return false;
    }
 
 /**
@@ -9170,7 +9169,7 @@ bool TR_LoopVersioner::guardOkForExpr(TR::Node *node, bool onlySearching)
  * While it is not necessarily incorrect for \p node for to be unrepresentable,
  * it is unexpected and likely to cause a performance problem. So in case
  * \p node \em is unrepresentable, this method increments a static debug
- * counter matching <tt>{loopVersioner.unrepresentable/*}</tt>, and optionally
+ * counter matching <tt>{loopVersioner.unrepresentable*}</tt>, and optionally
  * fails an assertion when enabled using \c ASSERT_REPRESENTABLE_IN_VERSIONER
  * or \c TR_assertRepresentableInVersioner.
  *
@@ -9884,7 +9883,7 @@ TR_LoopVersioner::LoopEntryPrep *TR_LoopVersioner::createLoopEntryPrep(
       {
       // This is the top-level call. Ensure that node's flags have been reset
       // for code motion.
-      node->resetFlagsForCodeMotion();
+      node->resetFlagsAndPropertiesForCodeMotion();
       }
 
    // Because node will no longer appear verbatim in the trees, print it to

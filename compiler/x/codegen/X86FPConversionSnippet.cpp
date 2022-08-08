@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -124,11 +124,11 @@ uint8_t *TR::X86FPConvertToIntSnippet::genFPConversion(uint8_t *buffer)
    else
       {
       TR::X86RegRegInstruction  *instr = _convertInstruction->getIA32RegRegInstruction();
-      TR_ASSERT(instr != NULL, "f2i conversion instruction must be either L4RegMem or CVTTSS2SIRegReg\n");
+      TR_ASSERT(instr != NULL, "f2i conversion instruction must be either TR::InstOpCode::L4RegMem or CVTTSS2SIRegReg\n");
 
       TR::RealRegister *sourceRegister = toRealRegister(instr->getSourceRegister());
 
-      // MOVSS/MOVSD [esp], source
+      // MOVSS/TR::InstOpCode::MOVSD [esp], source
       //
       if (opcode == TR::f2i)
          *buffer++ = 0xf3;
@@ -458,19 +458,14 @@ void TR::X86FPConvertToLongSnippet::analyseLongConversion()
    // to the snippets being sized and emitted.
    //
    TR_ASSERT(((_loadHighInstruction && _loadHighInstruction->getTargetRegister()) &&
-            (_loadLowInstruction && _loadLowInstruction->getTargetRegister()) &&
-            (_clobberInstruction && _clobberInstruction->getSourceRegister())),
+            (_loadLowInstruction && _loadLowInstruction->getTargetRegister())),
            "analyseLongConversion() ==> register assignment is a prerequisite!\n");
 
    _action = 0;
 
    _lowRegister = toRealRegister(_loadLowInstruction->getTargetRegister());
    _highRegister = toRealRegister(_loadHighInstruction->getTargetRegister());
-   _doubleRegister = toRealRegister(_clobberInstruction->getSourceRegister());
 
-   TR::Machine * machine = cg()->machine();
-
-   _action |= ((_doubleRegister->getRegisterNumber() != TR::RealRegister::st0) << 7);
    _action |= ((_lowRegister->getRegisterNumber() == TR::RealRegister::eax) << 3);
    _action |= ((_lowRegister->getRegisterNumber() == TR::RealRegister::edx) << 2);
    _action |= ((_highRegister->getRegisterNumber() == TR::RealRegister::eax) << 1);

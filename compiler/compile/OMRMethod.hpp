@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -118,8 +118,6 @@ class Method
 
    TR_ALLOC(TR_Memory::Method);
 
-   TR::Method *self();
-
    enum Type {J9, Test, JitBuilder};
 
 
@@ -153,8 +151,6 @@ class Method
    virtual void setArchetypeSpecimen(bool b = true);
    virtual bool isUnsafeWithObjectArg(TR::Compilation * = NULL);
    virtual bool isUnsafeCAS(TR::Compilation * = NULL);
-   virtual bool isBigDecimalMethod (TR::Compilation * = NULL);
-   virtual bool isBigDecimalConvertersMethod (TR::Compilation * = NULL);
    virtual bool isFinalInObject();
 
 
@@ -172,6 +168,10 @@ class Method
 
    void setRecognizedMethod(TR::RecognizedMethod rm) { _recognizedMethod = rm; }
    void setMandatoryRecognizedMethod(TR::RecognizedMethod rm) { _mandatoryRecognizedMethod = rm; }
+
+   protected:
+
+   TR::Method *self();
 
    private:
 

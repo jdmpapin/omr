@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -138,7 +138,12 @@ OMR::SymbolReference::getUseonlyAliasesBV(TR::SymbolReferenceTable * symRefTab)
             {
             return &symRefTab->aliasBuilder.defaultMethodUseAliases();
             }
-         if (symRefTab->isNonHelper(self(), TR::SymbolReferenceTable::objectEqualityComparisonSymbol))
+         if (symRefTab->isNonHelper(self(), TR::SymbolReferenceTable::objectEqualityComparisonSymbol)
+             || symRefTab->isNonHelper(self(), TR::SymbolReferenceTable::objectInequalityComparisonSymbol))
+            {
+            return &symRefTab->aliasBuilder.defaultMethodUseAliases();
+            }
+         if (symRefTab->isNonHelper(self(), TR::SymbolReferenceTable::nonNullableArrayNullStoreCheckSymbol))
             {
             return &symRefTab->aliasBuilder.defaultMethodUseAliases();
             }
@@ -187,23 +192,26 @@ OMR::SymbolReference::getUseonlyAliasesBV(TR::SymbolReferenceTable * symRefTab)
             case TR_transactionExit:
             case TR_newObject:
             case TR_newObjectNoZeroInit:
-            case TR_acmpHelper:
+            case TR_acmpeqHelper:
+            case TR_acmpneHelper:
             case TR_newValue:
             case TR_newValueNoZeroInit:
             case TR_newArray:
             case TR_multiANewArray:
+            case TR_jitLookupDynamicInterfaceMethod:
+            case TR_jitLookupDynamicPublicInterfaceMethod:
             default:
                return &symRefTab->aliasBuilder.defaultMethodUseAliases();
             }
          }
       case TR::Symbol::IsResolvedMethod:
          {
+#ifdef J9_PROJECT_SPECIFIC
          TR::ResolvedMethodSymbol * resolvedMethodSymbol = _symbol->castToResolvedMethodSymbol();
          if (!TR::comp()->getOption(TR_EnableHCR))
             {
             switch (resolvedMethodSymbol->getRecognizedMethod())
                {
-#ifdef J9_PROJECT_SPECIFIC
                case TR::java_lang_Double_longBitsToDouble:
                case TR::java_lang_Double_doubleToLongBits:
                case TR::java_lang_Float_intBitsToFloat:
@@ -239,11 +247,12 @@ OMR::SymbolReference::getUseonlyAliasesBV(TR::SymbolReferenceTable * symRefTab)
                case TR::java_lang_StrictMath_copySign_F:
                case TR::java_lang_StrictMath_copySign_D:
                   return NULL;
-#endif
+
                default:
                	break;
                }
             }
+#endif
          return &symRefTab->aliasBuilder.defaultMethodUseAliases();
          }
 
@@ -328,7 +337,9 @@ OMR::SymbolReference::getUseDefAliasesBV(bool isDirectCall, bool includeGCSafePo
              symRefTab->isNonHelper(self(), TR::SymbolReferenceTable::osrFearPointHelperSymbol) ||
              symRefTab->isNonHelper(self(), TR::SymbolReferenceTable::potentialOSRPointHelperSymbol) ||
              symRefTab->isNonHelper(self(), TR::SymbolReferenceTable::eaEscapeHelperSymbol) ||
-             symRefTab->isNonHelper(self(), TR::SymbolReferenceTable::objectEqualityComparisonSymbol))
+             symRefTab->isNonHelper(self(), TR::SymbolReferenceTable::objectEqualityComparisonSymbol) ||
+             symRefTab->isNonHelper(self(), TR::SymbolReferenceTable::objectInequalityComparisonSymbol) ||
+             symRefTab->isNonHelper(self(), TR::SymbolReferenceTable::nonNullableArrayNullStoreCheckSymbol))
             {
             return &symRefTab->aliasBuilder.defaultMethodDefAliases();
             }
@@ -367,6 +378,8 @@ OMR::SymbolReference::getUseDefAliasesBV(bool isDirectCall, bool includeGCSafePo
             case TR_jitProfileLongValue:
             case TR_jitProfileBigDecimalValue:
             case TR_jitProfileParseBuffer:
+            case TR_jitLookupDynamicInterfaceMethod:
+            case TR_jitLookupDynamicPublicInterfaceMethod:
 
                return 0;
 
@@ -374,7 +387,8 @@ OMR::SymbolReference::getUseDefAliasesBV(bool isDirectCall, bool includeGCSafePo
             case TR_writeBarrierClassStoreRealTimeGC:
             case TR_writeBarrierStoreRealTimeGC:
             case TR_aNewArray:
-            case TR_acmpHelper:
+            case TR_acmpeqHelper:
+            case TR_acmpneHelper:
             case TR_newValue:
             case TR_newValueNoZeroInit:
             case TR_newObject:
@@ -409,13 +423,13 @@ OMR::SymbolReference::getUseDefAliasesBV(bool isDirectCall, bool includeGCSafePo
          }
       case TR::Symbol::IsResolvedMethod:
          {
+#ifdef J9_PROJECT_SPECIFIC
          TR::ResolvedMethodSymbol * resolvedMethodSymbol = _symbol->castToResolvedMethodSymbol();
 
          if (!comp->getOption(TR_EnableHCR))
             {
             switch (resolvedMethodSymbol->getRecognizedMethod())
                {
-#ifdef J9_PROJECT_SPECIFIC
                case TR::java_lang_System_arraycopy:
                   {
                   TR_BitVector * aliases = new (aliasRegion) TR_BitVector(bvInitialSize, aliasRegion, growability);
@@ -469,33 +483,11 @@ OMR::SymbolReference::getUseDefAliasesBV(bool isDirectCall, bool includeGCSafePo
                   else
                      return 0;
 
-               // no aliasing on DFP dummy stubs
-               case TR::java_math_BigDecimal_DFPPerformHysteresis:
-               case TR::java_math_BigDecimal_DFPUseDFP:
-               case TR::java_math_BigDecimal_DFPHWAvailable:
-               case TR::java_math_BigDecimal_DFPCompareTo:
-               case TR::java_math_BigDecimal_DFPUnscaledValue:
-               case TR::com_ibm_dataaccess_DecimalData_DFPFacilityAvailable:
-               case TR::com_ibm_dataaccess_DecimalData_DFPUseDFP:
-               case TR::com_ibm_dataaccess_DecimalData_DFPConvertPackedToDFP:
-               case TR::com_ibm_dataaccess_DecimalData_DFPConvertDFPToPacked:
-               case TR::com_ibm_dataaccess_DecimalData_createZeroBigDecimal:
-               case TR::com_ibm_dataaccess_DecimalData_getlaside:
-               case TR::com_ibm_dataaccess_DecimalData_setlaside:
-               case TR::com_ibm_dataaccess_DecimalData_getflags:
-               case TR::com_ibm_dataaccess_DecimalData_setflags:
-                  if (!(
-#ifdef TR_TARGET_S390
-                     comp->target().cpu.supportsFeature(OMR_FEATURE_S390_DFP) ||
-#endif
-                      comp->target().cpu.supportsDecimalFloatingPoint()) ||
-                      comp->getOption(TR_DisableDFP))
-                     return NULL;
-#endif //J9_PROJECT_SPECIFIC
                default:
                	break;
                }
             }
+#endif //J9_PROJECT_SPECIFIC
 
 #ifdef J9_PROJECT_SPECIFIC
          TR_ResolvedMethod * method = resolvedMethodSymbol->getResolvedMethod();
@@ -699,11 +691,16 @@ OMR::SymbolReference::getUseDefAliasesBV(bool isDirectCall, bool includeGCSafePo
             aliases->set(symRefTab->getArrayShadowIndex(_symbol->getDataType().vectorToScalar()));
             }
          // the other way around
-         if (_symbol->isArrayShadowSymbol() && !_symbol->getDataType().isVector())
+         if (_symbol->isArrayShadowSymbol() && _symbol->getDataType().isVectorElement())
             {
             if (!aliases)
                aliases = new (aliasRegion) TR_BitVector(bvInitialSize, aliasRegion, growability);
-            aliases->set(symRefTab->getArrayShadowIndex(_symbol->getDataType().scalarToVector()));
+
+            // alias with vectors of all supported lengths
+            for (int32_t i = 1; i <= TR::NumVectorLengths; i++)
+               {
+               aliases->set(symRefTab->getArrayShadowIndex(_symbol->getDataType().scalarToVector((TR::VectorLength)i)));
+               }
             }
 
          if (_symbol->isArrayShadowSymbol() &&
@@ -1050,28 +1047,6 @@ OMR::SymbolReference::storeCanBeRemoved()
      (((s->getDataType() != TR::Double) && (s->getDataType() != TR::Float)) ||
            comp->cg()->getSupportsJavaFloatSemantics() ||
            (self()->isTemporary(comp) && !s->behaveLikeNonTemp()));
-   }
-
-char *
-classNameToSignature(const char *name, int32_t &len, TR::Compilation * comp, TR_AllocationKind allocKind)
-   {
-   char * sig;
-
-   if (name[0] == '[')
-      {
-      sig = (char *)comp->trMemory()->allocateMemory(len+1, allocKind);
-      memcpy(sig,name,len);
-      }
-   else
-      {
-      len += 2;
-      sig = (char *)comp->trMemory()->allocateMemory(len+1, allocKind);
-      sig[0] = 'L';
-      memcpy(sig+1,name,len-2);
-      sig[len-1]=';';
-      }
-   sig[len] = 0; // null terminated string
-   return sig;
    }
 
 const char *

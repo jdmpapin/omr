@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -29,8 +29,7 @@
 #include "env/jittypes.h"
 #include "il/LabelSymbol.hpp"
 #include "infra/Assert.hpp"
-#include "x/codegen/X86Ops.hpp"
-#include "x/codegen/X86Ops_inlines.hpp"
+#include "codegen/InstOpCode.hpp"
 
 namespace TR { class Node; }
 
@@ -59,19 +58,19 @@ class X86RestartSnippet  : public TR::Snippet
    void setForceLongRestartJump() {_forceLongRestartJump = true;}
    bool getForceLongRestartJump() {return _forceLongRestartJump;}
 
-   uint8_t *genRestartJump(TR_X86OpCodes branchOp, uint8_t *bufferCursor, TR::LabelSymbol *label)
+   uint8_t *genRestartJump(TR::InstOpCode::Mnemonic branchOp, uint8_t *bufferCursor, TR::LabelSymbol *label)
       {
-      TR_X86OpCode  opcode(branchOp);
+      TR::InstOpCode  opcode(branchOp);
 
       uint8_t *destination = label->getCodeLocation();
       intptr_t  distance    = destination - (bufferCursor + 2);
 
-      TR_ASSERT((branchOp >= JA4) && (branchOp <= JMP4),
+      TR_ASSERT((branchOp >= TR::InstOpCode::JA4) && (branchOp <= TR::InstOpCode::JMP4),
              "opcode must be a long branch for conditional restart in a restart snippet\n");
 
       if (getForceLongRestartJump())
          {
-          bufferCursor = opcode.binary(bufferCursor);
+          bufferCursor = opcode.binary(bufferCursor, OMR::X86::Encoding::Default);
           *(int32_t *)bufferCursor = (int32_t)(destination - (bufferCursor + 4));
           bufferCursor += 4;
          }
@@ -80,13 +79,13 @@ class X86RestartSnippet  : public TR::Snippet
          if (distance >= -128 && distance <= 127)
             {
             opcode.convertLongBranchToShort();
-            bufferCursor = opcode.binary(bufferCursor);
+            bufferCursor = opcode.binary(bufferCursor, OMR::X86::Encoding::Default);
             *bufferCursor = (int8_t)(destination - (bufferCursor + 1));
             bufferCursor++;
             }
          else
             {
-            bufferCursor = opcode.binary(bufferCursor);
+            bufferCursor = opcode.binary(bufferCursor, OMR::X86::Encoding::Default);
             *(int32_t *)bufferCursor = (int32_t)(destination - (bufferCursor + 4));
             bufferCursor += 4;
             }
@@ -96,7 +95,7 @@ class X86RestartSnippet  : public TR::Snippet
 
    uint8_t *genRestartJump(uint8_t *bufferCursor, TR::LabelSymbol *label)
       {
-      return genRestartJump(JMP4, bufferCursor, label);
+      return genRestartJump(TR::InstOpCode::JMP4, bufferCursor, label);
       }
 
    uint8_t *genRestartJump(uint8_t *bufferCursor)
@@ -104,7 +103,7 @@ class X86RestartSnippet  : public TR::Snippet
       return genRestartJump(bufferCursor, _restartLabel);
       }
 
-   uint32_t estimateRestartJumpLength(TR_X86OpCodes  branchOp,
+   uint32_t estimateRestartJumpLength(TR::InstOpCode::Mnemonic  branchOp,
                                       int32_t         estimatedSnippetLocation,
                                       TR::LabelSymbol *label)
       {
@@ -119,7 +118,7 @@ class X86RestartSnippet  : public TR::Snippet
          return 2;
          }
       // long branch required
-      if (branchOp == JMP4)
+      if (branchOp == TR::InstOpCode::JMP4)
          return 5;
       else
          return 6;
@@ -127,7 +126,7 @@ class X86RestartSnippet  : public TR::Snippet
 
    uint32_t estimateRestartJumpLength(int32_t estimatedSnippetLocation, TR::LabelSymbol *label)
       {
-      return estimateRestartJumpLength(JMP4, estimatedSnippetLocation, label);
+      return estimateRestartJumpLength(TR::InstOpCode::JMP4, estimatedSnippetLocation, label);
       }
 
    uint32_t estimateRestartJumpLength(int32_t estimatedSnippetLocation)
@@ -135,7 +134,7 @@ class X86RestartSnippet  : public TR::Snippet
       return estimateRestartJumpLength(estimatedSnippetLocation, _restartLabel);
       }
 
-   uint32_t estimateRestartJumpLength(TR_X86OpCodes branchOp, int32_t estimatedSnippetLocation)
+   uint32_t estimateRestartJumpLength(TR::InstOpCode::Mnemonic branchOp, int32_t estimatedSnippetLocation)
       {
       return estimateRestartJumpLength(branchOp, estimatedSnippetLocation, _restartLabel);
       }

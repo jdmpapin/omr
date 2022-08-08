@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -285,6 +285,16 @@ class OMR_EXTENSIBLE Linkage : public OMR::Linkage
    Linkage (TR::CodeGenerator *cg) : OMR::Linkage(cg) {}
 
    /**
+    * @brief Adjust stack index so that local references are aligned properly
+    * @param[in/out] stackIndex : index on stack
+    */
+   virtual void alignLocalReferences(uint32_t &stackIndex);
+   /**
+    * @brief Maps symbols to locations on stack with locals compaction enabled
+    * @param[in]: method : method for which symbols are mapped on stack
+    */
+   virtual void mapCompactedStack(TR::ResolvedMethodSymbol *method);
+   /**
     * @brief Maps symbols to locations on stack
     * @param[in] method : method for which symbols are mapped on stack
     */
@@ -296,19 +306,33 @@ class OMR_EXTENSIBLE Linkage : public OMR::Linkage
     */
    virtual void mapSingleAutomatic(TR::AutomaticSymbol *p, uint32_t &stackIndex);
    /**
+    * @brief Maps an automatic symbol to an index on stack
+    * @param[in] p : automatic symbol
+    * @param[in] size : size
+    * @param[in/out] stackIndex : index on stack
+    */
+   virtual void mapSingleAutomatic(TR::AutomaticSymbol *p, uint32_t size, uint32_t &stackIndex);
+   /**
+    * @brief Maps incoming parameters to locations on stack
+    * @param[in] method : method for which symbols are mapped on stack
+    */
+   virtual void mapIncomingParms(TR::ResolvedMethodSymbol *method);
+
+   /**
     * @brief Initializes ARM64 RealRegister linkage
     */
    virtual void initARM64RealRegisterLinkage();
 
    /**
     * @brief Returns a MemoryReference for an outgoing argument
-    * @param[in] argMemReg : register pointing to address for the outgoing argument
+    * @param[in] baseReg : base register for memory access
+    * @param[in] offset : memory offset
     * @param[in] argReg : register for the argument
     * @param[in] opCode : instruction OpCode for store to memory
     * @param[out] memArg : struct holding memory argument information
     * @return MemoryReference for the argument
     */
-   virtual TR::MemoryReference *getOutgoingArgumentMemRef(TR::Register *argMemReg, TR::Register *argReg, TR::InstOpCode::Mnemonic opCode, TR::ARM64MemoryArgument &memArg);
+   virtual TR::MemoryReference *getOutgoingArgumentMemRef(TR::Register *baseReg, int32_t offset, TR::Register *argReg, TR::InstOpCode::Mnemonic opCode, TR::ARM64MemoryArgument &memArg);
 
    /**
     * @brief Loads parameters from stack
@@ -396,6 +420,13 @@ class OMR_EXTENSIBLE Linkage : public OMR::Linkage
     * @return The instruction cursor after copies inserted.
     */
    TR::Instruction *copyParametersToHomeLocation(TR::Instruction *cursor, bool parmsHaveBeenStored = false);
+
+   /**
+    * @brief Answers if vector registers need to be spilled
+    *
+    * @return true if vector registers need to be spilled.
+    */
+   bool killsVectorRegisters();
    };
 } // ARM64
 } // TR

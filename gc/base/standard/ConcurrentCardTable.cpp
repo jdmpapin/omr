@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2017 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -1045,7 +1045,6 @@ MM_ConcurrentCardTable::finalCleanCards(MM_EnvironmentBase *env, uintptr_t *byte
 	uintptr_t traceCount = 0;
 	Card * nextDirtyCard;
 	omrobjectptr_t objectPtr;
-	uintptr_t objects;
 	uintptr_t cards = 0;
 	bool phase2 = false;
 
@@ -1080,11 +1079,12 @@ MM_ConcurrentCardTable::finalCleanCards(MM_EnvironmentBase *env, uintptr_t *byte
 		/* ..and address of last slot N.B Range is EXCLUSIVE */
 		uintptr_t *heapTop = (uintptr_t *)((uint8_t *)heapBase + CARD_SIZE);
 
+		/* prevent loading mark bits prematurely */
+		MM_AtomicOperations::readBarrier();
+
 		/* Then iterate over all marked objects in the heap between the two addresses */
 		MM_HeapMapIterator markedObjectIterator(_extensions, markMap, heapBase, heapTop);
-		objects = 0;
 		while (NULL != (objectPtr = markedObjectIterator.nextObject())) {
-			objects +=1;
 			traceCount += _markingScheme->scanObject(env, objectPtr, SCAN_REASON_DIRTY_CARD);
 		}
 

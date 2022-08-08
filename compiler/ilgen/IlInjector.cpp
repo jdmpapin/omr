@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2018 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -86,12 +86,12 @@ OMR::IlInjector::initPrimitiveTypes()
    Float        = _types->PrimitiveType(TR::Float);
    Double       = _types->PrimitiveType(TR::Double);
    Address      = _types->PrimitiveType(TR::Address);
-   VectorInt8   = _types->PrimitiveType(TR::VectorInt8);
-   VectorInt16  = _types->PrimitiveType(TR::VectorInt16);
-   VectorInt32  = _types->PrimitiveType(TR::VectorInt32);
-   VectorInt64  = _types->PrimitiveType(TR::VectorInt64);
-   VectorFloat  = _types->PrimitiveType(TR::VectorFloat);
-   VectorDouble = _types->PrimitiveType(TR::VectorDouble);
+   VectorInt8   = _types->PrimitiveType(TR::DataType::createVectorType(TR::Int8,  TR::VectorLength128));
+   VectorInt16  = _types->PrimitiveType(TR::DataType::createVectorType(TR::Int16, TR::VectorLength128));
+   VectorInt32  = _types->PrimitiveType(TR::DataType::createVectorType(TR::Int32, TR::VectorLength128));
+   VectorInt64  = _types->PrimitiveType(TR::DataType::createVectorType(TR::Int64, TR::VectorLength128));
+   VectorFloat  = _types->PrimitiveType(TR::DataType::createVectorType(TR::Float, TR::VectorLength128));
+   VectorDouble = _types->PrimitiveType(TR::DataType::createVectorType(TR::Double,TR::VectorLength128));
 
    if (TR::Compiler->target.is64Bit())
       Word = Int64;
@@ -330,7 +330,7 @@ OMR::IlInjector::multiplyBy(TR::Node *value, int64_t factor)
    {
    TR::Node *result;
    if (value->getDataType() == TR::Int32)
-      result = TR::Node::create(TR::imul, 2, value, TR::Node::iconst(factor));
+      result = TR::Node::create(TR::imul, 2, value, TR::Node::iconst(static_cast<int32_t>(factor)));
    else
       {
       TR_ASSERT(value->getDataType() == TR::Int64, "expecting Int32 or Int64 for multiplyBy value expression");
@@ -413,11 +413,11 @@ OMR::IlInjector::createWithoutSymRef(TR::ILOpCodes opCode, uint32_t numArgs, ...
    va_list args;
    va_start(args, numArgs);
    TR::Node * result = TR::Node::create(opCode, numArgs);
-   for (int i = 0; i < numArgs; ++i)
+   for (auto i = 0U; i < numArgs; ++i)
       {
       TR::Node * child = va_arg(args, TR::Node *);
       TR_ASSERT(child != NULL, "Child %d must be non NULL", i);
-      result->setAndIncChild(i,child);
+      result->setAndIncChild(static_cast<int32_t>(i),child);
       }
    return result;
    }

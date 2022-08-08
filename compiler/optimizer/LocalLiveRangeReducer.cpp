@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -194,7 +194,7 @@ void  TR_LocalLiveRangeReduction::collectRefInfo(TR_TreeRefInfo *treeRefInfo,TR:
    vcount_t visitCount = node->getVisitCount();
    if (node->getReferenceCount() > 1)
       {
-      if (node->getReferenceCount()> *maxRefCount)
+      if (node->getReferenceCount()> unsigned(*maxRefCount))
          *maxRefCount = node->getReferenceCount();
 
       if (visitCount >= compVisitCount) //already visited
@@ -368,6 +368,16 @@ void TR_LocalLiveRangeReduction::populatePotentialDeps(TR_TreeRefInfo *treeRefIn
                int32_t nextAlias = aliasCursor;
                treeRefInfo->getDefSym()->set(nextAlias);
                }
+            }
+
+         // UseonlyAliases needs to be set up to prevent any store node from being moved
+         // beyond the node that accesses the same address.
+         if (!symRef->getUseonlyAliases().isZero(comp()))
+            {
+            TR_BitVector *useSym = treeRefInfo->getUseSym();
+            TR::SparseBitVector useOnlyAliases(comp()->allocator());
+            symRef->getUseonlyAliases().getAliases(useOnlyAliases);
+            *useSym |= useOnlyAliases;
             }
 
          if (opCode.isStore())

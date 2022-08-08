@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -50,7 +50,7 @@
 #include "infra/List.hpp"
 #include "ras/Debug.hpp"
 #include "x/codegen/X86Instruction.hpp"
-#include "x/codegen/X86Ops.hpp"
+#include "codegen/InstOpCode.hpp"
 #include "x/codegen/X86SystemLinkage.hpp"
 
 ////////////////////////////////////////////////
@@ -743,7 +743,7 @@ TR::AMD64SystemLinkage::buildIndirectDispatch(TR::Node *callNode)
 
    // Dispatch
    //
-   generateRegInstruction(CALLReg, callNode, vftRegister, callDeps, cg());
+   generateRegInstruction(TR::InstOpCode::CALLReg, callNode, vftRegister, callDeps, cg());
    cg()->resetIsLeafMethod();
 
    // Build label post-conditions
@@ -753,7 +753,7 @@ TR::AMD64SystemLinkage::buildIndirectDispatch(TR::Node *callNode)
    postDeps->stopAddingPostConditions();
 
    TR::LabelSymbol *postDepLabel = generateLabelSymbol(cg());
-   generateLabelInstruction(LABEL, callNode, postDepLabel, postDeps, cg());
+   generateLabelInstruction(TR::InstOpCode::label, callNode, postDepLabel, postDeps, cg());
 
    return returnReg;
    }
@@ -792,7 +792,7 @@ TR::Register *TR::AMD64SystemLinkage::buildDirectDispatch(
    //
    TR::Register *scratchReg = NULL;
    TR::RealRegister::RegNum scratchRegIndex = getProperties().getIntegerScratchRegister(1);
-   for (int32_t i=0; i<post; i++)
+   for (auto i = 0U; i < post; i++)
       {
       if (postDeps->getPostConditions()->getRegisterDependency(i)->getRealRegister() == scratchRegIndex)
          {
@@ -806,7 +806,7 @@ TR::Register *TR::AMD64SystemLinkage::buildDirectDispatch(
       {
       TR_ASSERT(scratchReg, "could not find second scratch register");
       auto LoadRegisterInstruction = generateRegImm64SymInstruction(
-         MOV8RegImm64,
+         TR::InstOpCode::MOV8RegImm64,
          callNode,
          scratchReg,
          (uintptr_t)methodSymbol->getMethodAddress(),
@@ -818,11 +818,11 @@ TR::Register *TR::AMD64SystemLinkage::buildDirectDispatch(
          LoadRegisterInstruction->setReloKind(TR_NativeMethodAbsolute);
          }
 
-      instr = generateRegInstruction(CALLReg, callNode, scratchReg, preDeps, cg());
+      instr = generateRegInstruction(TR::InstOpCode::CALLReg, callNode, scratchReg, preDeps, cg());
       }
    else
       {
-      instr = generateImmSymInstruction(CALLImm4, callNode, (uintptr_t)methodSymbol->getMethodAddress(), methodSymRef, preDeps, cg());
+      instr = generateImmSymInstruction(TR::InstOpCode::CALLImm4, callNode, static_cast<int32_t>(reinterpret_cast<uintptr_t>(methodSymbol->getMethodAddress())), methodSymRef, preDeps, cg());
       }
 
    cg()->resetIsLeafMethod();
@@ -832,7 +832,7 @@ TR::Register *TR::AMD64SystemLinkage::buildDirectDispatch(
    cg()->stopUsingRegister(scratchReg);
 
    TR::LabelSymbol *postDepLabel = generateLabelSymbol(cg());
-   generateLabelInstruction(LABEL, callNode, postDepLabel, postDeps, cg());
+   generateLabelInstruction(TR::InstOpCode::label, callNode, postDepLabel, postDeps, cg());
 
    return returnReg;
    }
@@ -900,10 +900,10 @@ TR::AMD64ABILinkage::mapIncomingParms(
          {
          uint32_t align = getAlignment(parmCursor->getDataType());
          uint32_t alignMinus1 = (align <= AMD64_STACK_SLOT_SIZE) ? (AMD64_STACK_SLOT_SIZE - 1) : (align - 1);
-         uint32_t pos = -stackIndex;
-         pos += parmCursor->getSize();
+         uint32_t pos = (~stackIndex) + 1;
+         pos += static_cast<uint32_t>(parmCursor->getSize());
          pos = (pos + alignMinus1) & (~alignMinus1);
-         stackIndex = -pos;
+         stackIndex = (~pos) + 1;
          parmCursor->setParameterOffset(stackIndex);
 
          if (comp()->getOption(TR_TraceCG))
@@ -1050,7 +1050,7 @@ TR::AMD64SystemLinkage::setUpStackSizeForCallNode(TR::Node* node)
    const TR::X86LinkageProperties     &properties = getProperties();
    uint16_t intReg = 0, floatReg = 0;
    // AMD64 SysV ABI: The end of the input argument area shall be aligned on a 16 (32, if __m256 is passed on stack) byte boundary. In other words, the value (%rsp + 8) is always a multiple of 16 (32) when control is transferred to the function entry point.
-   int32_t alignment = AMD64_DEFAULT_STACK_ALIGNMENT;
+   uint32_t alignment = AMD64_DEFAULT_STACK_ALIGNMENT;
    int32_t sizeOfOutGoingArgs = 0;
 
    if (comp()->getOption(TR_TraceCG))
@@ -1065,7 +1065,7 @@ TR::AMD64SystemLinkage::setUpStackSizeForCallNode(TR::Node* node)
          alignment = 32;
       }
 
-   if (sizeOfOutGoingArgs > cg()->getLargestOutgoingArgSize())
+   if (unsigned(sizeOfOutGoingArgs) > cg()->getLargestOutgoingArgSize())
       {
       cg()->setLargestOutgoingArgSize(sizeOfOutGoingArgs);
       if (comp()->getOption(TR_TraceCG))

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -68,7 +68,6 @@
 #define TR_PDPOWER_NEGATIVE_INLINE_THRESHOLD -32
 #define TR_MAX_OCONST_FOLDING_SIZE 256
 #define TR_MAX_ARRAYSET_EXPANSION_LEN 256
-#define DFP_SHIFT_AMOUNT_CHILD_INDEX 1
 
 
 #define FMA_CONST_LOWBOUND     5.915260931E-272
@@ -164,25 +163,25 @@
          }\
       }
 
-static TR::ILOpCodes addOps[TR::NumTypes] = { TR::BadILOp,
+static TR::ILOpCodes addOps[TR::NumAllTypes] = { TR::BadILOp,
                                                TR::badd,    TR::sadd,    TR::iadd,    TR::ladd,
                                                TR::fadd,    TR::dadd,
                                                TR::BadILOp, TR::BadILOp, TR::BadILOp,
                                                TR::BadILOp, TR::BadILOp,  TR::BadILOp};
 
-static TR::ILOpCodes subOps[TR::NumTypes] = { TR::BadILOp,
+static TR::ILOpCodes subOps[TR::NumAllTypes] = { TR::BadILOp,
                                                TR::bsub,    TR::ssub,    TR::isub,    TR::lsub,
                                                TR::fsub,    TR::dsub,
                                                TR::asub,    TR::BadILOp, TR::BadILOp,
                                                TR::BadILOp, TR::BadILOp, TR::BadILOp};
 
-static TR::ILOpCodes constOps[TR::NumTypes] = { TR::BadILOp,
+static TR::ILOpCodes constOps[TR::NumAllTypes] = { TR::BadILOp,
                                                  TR::bconst,  TR::sconst,  TR::iconst,    TR::lconst,
                                                  TR::fconst,  TR::dconst,
                                                  TR::aconst,  TR::BadILOp,  TR::BadILOp,
                                                  TR::BadILOp, TR::BadILOp, TR::BadILOp};
 
-static TR::ILOpCodes negOps[TR::NumTypes] = { TR::BadILOp,
+static TR::ILOpCodes negOps[TR::NumAllTypes] = { TR::BadILOp,
                                                TR::bneg,    TR::sneg,    TR::ineg,    TR::lneg,
                                                TR::fneg,    TR::dneg,
                                                TR::BadILOp, TR::BadILOp, TR::BadILOp,
@@ -283,7 +282,7 @@ static void convertToTestUnderMask(TR::Node *node, TR::Block *block, TR::Simplif
     *     iconst 1
     *   iconst 0
     */
-   TR::Node *iand, *iushr, *load, *constCompare;
+   TR::Node *iand, *iushr, *load;
    int32_t constVal;
    if ((iand = node->getChild(0))->getOpCodeValue() == TR::iand &&
        node->getChild(1)->getOpCode().isLoadConst() &&
@@ -3454,7 +3453,7 @@ TR::Node *getQuotientUsingMagicNumberMultiply(TR::Node *node, TR::Block *block, 
       else
          {
          node3 = TR::Node::create(TR::lshr, 2, node2,
-                                  TR::Node::create(node2, TR::iconst, 0, shiftAmount));
+                                  TR::Node::create(node2, TR::iconst, 0, static_cast<int32_t>(shiftAmount)));
 
          if (divisor > 0)
             {
@@ -4895,7 +4894,7 @@ static bool checkAndReplaceRotation(TR::Node *node,TR::Block *block, TR::Simplif
    if (!performTransformation(s->comp(), "%sReduced or/xor/add in node [" POINTER_PRINTF_FORMAT "] to rol\n", s->optDetailString(), node))
       return false;
 
-   TR::Node *newConstNode = TR::Node::iconst(mulConstNode, correctLeftShiftAmount);
+   TR::Node *newConstNode = TR::Node::iconst(mulConstNode, static_cast<int32_t>(correctLeftShiftAmount));
    TR::Node::recreate(node, TR::ILOpCode::getRotateOpCodeFromDt(mulConstNode->getDataType())); // this line will have to change based on T
 
    // Set the common nonconst node (child of mul and shift) as the child of rol node,
@@ -5134,236 +5133,6 @@ static void bitTestingOp(TR::Node * node, TR::Simplifier *s)
         TR_ASSERT(false, "should be unreachable");
      }
   }
-
-/**
- * analyse expression and determine if it's result will exceed the precision of the node's
- * type.  The motivation is to see if using FMA whose intermediate result has higher precision
- * than the arguments, would be identical to an FP strict implementation.  If so, then
- * we can substitute (a*b)+c expression trees at codegeneration time with fma instructions,
- * if supported on the platform.
-
-   In general we can use fmadd/fmsub if.
-     - Multiply and add/subtract are in same method and
-           - One child of multiply is double and other is power of 2 and method is not strictfp
-           - One child of multiply is f2d or i2d and other is double const of <(53-24) or <(53-31)
-        bits precision ,but result might overflow a double range or denormalised precision
-     - Children of multiplies are both f2d
-     - One child of multiply is f2d or i2d and other is double const of <(53-24) or <(53-31) bits precision
-       and result cannot overflow a double range or precision.  This is currently not handled as it requires
-       value propagation of floats.
-
-  NOTE: rounding of very large values can cause overflow, but these constants would have to be:
-  i2d: |constant| must be < 2^993
-  f2d: |constant| must be < 2^896 and >= 2^-901
- */
-
-static bool isOperationFPCompliant(TR::Node *parent,TR::Node *arithExprNode, TR::Simplifier *s)
-   {
-   static char * nofma = feGetEnv("TR_NOFMA");
-   if (nofma) return false;
-
-   if (!s->cg()->supportsFusedMultiplyAdd()) return false; // no point if FMA not supported
-
-   if (!arithExprNode->getOpCode().isMul()) return false;
-
-   if (s->comp()->getOption(TR_IgnoreIEEERestrictions)) return true;
-
-   TR::Node *mulNode = arithExprNode;
-   bool traceIt = false;
-   bool i2dConv=false;
-   bool f2dConv=false;
-
-   /** if both children are being converted to double, and they're going from
-    * less precision to double precision then it's safe to convert them */
-   if (mulNode->getDataType()== TR::Double && mulNode->getFirstChild()->getOpCode().isConversion() &&
-      mulNode->getSecondChild()->getOpCode().isConversion())
-     { // long->double is only case where we must give up
-     if (mulNode->getFirstChild()->getOpCode().isLong())
-        {
-        if (traceIt) traceMsg(s->comp(), "Node: %p fails because conversion type is long\n",mulNode->getFirstChild());
-        return false;
-        }
-     if (mulNode->getSecondChild()->getOpCode().isLong())
-        {
-        if (traceIt) traceMsg(s->comp(), "Node: %p fails because conversion type is long\n",mulNode->getSecondChild());
-        return false;
-        }
-     if (traceIt) traceMsg(s->comp(), "Node: %p passes because conversion type is <long\n",mulNode);
-     return true;
-     }
-
-   bool sameCaller = mulNode->getInlinedSiteIndex() == parent->getInlinedSiteIndex();
-
-   bool mulChildIsConst = mulNode->getSecondChild()->getOpCode().isLoadConst();
-   TR::Node *mulConstChild = mulNode->getSecondChild();
-   TR::Node *mulNonConstChild = mulNode->getFirstChild();
-
-   /**
-     * assume that constants have already been folded */
-   if (mulNode->getFirstChild()->getOpCode().isLoadConst())
-      {
-      mulChildIsConst = true;
-      mulConstChild = mulNode->getFirstChild();
-      mulNonConstChild = mulNode->getSecondChild();
-      }
-
-   // 'constant' may be loaded out of literal pool
-   if (!mulChildIsConst && s->cg()->supportsOnDemandLiteralPool())
-      {
-      if (mulNonConstChild->getOpCode().isLoadIndirect() && // the "nonconst' node is actually the const
-         mulNonConstChild->getSymbolReference()->isLiteralPoolAddress())
-         {
-         TR::Node * temp = mulConstChild;
-         mulConstChild = mulNonConstChild;
-         mulNonConstChild = temp;
-         mulChildIsConst=true;
-         }
-
-      if (mulChildIsConst || (mulConstChild->getOpCode().isLoadIndirect() &&
-         mulConstChild->getSymbolReference()->isLiteralPoolAddress()))
-         {
-         // offset in the sym ref points to the constant node
-         TR::Node *constNode = (TR::Node *)(mulConstChild->getSymbolReference()->getOffset());
-         if (traceIt) traceMsg(s->comp(), "LiteralPool load detected:%p points to %p\n",mulConstChild,constNode);
-         mulConstChild = constNode;
-         mulChildIsConst = true;
-         }
-      }
-
-   if (!mulChildIsConst)
-      {
-      if (traceIt) traceMsg(s->comp(), "Node %p fails since not a const\n",mulNode);
-      return false;
-      }
-
-   // We guarantee at this point that the 2nd child is the constant
-
-   if (!sameCaller)
-      {
-      if (traceIt) traceMsg(s->comp(), "Node: %p fails because split between two methods \n",mulNode);
-      return false;
-      }
-
-   // we look at trailing zeros of the constant ie how 'small' is the number, and that
-   // number indicates the kind of precision of the result.  Subtract this number
-   // from the precision of current type and if smaller than the precision limit then
-   // a fused multiply will have same results as lower-precision mult.
-   // So, for example  i2f: float has 24 bits of precision, so the most precision
-   // we have 53-24 bits of precision 'available'--anything requiring more bits will
-   // give different results between fused multiply and double multiply
-   // So the constant must not cause the precision to increase by more than
-   // this 'available' bits.  So, if the constant is 1000...010000000000,
-   // then there are 10 zeros and hence can increase precision requirements by 53-10=43 bits.
-   // available precision is 53-24 = 19, 43 > 19 (=14) so can't use fmul
-   // This boils down to whether precision of the constant is greater than the precision of the
-   // non-const argument (aka the conversion operator).
-   //
-   if (mulNonConstChild->getOpCode().isConversion())
-      {
-      uint32_t precisionLimit=53; // bit count must be more than this to assure no rounding issues
-      switch(mulNonConstChild->getOpCodeValue())
-         {
-         case TR::i2d: precisionLimit = 31; i2dConv = true; break;
-         case TR::f2d: precisionLimit = 24; f2dConv = true; break;
-         default: break;
-         /*
-          these nodes are actually never generated by J9, so no chance to test them
-         case TR::b2d: precisionLimit = 8; break; //unsigned
-         case TR::su2d: precisionLimit = 16; break; //unsigned
-         case TR::s2d: precisionLimit = 15; break; //signed
-         */
-         }
-
-      double possibleRoundedValue=1;// if not a float or double value, doesn't matter
-      ///
-      /// The Java language spec
-      /// lists bit sizes for doubles.  53 bits used for precision exponent, 11 for magnitude
-      /// and leading one for sign.  So check # bits in precision only by masking
-      /// off these first 11+1 bits
-      uint32_t bitcount;
-      switch(mulConstChild->getDataType())
-         {
-         // I don't believe it is possible to reach here with anything other than a floating
-         // point const child; even in the case of a literal pool load.
-         case TR::Float:
-           {
-           union {
-               float f;
-               int32_t i;
-           } u;
-           u.f = mulConstChild->getFloat();
-           possibleRoundedValue = fabs(u.f);
-           bitcount = trailingZeroes(u.i & 0x007fffff); // just look @ mantissa
-           break;
-           }
-         case TR::Double: // rely on fact same storage used for longs
-            if (mulConstChild->getDataType() == TR::Double)
-               {
-               possibleRoundedValue = fabs(mulConstChild->getDouble());
-               }
-            bitcount = trailingZeroes(mulConstChild->getLongIntLow());
-            if (32 == bitcount) bitcount+=  trailingZeroes(0x000fffff & mulConstChild->getLongIntHigh());
-
-            if (traceIt) traceMsg(s->comp(), "Node:%p  bitcount:%d hex:%x%x value:%g\n",mulConstChild,bitcount,
-                mulConstChild->getLongIntHigh(),mulConstChild->getLongIntLow(),
-                mulConstChild->getDouble());
-
-            break;
-
-            {
-         case TR::Int8:
-         case TR::Int16:
-         case TR::Int32:
-         case TR::Int64:
-            TR_ASSERT(0, "We should not reach here for these data types.");
-            return false;
-            }
-
-         default:
-            return false;
-         }
-
-        // check for huge constants where rounding could cause overflow
-        if (i2dConv)
-           {
-           if (possibleRoundedValue >= FMA_CONST_HIGHBOUNDI2D)
-              {
-               if (traceIt) traceMsg(s->comp(), "Fails because |constant| %e exceeds %e\n",possibleRoundedValue,FMA_CONST_HIGHBOUNDI2D);
-               return false;
-              }
-           }
-        else if (f2dConv)
-           {
-           if (possibleRoundedValue >= FMA_CONST_HIGHBOUNDF2D || possibleRoundedValue < FMA_CONST_LOWBOUND)
-              {
-               if (traceIt) traceMsg(s->comp(), "Fails because |constant| %e exceeds range %e-%e \n",possibleRoundedValue,FMA_CONST_LOWBOUND,
-                                   FMA_CONST_HIGHBOUNDF2D);
-               return false;
-              }
-           }
-
-      if (bitcount > precisionLimit) return true;
-      else if (traceIt)
-        traceMsg(s->comp(), "Node:%p failed bitcount:%d >= precision:%d\n",mulConstChild,bitcount,precisionLimit);
-      }
-
-   bool loadConstIsPowerOfTwoDbl = (mulConstChild->getDataType() == TR::Double) &&
-                isNZDoublePowerOfTwo(mulConstChild->getDouble());
-
-   bool loadConstIsPowerOfTwoFloat = (mulConstChild->getDataType() == TR::Float) &&
-                isNZFloatPowerOfTwo(mulConstChild->getFloat());
-
-   bool isStrictfp =  s->comp()->getCurrentMethod()->isStrictFP() || s->comp()->getOption(TR_StrictFP);
-
-
-   if ((loadConstIsPowerOfTwoDbl || loadConstIsPowerOfTwoFloat) && !isStrictfp)
-      return true;
-   else if (traceIt)
-      traceMsg(s->comp(), "Fails because not power of 2 or !strict\n",mulConstChild);
-
-   if (traceIt) traceMsg(s->comp(), "Fails because strict, no const or bitcount exceeded\n");
-   return false;
-   }
 
 // Convert a branch that uses bitwise operators into proper logical
 // control flow.
@@ -5789,37 +5558,40 @@ TR::Node *indirectLoadSimplifier(TR::Node * node, TR::Block * block, TR::Simplif
       {
       TR::Node *addressNode = node->getFirstChild();
 
-      // Can convert to getvelem if trying to load a scalar from a vector
+      // Can convert to vgetelem if trying to load a scalar from a vector
       if ((node->getType().isIntegral() || node->getType().isDouble()) &&
           ((addressNode->getOpCode().isArrayRef() && addressNode->getSecondChild()->getOpCode().isLoadConst() &&
            addressNode->getFirstChild()->getOpCode().hasSymbolReference() && addressNode->getFirstChild()->getSymbol()->getType().isVector()) ||
           (addressNode->getOpCode().hasSymbolReference() && addressNode->getSymbol()->getType().isVector())) &&
-          performTransformation(s->comp(), "%sReplace indirect load [" POINTER_PRINTF_FORMAT "] with getvelem", s->optDetailString(), node))
+          performTransformation(s->comp(), "%sReplace indirect load [" POINTER_PRINTF_FORMAT "] with vgetelem", s->optDetailString(), node))
          {
          int32_t offset = 0;
          TR::SymbolReference *oldSymRef = node->getSymbolReference();
 
          if (addressNode->getOpCode().isArrayRef())
             {
-            offset = addressNode->getSecondChild()->get64bitIntegralValue();
+            offset = static_cast<int32_t>(addressNode->getSecondChild()->get64bitIntegralValue());
             addressNode = addressNode->getFirstChild();
             }
          else
             {
-            offset = oldSymRef->getOffset();
+            offset = static_cast<int32_t>(oldSymRef->getOffset());
             }
 
          TR::SymbolReference *newSymRef = s->comp()->getSymRefTab()->createSymbolReference(
                TR::Symbol::createShadow(s->comp()->trHeapMemory(), addressNode->getSymbol()->getDataType()), 0);
-         TR::Node *vloadiNode = TR::Node::createWithSymRef(TR::vloadi, 1, 1, addressNode, newSymRef);
+
+         TR::DataType vectorType = newSymRef->getSymbol()->getDataType();
+
+         TR::Node *vloadiNode = TR::Node::createWithSymRef(TR::ILOpCode::createVectorOpCode(TR::vloadi, vectorType), 1, 1, addressNode, newSymRef);
          TR::Node *indexNode = TR::Node::iconst(offset/(node->getSize()));
 
-         TR::Node *getvelemNode = TR::Node::create(TR::getvelem, 2, vloadiNode, indexNode);
+         TR::Node *vgetelemNode = TR::Node::create(TR::ILOpCode::createVectorOpCode(TR::vgetelem, vectorType), 2, vloadiNode, indexNode);
 
-         dumpOptDetails(s->comp(),"[" POINTER_PRINTF_FORMAT "]\n", getvelemNode);
+         dumpOptDetails(s->comp(),"[" POINTER_PRINTF_FORMAT "]\n", vgetelemNode);
 
-         s->replaceNode(node, getvelemNode, s->_curTree);
-         return s->simplify(getvelemNode, block);
+         s->replaceNode(node, vgetelemNode, s->_curTree);
+         return s->simplify(vgetelemNode, block);
          }
       }
 
@@ -5908,7 +5680,6 @@ TR::Node *indirectStoreSimplifier(TR::Node * node, TR::Block * block, TR::Simpli
       if ((valueChild->getOpCodeValue() == TR::New) ||
           (valueChild->getOpCodeValue() == TR::newarray) ||
           (valueChild->getOpCodeValue() == TR::anewarray) ||
-          (valueChild->getOpCodeValue() == TR::MergeNew) ||
           (valueChild->getOpCodeValue() == TR::multianewarray))
          {
          bool seenGCPoint = false;
@@ -5969,19 +5740,20 @@ TR::Node *indirectStoreSimplifier(TR::Node * node, TR::Block * block, TR::Simpli
 
          if (addressNode->getOpCode().isArrayRef())
             {
-            offset = addressNode->getSecondChild()->get64bitIntegralValue();
+            offset = static_cast<int32_t>(addressNode->getSecondChild()->get64bitIntegralValue());
             addressNode = addressNode->getFirstChild();
             }
          else
             {
-            offset = oldSymRef->getOffset();
+            offset = static_cast<int32_t>(oldSymRef->getOffset());
             }
 
-         TR::SymbolReference *newSymRef = s->comp()->getSymRefTab()->createSymbolReference(TR::Symbol::createShadow(s->comp()->trHeapMemory(), addressNode->getSymbol()->getDataType()), 0);
-         TR::Node *vloadiNode = TR::Node::createWithSymRef(TR::vloadi, 1, 1, addressNode, newSymRef);
+         TR::DataType type = addressNode->getSymbol()->getDataType();
+         TR::SymbolReference *newSymRef = s->comp()->getSymRefTab()->createSymbolReference(TR::Symbol::createShadow(s->comp()->trHeapMemory(), type), 0);
+         TR::Node *vloadiNode = TR::Node::createWithSymRef(TR::ILOpCode::createVectorOpCode(TR::vloadi, type), 1, 1, addressNode, newSymRef);
          TR::Node *indexNode = TR::Node::iconst(offset/(node->getSize()));   // idx = byte offset / element size
-         TR::Node *vsetelemNode = TR::Node::create(TR::vsetelem, 3, vloadiNode, indexNode, valueNode);
-         auto newVStorei = TR::Node::createWithSymRef(TR::vstorei, 2, 2, addressNode, vsetelemNode, newSymRef);
+         TR::Node *vsetelemNode = TR::Node::create(TR::ILOpCode::createVectorOpCode(TR::vsetelem, type), 3, vloadiNode, indexNode, valueNode);
+         auto newVStorei = TR::Node::createWithSymRef(TR::ILOpCode::createVectorOpCode(TR::vstorei, type), 2, 2, addressNode, vsetelemNode, newSymRef);
          dumpOptDetails(s->comp(),"[" POINTER_PRINTF_FORMAT "]\n", newVStorei);
          s->replaceNode(node, newVStorei, s->_curTree);
          newVStorei->setReferenceCount(0);
@@ -6132,18 +5904,21 @@ TR::Node *vsetelemSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier 
    //          vload <vec>
    //          iconst 0
    //          dload <a>
-   //    iconst 1
-   //    ==> dload
+   //       iconst 1
+   //       ==> dload
    // Since the value being set is the same for all elements in the vector, we can convert it into a single vsplats
 
-   for (TR::Node *vsetelemNode = node; vsetelemNode && vsetelemNode->getOpCodeValue() == TR::vsetelem; vsetelemNode = vsetelemNode->getFirstChild())
+   TR::DataType vectorType = node->getDataType();
+   TR::ILOpCodes vsetelemOpCode = node->getOpCode().getOpCodeValue();
+
+   for (TR::Node *vsetelemNode = node; vsetelemNode && vsetelemNode->getOpCodeValue() == vsetelemOpCode; vsetelemNode = vsetelemNode->getFirstChild())
       {
       // Can't determine which element is being stored
       if (!vsetelemNode->getSecondChild()->getOpCode().isLoadConst())
          break;
 
       // If we've seen this index before, then the outer set element overrides the inner set element, so it's safe to skip this node
-      int8_t index = vsetelemNode->getSecondChild()->get64bitIntegralValue();
+      int8_t index = static_cast<int8_t>(vsetelemNode->getSecondChild()->get64bitIntegralValue());
       if (seenIndex[index])
          continue;
 
@@ -6154,10 +5929,10 @@ TR::Node *vsetelemSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier 
       seenIndex[index] = true;
       }
 
-   // Can convert to a splat if we've seen 16 bytes worth of vsetelems
-   if ((seenIndex.PopulationCount() * valueNode->getSize()) == 16)
+   // Can convert to a splat if we've seen all elements set
+   if ((seenIndex.PopulationCount() * valueNode->getSize()) == node->getSize())
       {
-      TR::Node *vsplatsNode = TR::Node::create(TR::vsplats, 1, valueNode);
+      TR::Node *vsplatsNode = TR::Node::create(TR::ILOpCode::createVectorOpCode(TR::vsplats, vectorType), 1, valueNode);
       s->replaceNode(node, vsplatsNode, s->_curTree);
       return s->simplify(vsplatsNode, block);
       }
@@ -6167,7 +5942,7 @@ TR::Node *vsetelemSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier 
    return node;
    }
 
-TR::Node *v2vSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s)
+TR::Node *vcastSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s)
    {
    if (node->getDataType() == node->getFirstChild()->getDataType())
       {
@@ -7014,8 +6789,6 @@ TR::Node *faddSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s)
    firstChild = node->getFirstChild();
    secondChild = node->getSecondChild();
 
-   if (isOperationFPCompliant(node, firstChild, s)) firstChild->setIsFPStrictCompliant(true);
-   if (isOperationFPCompliant(node, secondChild, s))secondChild->setIsFPStrictCompliant(true);
    return node;
    }
 
@@ -7047,8 +6820,6 @@ TR::Node *daddSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s)
    //
    BINARY_IDENTITY_OP(LongInt, DOUBLE_NEG_ZERO)
 
-   if (isOperationFPCompliant(node, firstChild, s)) firstChild->setIsFPStrictCompliant(true);
-   if (isOperationFPCompliant(node, secondChild, s))secondChild->setIsFPStrictCompliant(true);
    return node;
    }
 
@@ -7811,7 +7582,7 @@ TR::Node *lsubSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s)
          }
       else if(firstChildOp == TR::lshl)
          {
-         shftAmnt = lmulInt;
+         shftAmnt = static_cast<int32_t>(lmulInt);
          }
 
       TR::Node * firstChild = i2lChild->getFirstChild();
@@ -8095,9 +7866,6 @@ TR::Node *fsubSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s)
    firstChild  = node->getFirstChild();
    secondChild = node->getSecondChild();
 
-   if (isOperationFPCompliant(node,firstChild, s)) firstChild->setIsFPStrictCompliant(true);
-   if (isOperationFPCompliant(node,secondChild, s))secondChild->setIsFPStrictCompliant(true);
-
    return node;
    }
 
@@ -8127,8 +7895,6 @@ TR::Node *dsubSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s)
    //
    BINARY_IDENTITY_OP(LongInt, DOUBLE_POS_ZERO)
 
-   if (isOperationFPCompliant(node, firstChild, s)) firstChild->setIsFPStrictCompliant(true);
-   if (isOperationFPCompliant(node, secondChild, s))secondChild->setIsFPStrictCompliant(true);
    return node;
    }
 
@@ -8319,7 +8085,7 @@ TR::Node *imulSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s)
        node->getFirstChild()->getOpCode().isDiv() &&
        node->getFirstChild()->getSecondChild()->getOpCode().isLoadConst() &&
        node->getSecondChild()->getOpCode().isLoadConst() &&
-       (size = node->getSecondChild()->get64bitIntegralValue()) ==
+       (size = static_cast<int32_t>(node->getSecondChild()->get64bitIntegralValue())) ==
         node->getFirstChild()->getSecondChild()->get64bitIntegralValue() &&
        ((size & (size - 1)) == 0) &&  // size is  power of 2
         size > 0)
@@ -12707,8 +12473,6 @@ TR::Node *bu2iSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s)
    else if (firstChild->getOpCodeValue() == TR::i2b &&
             (firstChild->getFirstChild()->getOpCodeValue() == TR::butest ||
              firstChild->getFirstChild()->getOpCodeValue() == TR::arraycmp ||
-             firstChild->getFirstChild()->getOpCodeValue() == TR::trt ||
-             firstChild->getFirstChild()->getOpCodeValue() == TR::trtSimple ||
              firstChild->getFirstChild()->getOpCodeValue() == TR::icmpeq ||
              firstChild->getFirstChild()->getOpCodeValue() == TR::lcmpeq ||
              firstChild->getFirstChild()->getOpCodeValue() == TR::icmpne ||
@@ -14778,7 +14542,7 @@ TR::Node *lcmpeqSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * 
          {
          node->recreate(node, TR::icmpeq);
          TR::Node * newSecondChild = TR::Node::create(node, TR::iconst, 0);
-         newSecondChild->setInt(secondChild->getLongInt());
+         newSecondChild->setInt(static_cast<int32_t>(secondChild->getLongInt()));
          TR::Node * newFirstChild = TR::Node::create(node, TR::l2i, 1);
          newFirstChild->setChild(0, firstChild);
          node->setAndIncChild(0, newFirstChild);
@@ -15890,9 +15654,9 @@ TR::Node *a2iSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s)
    if (firstChild->getOpCode().isLoadConst())
       {
       if (firstChild->getType().isAddress())
-         foldIntConstant(node, firstChild->getAddress(), s, false /* !anchorChildren */);
+         foldIntConstant(node, static_cast<int32_t>(firstChild->getAddress()), s, false /* !anchorChildren */);
       else
-         foldIntConstant(node, firstChild->get64bitIntegralValue(), s, false /* !anchorChildren */);
+         foldIntConstant(node, static_cast<int32_t>(firstChild->get64bitIntegralValue()), s, false /* !anchorChildren */);
       }
    else
       {
@@ -16050,9 +15814,9 @@ TR::Node *switchSimplifier(TR::Node * node, TR::Block * block, bool isTableSwitc
             highNBits64 = lowNBits << ((shiftNode->getOpCode().getSize() * 8) - shiftAmount);
 
             // Make sure all the case nodes can be shifted safely
-            for (int caseIndex = 0; caseIndex < numCases; caseIndex++)
+            for (auto caseIndex = 0U; caseIndex < numCases; caseIndex++)
                {
-               TR::Node *caseNode = node->getChild(caseIndex + 2);
+               TR::Node *caseNode = node->getChild(static_cast<int32_t>(caseIndex + 2));
                if ((isLeftShift && ((caseNode->getCaseConstant() & lowNBits) != 0)) || (!isLeftShift && ((caseNode->getCaseConstant() & highNBits32) != 0)))
                   {
                   canTransform = false;
@@ -16089,9 +15853,9 @@ TR::Node *switchSimplifier(TR::Node * node, TR::Block * block, bool isTableSwitc
 
 
             // Adjust the case values
-            for (int caseIndex = 0; caseIndex < numCases; caseIndex++)
+            for (auto caseIndex = 0U; caseIndex < numCases; caseIndex++)
                {
-               TR::Node *caseNode = node->getChild(caseIndex + 2);
+               TR::Node *caseNode = node->getChild(static_cast<int32_t>(caseIndex + 2));
                caseNode->setCaseConstant(isLeftShift ? (caseNode->getCaseConstant() >> shiftAmount) : (caseNode->getCaseConstant() << shiftAmount));
                }
             }
@@ -16382,47 +16146,6 @@ TR::Node *variableNewSimplifier(TR::Node * node, TR::Block * block, TR::Simplifi
    }
 
 //---------------------------------------------------------------------
-// Char add
-//
-
-TR::Node *caddSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s)
-   {
-   simplifyChildren(node, block, s);
-
-   TR::Node * firstChild = node->getFirstChild(), * secondChild = node->getSecondChild();
-
-   if (firstChild->getOpCode().isLoadConst() && secondChild->getOpCode().isLoadConst())
-      {
-      foldCharConstant(node, firstChild->getConst<uint16_t>() + secondChild->getConst<uint16_t>(), s, false /* !anchorChildren*/);
-      return node;
-      }
-   orderChildren(node, firstChild, secondChild, s);
-
-   BINARY_IDENTITY_OP(UnsignedShortInt, 0)
-   return node;
-   }
-
-//---------------------------------------------------------------------
-// Char subtract
-//
-
-TR::Node *csubSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s)
-   {
-   simplifyChildren(node, block, s);
-
-   TR::Node * firstChild = node->getFirstChild(), * secondChild = node->getSecondChild();
-
-   if (firstChild->getOpCode().isLoadConst() && secondChild->getOpCode().isLoadConst())
-      {
-      foldCharConstant(node, firstChild->getConst<uint16_t>() - secondChild->getConst<uint16_t>(), s, false /* !anchorChildren*/);
-      return node;
-      }
-
-   BINARY_IDENTITY_OP(UnsignedShortInt, 0)
-   return node;
-   }
-
-//---------------------------------------------------------------------
 // High word of 32x32 multiply
 //
 //
@@ -16445,7 +16168,7 @@ TR::Node * imulhSimplifier(TR::Node * node, TR::Block *block, TR::Simplifier * s
             uint64_t src2 = secondChild->getUnsignedInt();
             uint64_t product = src1 * src2;
             uint64_t high = product >> 32;
-            uint32_t result = high;
+            uint32_t result = static_cast<uint32_t>(high);
             TR::Node::recreate(node, TR::iconst);
             node->setUnsignedInt(result);
             }
@@ -16455,7 +16178,7 @@ TR::Node * imulhSimplifier(TR::Node * node, TR::Block *block, TR::Simplifier * s
             int64_t src2 = secondChild->getInt();
             int64_t product = src1 * src2;
             int64_t high = product >> 32;
-            int32_t result = high;
+            int32_t result = static_cast<int32_t>(high);
             TR::Node::recreate(node, TR::iconst);
             node->setInt(result);
             }
@@ -16585,12 +16308,6 @@ TR::Node *d2cSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s)
    }
 
 
-TR::Node *expSimplifier(TR::Node *node,TR::Block *block,TR::Simplifier *s)
-   {
-   simplifyChildren(node, block, s);
-   return replaceExpWithMult(node,node->getFirstChild(),node->getSecondChild(),block,s);
-   }
-
 //---------------------------------------------------------------------
 // Type coersion operators
 //
@@ -16606,7 +16323,15 @@ TR::Node *ibits2fSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier *
       node->setNumChildren(0);
       node->setFloatBits(firstChild->getInt());
       firstChild->recursivelyDecReferenceCount();
+      return node;
       }
+
+   TR::Node * result;
+   if (firstChild->getOpCodeValue() == TR::fbits2i &&
+       !firstChild->normalizeNanValues() &&
+       (result = s->unaryCancelOutWithChild(node, firstChild, s->_curTree, TR::fbits2i)))
+      return result;
+
    return node;
    }
 
@@ -16622,7 +16347,15 @@ TR::Node *lbits2dSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier *
       node->setNumChildren(0);
       node->setDouble(firstChild->getDouble());
       firstChild->recursivelyDecReferenceCount();
+      return node;
       }
+
+   TR::Node * result;
+   if (firstChild->getOpCodeValue() == TR::dbits2l &&
+       !firstChild->normalizeNanValues() &&
+       (result = s->unaryCancelOutWithChild(node, firstChild, s->_curTree, TR::dbits2l)))
+      return result;
+
    return node;
    }
 
@@ -16645,7 +16378,14 @@ TR::Node *fbits2iSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier *
       node->setInt(intValue);
       node->setNumChildren(0);
       firstChild->recursivelyDecReferenceCount();
+      return node;
       }
+
+   TR::Node * result;
+   if (!node->normalizeNanValues() &&
+       (result = s->unaryCancelOutWithChild(node, firstChild, s->_curTree, TR::ibits2f)))
+      return result;
+
    return node;
    }
 
@@ -16668,7 +16408,14 @@ TR::Node *dbits2lSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier *
       node->setLongInt(longValue);
       node->setNumChildren(0);
       firstChild->recursivelyDecReferenceCount();
+      return node;
       }
+
+   TR::Node * result;
+   if (!node->normalizeNanValues() &&
+       (result = s->unaryCancelOutWithChild(node, firstChild, s->_curTree, TR::lbits2d)))
+      return result;
+
    return node;
    }
 
@@ -17574,24 +17321,6 @@ TR::Node *bitOpMemSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier 
    if (s->comp()->getOption(TR_ScalarizeSSOps))
       {
       }
-   return node;
-   }
-
-//---------------------------------------------------------------------
-// bitOpMemND simplification
-//
-TR::Node *bitOpMemNDSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s)
-   {
-   return node;
-   }
-
-// arraycmpWithPad simplifier
-//
-TR::Node *arrayCmpWithPadSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s)
-   {
-   simplifyChildren(node, block, s);
-
-
    return node;
    }
 

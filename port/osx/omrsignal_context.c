@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2016, 2019 IBM Corp. and others
+ * Copyright (c) 2016, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -93,6 +93,7 @@ infoForSignal(struct OMRPortLibrary *portLibrary, OMRUnixSignalInfo *info, int32
 uint32_t
 infoForFPR(struct OMRPortLibrary *portLibrary, OMRUnixSignalInfo *info, int32_t index, const char **name, void **value)
 {
+#if defined(OMR_ARCH_X86)
 	mcontext_t *context = (mcontext_t *)&info->platformSignalInfo.context->uc_mcontext;
 	_STRUCT_X86_FLOAT_STATE64 *floatState = &(*context)->__fs;
 
@@ -165,11 +166,34 @@ infoForFPR(struct OMRPortLibrary *portLibrary, OMRUnixSignalInfo *info, int32_t 
 		*name = "";
 		return OMRPORT_SIG_VALUE_UNDEFINED;
 	}
+#elif defined(OMR_ARCH_AARCH64) /* defined(OMR_ARCH_X86) */
+	mcontext_t *context = (mcontext_t *)&info->platformSignalInfo.context->uc_mcontext;
+	_STRUCT_ARM_NEON_STATE64 *neonState = &(*context)->__ns;
+
+	static const char *fpr_names[] = {
+		"v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7",
+		"v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15",
+		"v16", "v17", "v18", "v19", "v20", "v21", "v22", "v23",
+		"v24", "v25", "v26", "v27", "v28", "v29", "v30", "v31"
+	};
+
+	if ((0 <= index) && (index < (sizeof(fpr_names) / sizeof(fpr_names[0])))) {
+		*name = fpr_names[index];
+		*value = &neonState->__v[index];
+		return OMRPORT_SIG_VALUE_FLOAT_64;
+	} else {
+		*name = "";
+		return OMRPORT_SIG_VALUE_UNDEFINED;
+	}
+#else /* defined(OMR_ARCH_X86) */
+#error Unsupported processor
+#endif /* defined(OMR_ARCH_X86) */
 }
 
 uint32_t
 infoForGPR(struct OMRPortLibrary *portLibrary, OMRUnixSignalInfo *info, int32_t index, const char **name, void **value)
 {
+#if defined(OMR_ARCH_X86)
 	mcontext_t *context = (mcontext_t *)&info->platformSignalInfo.context->uc_mcontext;
 	_STRUCT_X86_THREAD_STATE64 *threadState = &(*context)->__ss;
 
@@ -248,11 +272,48 @@ infoForGPR(struct OMRPortLibrary *portLibrary, OMRUnixSignalInfo *info, int32_t 
 		*name = "";
 		return OMRPORT_SIG_VALUE_UNDEFINED;
 	}
+#elif defined(OMR_ARCH_AARCH64) /* defined(OMR_ARCH_X86) */
+	mcontext_t *context = (mcontext_t *)&info->platformSignalInfo.context->uc_mcontext;
+	_STRUCT_ARM_THREAD_STATE64 *threadState = &(*context)->__ss;
+
+	static const char *gpr_names[] = {
+		"x0", "x1", "x2", "x3", "x4",  "x5", "x6", "x7",
+		"x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15",
+		"x16", "x17", "x18", "x19", "x20", "x21", "x22", "x23",
+		"x24", "x25", "x26", "x27", "x28"
+	};
+
+	if ((0 <= index) && (index < (sizeof(gpr_names) / sizeof(gpr_names[0])))) {
+		*name = gpr_names[index];
+		*value = &threadState->__x[index];
+		return OMRPORT_SIG_VALUE_ADDRESS;
+	}
+	switch (index) {
+	case 29:
+		*name = "x29(FP)";
+		*value = &threadState->__fp;
+		return OMRPORT_SIG_VALUE_ADDRESS;
+	case 30:
+		*name = "x30(LR)";
+		*value = &threadState->__lr;
+		return OMRPORT_SIG_VALUE_ADDRESS;
+	case 31:
+		*name = "x31(SP)";
+		*value = &threadState->__sp;
+		return OMRPORT_SIG_VALUE_ADDRESS;
+	default:
+		*name = "";
+		return OMRPORT_SIG_VALUE_UNDEFINED;
+	}
+#else /* defined(OMR_ARCH_X86) */
+#error Unsupported processor
+#endif /* defined(OMR_ARCH_X86) */
 }
 
 uint32_t
 infoForControl(struct OMRPortLibrary *portLibrary, OMRUnixSignalInfo *info, int32_t index, const char **name, void **value)
 {
+#if defined(OMR_ARCH_X86)
 	mcontext_t *context = (mcontext_t *)&info->platformSignalInfo.context->uc_mcontext;
 	_STRUCT_X86_THREAD_STATE64 *threadState = &(*context)->__ss;
 	_STRUCT_X86_EXCEPTION_STATE64 *exceptionState = &(*context)->__es;
@@ -276,6 +337,7 @@ infoForControl(struct OMRPortLibrary *portLibrary, OMRUnixSignalInfo *info, int3
 		*name = "RSP";
 		*value = (void *)&(threadState->__rsp);
 		return OMRPORT_SIG_VALUE_ADDRESS;
+	case OMRPORT_SIG_CONTROL_X86_EFLAGS:
 	case 4:
 		*name = "RFlags";
 		*value = (void *)&(threadState->__rflags);
@@ -309,14 +371,41 @@ infoForControl(struct OMRPortLibrary *portLibrary, OMRUnixSignalInfo *info, int3
 		*name = "";
 		return OMRPORT_SIG_VALUE_UNDEFINED;
 	}
+#elif defined(OMR_ARCH_AARCH64) /* defined(OMR_ARCH_X86) */
+	mcontext_t *context = (mcontext_t *)&info->platformSignalInfo.context->uc_mcontext;
+	_STRUCT_ARM_THREAD_STATE64 *threadState = &(*context)->__ss;
+
+	switch (index) {
+	case OMRPORT_SIG_CONTROL_PC:
+	case 0:
+		*name = "PC";
+		*value = &threadState->__pc;
+		return OMRPORT_SIG_VALUE_ADDRESS;
+	case OMRPORT_SIG_CONTROL_SP:
+	case 1:
+		*name = "SP";
+		*value = &threadState->__sp;
+		return OMRPORT_SIG_VALUE_ADDRESS;
+	default:
+		*name = "";
+		return OMRPORT_SIG_VALUE_UNDEFINED;
+	}
+#else /* defined(OMR_ARCH_X86) */
+#error Unsupported processor
+#endif /* defined(OMR_ARCH_X86) */
 }
 
 uint32_t
 infoForModule(struct OMRPortLibrary *portLibrary, OMRUnixSignalInfo *info, int32_t index, const char **name, void **value)
 {
+#if defined(OMR_ARCH_X86) || defined(OMR_ARCH_AARCH64)
 	Dl_info *dl_info = &(info->platformSignalInfo.dl_info);
 	mcontext_t *context = (mcontext_t *)&info->platformSignalInfo.context->uc_mcontext;
+#if defined(OMR_ARCH_X86)
 	int dl_result = dladdr((void *)(*context)->__ss.__rip, dl_info);
+#else /* defined(OMR_ARCH_X86) */
+	int dl_result = dladdr((void *)(*context)->__ss.__pc, dl_info);
+#endif /* defined(OMR_ARCH_X86) */
 
 	switch (index) {
 	case OMRPORT_SIG_MODULE_NAME:
@@ -354,4 +443,7 @@ infoForModule(struct OMRPortLibrary *portLibrary, OMRUnixSignalInfo *info, int32
 		*name = "";
 		return OMRPORT_SIG_VALUE_UNDEFINED;
 	}
+#else /* defined(OMR_ARCH_X86) || defined(OMR_ARCH_AARCH64) */
+#error Unsupported processor
+#endif /* defined(OMR_ARCH_X86) || defined(OMR_ARCH_AARCH64) */
 }

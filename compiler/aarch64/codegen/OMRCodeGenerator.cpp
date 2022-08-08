@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -26,6 +26,7 @@
 #include "codegen/ARM64SystemLinkage.hpp"
 #include "codegen/CodeGenerator.hpp"
 #include "codegen/CodeGenerator_inlines.hpp"
+#include "codegen/CodeGeneratorUtils.hpp"
 #include "codegen/ConstantDataSnippet.hpp"
 #include "codegen/GCStackAtlas.hpp"
 #include "codegen/GCStackMap.hpp"
@@ -33,20 +34,26 @@
 #include "codegen/Linkage.hpp"
 #include "codegen/Linkage_inlines.hpp"
 #include "codegen/LiveRegister.hpp"
+#include "codegen/MemoryReference.hpp"
 #include "codegen/RegisterConstants.hpp"
+#include "codegen/RegisterDependency.hpp"
 #include "codegen/RegisterIterator.hpp"
 #include "codegen/TreeEvaluator.hpp"
+#include "codegen/ScratchRegisterManager.hpp"
 #include "control/Recompilation.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
 #include "il/StaticSymbol.hpp"
+#include "ras/DebugCounter.hpp"
 
+#if defined(OSX)
+#include <pthread.h> // for pthread_jit_write_protect_np
+#endif
 
 OMR::ARM64::CodeGenerator::CodeGenerator(TR::Compilation *comp) :
       OMR::CodeGenerator(comp),
       _dataSnippetList(getTypedAllocator<TR::ARM64ConstantDataSnippet*>(comp->allocator())),
-      _outOfLineCodeSectionList(getTypedAllocator<TR_ARM64OutOfLineCodeSection*>(comp->allocator())),
-      _firstTimeLiveOOLRegisterList(NULL)
+      _outOfLineCodeSectionList(getTypedAllocator<TR_ARM64OutOfLineCodeSection*>(comp->allocator()))
    {
    }
 
@@ -85,8 +92,10 @@ OMR::ARM64::CodeGenerator::initialize()
 
    cg->addSupportedLiveRegisterKind(TR_GPR);
    cg->addSupportedLiveRegisterKind(TR_FPR);
+   cg->addSupportedLiveRegisterKind(TR_VRF);
    cg->setLiveRegisters(new (cg->trHeapMemory()) TR_LiveRegisters(comp), TR_GPR);
    cg->setLiveRegisters(new (cg->trHeapMemory()) TR_LiveRegisters(comp), TR_FPR);
+   cg->setLiveRegisters(new (cg->trHeapMemory()) TR_LiveRegisters(comp), TR_VRF);
 
    cg->setSupportsVirtualGuardNOPing();
 
@@ -94,6 +103,9 @@ OMR::ARM64::CodeGenerator::initialize()
 
    cg->setSupportsSelect();
 
+   cg->setSupportsByteswap();
+
+   cg->setSupportsAlignedAccessOnly();
 
    if (!comp->getOption(TR_DisableTraps) && TR::Compiler->vm.hasResumableTrapHandler(comp))
       {
@@ -161,6 +173,11 @@ OMR::ARM64::CodeGenerator::initialize()
 
    if (comp->target().isSMP())
       cg->setEnforceStoreOrder();
+
+   cg->setSupportsAutoSIMD();
+   // Enable compaction of local stack slots.  i.e. variables with non-overlapping live ranges
+   // can share the same slot.
+   cg->setSupportsCompactedLocals();
    }
 
 void
@@ -190,76 +207,6 @@ OMR::ARM64::CodeGenerator::endInstructionSelection()
    }
 
 void
-OMR::ARM64::CodeGenerator::doRegisterAssignment(TR_RegisterKinds kindsToAssign)
-   {
-   // Registers are assigned in backward direction
-
-   TR::Compilation *comp = self()->comp();
-
-   TR::Instruction *instructionCursor = self()->getAppendInstruction();
-
-   if (!comp->getOption(TR_DisableOOL))
-      {
-      if (!self()->isOutOfLineColdPath())
-         {
-         // Allocates these lists when the register assignment starts.
-         // As doRegisterAssignment is called mutiple times for the cold path of OutOfLineCodeSections,
-         // we do allocation only when we are not in the cold path.
-         TR::list<TR::Register*> *firstTimeLiveOOLRegisterList = new (self()->trHeapMemory()) TR::list<TR::Register*>(getTypedAllocator<TR::Register*>(self()->comp()->allocator()));
-         self()->setFirstTimeLiveOOLRegisterList(firstTimeLiveOOLRegisterList);
-
-         TR::list<TR::Register*> *spilledRegisterList = new (self()->trHeapMemory()) TR::list<TR::Register*>(getTypedAllocator<TR::Register*>(comp->allocator()));
-         self()->setSpilledRegisterList(spilledRegisterList);
-         }
-      }
-
-   if (self()->getDebug())
-      self()->getDebug()->startTracingRegisterAssignment();
-
-   while (instructionCursor)
-      {
-      TR::Instruction *prevInstruction = instructionCursor->getPrev();
-
-      self()->tracePreRAInstruction(instructionCursor);
-
-      self()->setCurrentBlockIndex(instructionCursor->getBlockIndex());
-
-      instructionCursor->assignRegisters(TR_GPR);
-
-      // Maintain Internal Control Flow Depth
-      // Track internal control flow on labels
-      if (instructionCursor->isLabel())
-         {
-         TR::ARM64LabelInstruction *li = (TR::ARM64LabelInstruction *)instructionCursor;
-
-         if (li->getLabelSymbol() != NULL)
-            {
-            if (li->getLabelSymbol()->isStartInternalControlFlow())
-               {
-               self()->decInternalControlFlowNestingDepth();
-               }
-            if (li->getLabelSymbol()->isEndInternalControlFlow())
-               {
-               self()->incInternalControlFlowNestingDepth();
-               }
-            }
-         }
-
-      self()->freeUnlatchedRegisters();
-      self()->buildGCMapsForInstructionAndSnippet(instructionCursor);
-
-      self()->tracePostRAInstruction(instructionCursor);
-
-      instructionCursor = prevInstruction;
-      }
-
-   if (self()->getDebug())
-      {
-      self()->getDebug()->stopTracingRegisterAssignment();
-      }
-   }
-
-void
 OMR::ARM64::CodeGenerator::generateBinaryEncodingPrePrologue(TR_ARM64BinaryEncodingData &data)
    {
    data.recomp = NULL;
@@ -281,8 +228,21 @@ OMR::ARM64::CodeGenerator::doBinaryEncoding()
 
    while (data.cursorInstruction && data.cursorInstruction->getOpCodeValue() != TR::InstOpCode::proc)
       {
-      data.estimate = data.cursorInstruction->estimateBinaryLength(data.estimate);
-      data.cursorInstruction = data.cursorInstruction->getNext();
+      TR::Instruction *prev = data.cursorInstruction->getPrev();
+      /* The last instruction whose expansion is finished. */
+      TR::Instruction *expandedOrSelf = data.cursorInstruction->expandInstruction();
+      TR::Instruction *firstInstructionNotExpanded = expandedOrSelf->getNext();
+
+      if (prev != NULL)
+         {
+         /* The first instruction whose byte length has not been added to data.estimate */
+         data.cursorInstruction = prev->getNext();
+         }
+      while (data.cursorInstruction && (data.cursorInstruction != firstInstructionNotExpanded))
+         {
+         data.estimate = data.cursorInstruction->estimateBinaryLength(data.estimate);
+         data.cursorInstruction = data.cursorInstruction->getNext();
+         }
       }
 
    tempInstruction = data.cursorInstruction;
@@ -294,34 +254,40 @@ OMR::ARM64::CodeGenerator::doBinaryEncoding()
 
    self()->getLinkage()->createPrologue(tempInstruction);
 
-   bool skipOneReturn = false;
    while (data.cursorInstruction)
       {
-      if (data.cursorInstruction->getOpCodeValue() == TR::InstOpCode::retn)
+      TR::Instruction *prev = data.cursorInstruction->getPrev();
+      /* The last instruction whose expansion is finished. */
+      TR::Instruction *expandedOrSelf = data.cursorInstruction->expandInstruction();
+      TR::Instruction *firstInstructionNotExpanded = expandedOrSelf->getNext();
+
+      /* The first instruction whose byte length has not been added to data.estimate */
+      data.cursorInstruction = prev->getNext();
+      while (data.cursorInstruction && (data.cursorInstruction != firstInstructionNotExpanded))
          {
-         if (skipOneReturn == false)
-            {
-            TR::Instruction *temp = data.cursorInstruction->getPrev();
-            self()->getLinkage()->createEpilogue(temp);
-            data.cursorInstruction = temp->getNext();
-            skipOneReturn = true;
-            }
-         else
-            {
-            skipOneReturn = false;
-            }
+         data.estimate = data.cursorInstruction->estimateBinaryLength(data.estimate);
+         data.cursorInstruction = data.cursorInstruction->getNext();
          }
-      data.estimate = data.cursorInstruction->estimateBinaryLength(data.estimate);
-      data.cursorInstruction = data.cursorInstruction->getNext();
       }
 
    data.estimate = self()->setEstimatedLocationsForSnippetLabels(data.estimate);
 
    self()->setEstimatedCodeLength(data.estimate);
 
+   if (!constantIsSignedImm21(data.estimate))
+      {
+      // Workaround for huge code
+      // Range of conditional branch instruction is +/- 1MB
+      self()->comp()->failCompilation<TR::AssertionFailure>("Generated code is too large");
+      }
+
    data.cursorInstruction = self()->getFirstInstruction();
    uint8_t *coldCode = NULL;
    uint8_t *temp = self()->allocateCodeMemory(self()->getEstimatedCodeLength(), 0, &coldCode);
+
+#if defined(OSX)
+   pthread_jit_write_protect_np(0);
+#endif
 
    self()->setBinaryBufferStart(temp);
    self()->setBinaryBufferCursor(temp);
@@ -343,27 +309,28 @@ OMR::ARM64::CodeGenerator::doBinaryEncoding()
 
    // Create exception table entries for outlined instructions.
    //
-   if (!self()->comp()->getOption(TR_DisableOOL))
+   auto oiIterator = self()->getARM64OutOfLineCodeSectionList().begin();
+   while (oiIterator != self()->getARM64OutOfLineCodeSectionList().end())
       {
-      auto oiIterator = self()->getARM64OutOfLineCodeSectionList().begin();
-      while (oiIterator != self()->getARM64OutOfLineCodeSectionList().end())
-         {
-         uint32_t startOffset = (*oiIterator)->getFirstInstruction()->getBinaryEncoding() - self()->getCodeStart();
-         uint32_t endOffset   = (*oiIterator)->getAppendInstruction()->getBinaryEncoding() - self()->getCodeStart();
+      uint32_t startOffset = (*oiIterator)->getFirstInstruction()->getBinaryEncoding() - self()->getCodeStart();
+      uint32_t endOffset   = (*oiIterator)->getAppendInstruction()->getBinaryEncoding() - self()->getCodeStart();
 
-         TR::Block * block = (*oiIterator)->getBlock();
-         bool needsETE = (*oiIterator)->getFirstInstruction()->getNode()->getOpCode().hasSymbolReference() &&
-                         (*oiIterator)->getFirstInstruction()->getNode()->getSymbolReference() &&
-                         (*oiIterator)->getFirstInstruction()->getNode()->getSymbolReference()->canCauseGC();
+      TR::Block * block = (*oiIterator)->getBlock();
+      bool needsETE = (*oiIterator)->getFirstInstruction()->getNode()->getOpCode().hasSymbolReference() &&
+                        (*oiIterator)->getFirstInstruction()->getNode()->getSymbolReference() &&
+                        (*oiIterator)->getFirstInstruction()->getNode()->getSymbolReference()->canCauseGC();
 
-         if (needsETE && block && !block->getExceptionSuccessors().empty())
-            block->addExceptionRangeForSnippet(startOffset, endOffset);
+      if (needsETE && block && !block->getExceptionSuccessors().empty())
+         block->addExceptionRangeForSnippet(startOffset, endOffset);
 
-         ++oiIterator;
-         }
+      ++oiIterator;
       }
 
    self()->getLinkage()->performPostBinaryEncoding();
+
+#if defined(OSX)
+   pthread_jit_write_protect_np(1);
+#endif
    }
 
 TR::Linkage *OMR::ARM64::CodeGenerator::createLinkage(TR_LinkageConventions lc)
@@ -375,7 +342,7 @@ TR::Linkage *OMR::ARM64::CodeGenerator::createLinkage(TR_LinkageConventions lc)
          linkage = new (self()->trHeapMemory()) TR::ARM64SystemLinkage(self());
          break;
       default:
-         TR_ASSERT(false, "using system linkage for unrecognized convention %d\n", lc);
+         TR_ASSERT(false, "using system linkage for unrecognized convention %d", lc);
          linkage = new (self()->trHeapMemory()) TR::ARM64SystemLinkage(self());
       }
    self()->setLinkage(lc, linkage);
@@ -464,15 +431,24 @@ TR::Instruction *OMR::ARM64::CodeGenerator::generateSwitchToInterpreterPreProlog
 // different from evaluate in that it returns a clobberable register
 TR::Register *OMR::ARM64::CodeGenerator::gprClobberEvaluate(TR::Node *node)
    {
+   TR::Register *resultReg = self()->evaluate(node);
+
    if (node->getReferenceCount() > 1)
       {
-      TR::Register *targetReg = self()->allocateRegister();
-      generateMovInstruction(self(), node, targetReg, self()->evaluate(node));
+      TR::Register *targetReg = resultReg->containsCollectedReference() ? self()->allocateCollectedReferenceRegister() : self()->allocateRegister(resultReg->getKind());
+
+      if (resultReg->containsInternalPointer())
+         {
+         targetReg->setContainsInternalPointer();
+         targetReg->setPinningArrayPointer(resultReg->getPinningArrayPointer());
+         }
+
+      generateMovInstruction(self(), node, targetReg, resultReg);
       return targetReg;
       }
    else
       {
-      return self()->evaluate(node);
+      return resultReg;
       }
    }
 
@@ -593,9 +569,15 @@ void OMR::ARM64::CodeGenerator::apply16BitLabelRelativeRelocation(int32_t *curso
    // for "tbz/tbnz" instruction
    TR_ASSERT(label->getCodeLocation(), "Attempt to relocate to a NULL label address!");
 
+#if defined(OSX)
+   pthread_jit_write_protect_np(0);
+#endif
    intptr_t distance = reinterpret_cast<intptr_t>(label->getCodeLocation() - reinterpret_cast<uint8_t *>(cursor));
    TR_ASSERT_FATAL(constantIsSignedImm16(distance), "offset (%d) is too large for imm14", distance);
    *cursor |= ((distance >> 2) & 0x3fff) << 5; // imm14
+#if defined(OSX)
+   pthread_jit_write_protect_np(1);
+#endif
    }
 
 void OMR::ARM64::CodeGenerator::apply24BitLabelRelativeRelocation(int32_t *cursor, TR::LabelSymbol *label)
@@ -603,8 +585,14 @@ void OMR::ARM64::CodeGenerator::apply24BitLabelRelativeRelocation(int32_t *curso
    // for "b.cond" instruction
    TR_ASSERT(label->getCodeLocation(), "Attempt to relocate to a NULL label address!");
 
+#if defined(OSX)
+   pthread_jit_write_protect_np(0);
+#endif
    intptr_t distance = (uintptr_t)label->getCodeLocation() - (uintptr_t)cursor;
    *cursor |= ((distance >> 2) & 0x7ffff) << 5; // imm19
+#if defined(OSX)
+   pthread_jit_write_protect_np(1);
+#endif
    }
 
 void OMR::ARM64::CodeGenerator::apply32BitLabelRelativeRelocation(int32_t *cursor, TR::LabelSymbol *label)
@@ -612,8 +600,14 @@ void OMR::ARM64::CodeGenerator::apply32BitLabelRelativeRelocation(int32_t *curso
    // for unconditional "b" instruction
    TR_ASSERT(label->getCodeLocation(), "Attempt to relocate to a NULL label address!");
 
+#if defined(OSX)
+   pthread_jit_write_protect_np(0);
+#endif
    intptr_t distance = (uintptr_t)label->getCodeLocation() - (uintptr_t)cursor;
    *cursor |= ((distance >> 2) & 0x3ffffff); // imm26
+#if defined(OSX)
+   pthread_jit_write_protect_np(1);
+#endif
    }
 
 int64_t OMR::ARM64::CodeGenerator::getLargestNegConstThatMustBeMaterialized()
@@ -626,6 +620,67 @@ int64_t OMR::ARM64::CodeGenerator::getSmallestPosConstThatMustBeMaterialized()
    {
    TR_ASSERT(0, "Not Implemented on AArch64");
    return 0;
+   }
+
+
+bool OMR::ARM64::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::ILOpCode opcode)
+   {
+   TR_ASSERT_FATAL(opcode.isVectorOpCode(), "getSupportsOpCodeForAutoSIMD expects vector opcode\n");
+
+   TR::DataType ot = opcode.getVectorResultDataType();
+
+   if (ot.getVectorLength() != TR::VectorLength128) return false;
+
+   TR::DataType et = ot.getVectorElementType();
+
+   TR_ASSERT_FATAL(et == TR::Int8 || et == TR::Int16 || et == TR::Int32 || et == TR::Int64 || et == TR::Float || et == TR::Double,
+                   "Unexpected vector element type\n");
+
+   // implemented vector opcodes
+   switch (opcode.getVectorOperation())
+      {
+      case TR::vadd:
+      case TR::vsub:
+      case TR::vneg:
+      case TR::vmul:
+      case TR::vdiv:
+      case TR::vabs:
+      case TR::vmin:
+      case TR::vmax:
+      case TR::vreductionAdd:
+      case TR::vreductionMul:
+      case TR::vreductionMax:
+      case TR::vreductionMin:
+         return true;
+      case TR::vand:
+      case TR::vor:
+      case TR::vxor:
+      case TR::vnot:
+      case TR::vreductionAnd:
+      case TR::vreductionOr:
+      case TR::vreductionXor:
+      case TR::vbitselect:
+         // Float/ Double are not supported
+         return (et == TR::Int8 || et == TR::Int16 || et == TR::Int32 || et == TR::Int64);
+      case TR::vload:
+      case TR::vloadi:
+      case TR::vstore:
+      case TR::vstorei:
+      case TR::vsplats:
+         return true;
+      case TR::vfma:
+      case TR::vsqrt:
+         return (et == TR::Float || et == TR::Double);
+      default:
+         return false;
+      }
+
+   return false;
+   }
+
+bool OMR::ARM64::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::ILOpCode opcode)
+   {
+   return TR::CodeGenerator::getSupportsOpCodeForAutoSIMD(&self()->comp()->target().cpu, opcode);
    }
 
 bool
@@ -674,4 +729,141 @@ void OMR::ARM64::CodeGenerator::setRealRegisterAssociation(TR::Register *virtual
 
    TR::RealRegister *realReg = self()->machine()->getRealRegister(realNum);
    self()->getLiveRegisters(virtualRegister->getKind())->setAssociation(virtualRegister, realReg);
+   }
+
+
+TR::Instruction *OMR::ARM64::CodeGenerator::generateDebugCounterBump(TR::Instruction *cursor, TR::DebugCounterBase *counter, int32_t delta, TR::RegisterDependencyConditions *cond)
+   {
+   TR::Node *node = cursor->getNode();
+
+   if (!constantIsUnsignedImm12(delta))
+      {
+      TR::Register *deltaReg = self()->allocateRegister();
+      cursor = loadConstant64(self(), node, delta, deltaReg, cursor);
+      cursor = self()->generateDebugCounterBump(cursor, counter, deltaReg, cond);
+      if (cond)
+         {
+         TR::addDependency(cond, deltaReg, TR::RealRegister::NoReg, TR_GPR, self());
+         }
+      self()->stopUsingRegister(deltaReg);
+      return cursor;
+      }
+
+   intptr_t addr = counter->getBumpCountAddress();
+
+   TR_ASSERT_FATAL(addr, "Expecting a non-null debug counter address");
+
+   TR::Register *addrReg = self()->allocateRegister();
+   TR::Register *counterReg = self()->allocateRegister();
+
+   cursor = loadAddressConstant(self(), node, addr, addrReg, cursor, false, TR_DebugCounter);
+   cursor = generateTrg1MemInstruction(self(), TR::InstOpCode::ldrimmw, node, counterReg, TR::MemoryReference::createWithDisplacement(self(), addrReg, 0), cursor);
+   cursor = generateTrg1Src1ImmInstruction(self(), TR::InstOpCode::addimmw, node, counterReg, counterReg, delta, cursor);
+   cursor = generateMemSrc1Instruction(self(), TR::InstOpCode::strimmw, node, TR::MemoryReference::createWithDisplacement(self(), addrReg, 0), counterReg, cursor);
+
+   if (cond)
+      {
+      uint32_t preCondCursor = cond->getAddCursorForPre();
+      uint32_t postCondCursor = cond->getAddCursorForPost();
+      TR::addDependency(cond, addrReg, TR::RealRegister::NoReg, TR_GPR, self());
+      TR::addDependency(cond, counterReg, TR::RealRegister::NoReg, TR_GPR, self());
+      }
+   self()->stopUsingRegister(addrReg);
+   self()->stopUsingRegister(counterReg);
+   return cursor;
+   }
+
+TR::Instruction *OMR::ARM64::CodeGenerator::generateDebugCounterBump(TR::Instruction *cursor, TR::DebugCounterBase *counter, TR::Register *deltaReg, TR::RegisterDependencyConditions *cond)
+   {
+   TR::Node *node = cursor->getNode();
+   intptr_t addr = counter->getBumpCountAddress();
+
+   TR_ASSERT_FATAL(addr, "Expecting a non-null debug counter address");
+
+   TR::Register *addrReg = self()->allocateRegister();
+   TR::Register *counterReg = self()->allocateRegister();
+
+   cursor = loadAddressConstant(self(), node, addr, addrReg, cursor, false, TR_DebugCounter);
+   cursor = generateTrg1MemInstruction(self(), TR::InstOpCode::ldrimmw, node, counterReg, TR::MemoryReference::createWithDisplacement(self(), addrReg, 0), cursor);
+   cursor = generateTrg1Src2Instruction(self(), TR::InstOpCode::addw, node, counterReg, counterReg, deltaReg, cursor);
+   cursor = generateMemSrc1Instruction(self(), TR::InstOpCode::strimmw, node, TR::MemoryReference::createWithDisplacement(self(), addrReg, 0), counterReg, cursor);
+
+   if (cond)
+      {
+      uint32_t preCondCursor = cond->getAddCursorForPre();
+      uint32_t postCondCursor = cond->getAddCursorForPost();
+      TR::addDependency(cond, addrReg, TR::RealRegister::NoReg, TR_GPR, self());
+      TR::addDependency(cond, counterReg, TR::RealRegister::NoReg, TR_GPR, self());
+      }
+   self()->stopUsingRegister(addrReg);
+   self()->stopUsingRegister(counterReg);
+   return cursor;
+   }
+
+TR::Instruction *OMR::ARM64::CodeGenerator::generateDebugCounterBump(TR::Instruction *cursor, TR::DebugCounterBase *counter, int32_t delta, TR_ScratchRegisterManager &srm)
+   {
+   TR::Node *node = cursor->getNode();
+
+   if (!constantIsUnsignedImm12(delta))
+      {
+      TR::Register *deltaReg = srm.findOrCreateScratchRegister();
+      cursor = loadConstant64(self(), node, delta, deltaReg, cursor);
+      cursor = self()->generateDebugCounterBump(cursor, counter, deltaReg, srm);
+      srm.reclaimScratchRegister(deltaReg);
+      return cursor;
+      }
+
+   intptr_t addr = counter->getBumpCountAddress();
+
+   TR_ASSERT_FATAL(addr, "Expecting a non-null debug counter address");
+
+   TR::Register *addrReg = srm.findOrCreateScratchRegister();
+   TR::Register *counterReg = srm.findOrCreateScratchRegister();
+
+   cursor = loadAddressConstant(self(), node, addr, addrReg, cursor, false, TR_DebugCounter);
+   cursor = generateTrg1MemInstruction(self(), TR::InstOpCode::ldrimmw, node, counterReg, TR::MemoryReference::createWithDisplacement(self(), addrReg, 0), cursor);
+   cursor = generateTrg1Src1ImmInstruction(self(), TR::InstOpCode::addimmw, node, counterReg, counterReg, delta, cursor);
+   cursor = generateMemSrc1Instruction(self(), TR::InstOpCode::strimmw, node, TR::MemoryReference::createWithDisplacement(self(), addrReg, 0), counterReg, cursor);
+
+   srm.reclaimScratchRegister(addrReg);
+   srm.reclaimScratchRegister(counterReg);
+   return cursor;
+   }
+
+TR::Instruction *OMR::ARM64::CodeGenerator::generateDebugCounterBump(TR::Instruction *cursor, TR::DebugCounterBase *counter, TR::Register *deltaReg, TR_ScratchRegisterManager &srm)
+   {
+   TR::Node *node = cursor->getNode();
+   intptr_t addr = counter->getBumpCountAddress();
+
+   TR_ASSERT_FATAL(addr, "Expecting a non-null debug counter address");
+
+   TR::Register *addrReg = srm.findOrCreateScratchRegister();
+   TR::Register *counterReg = srm.findOrCreateScratchRegister();
+
+   cursor = loadAddressConstant(self(), node, addr, addrReg, cursor, false, TR_DebugCounter);
+   cursor = generateTrg1MemInstruction(self(), TR::InstOpCode::ldrimmw, node, counterReg, TR::MemoryReference::createWithDisplacement(self(), addrReg, 0), cursor);
+   cursor = generateTrg1Src2Instruction(self(), TR::InstOpCode::addw, node, counterReg, counterReg, deltaReg, cursor);
+   cursor = generateMemSrc1Instruction(self(), TR::InstOpCode::strimmw, node, TR::MemoryReference::createWithDisplacement(self(), addrReg, 0), counterReg, cursor);
+   srm.reclaimScratchRegister(addrReg);
+   srm.reclaimScratchRegister(counterReg);
+   return cursor;
+   }
+
+bool
+OMR::ARM64::CodeGenerator::supportsNonHelper(TR::SymbolReferenceTable::CommonNonhelperSymbol symbol)
+   {
+   bool result = false;
+
+   switch (symbol)
+      {
+      case TR::SymbolReferenceTable::atomicAddSymbol:
+      case TR::SymbolReferenceTable::atomicFetchAndAddSymbol:
+      case TR::SymbolReferenceTable::atomicSwapSymbol:
+         {
+         result = true;
+         break;
+         }
+      }
+
+   return result;
    }

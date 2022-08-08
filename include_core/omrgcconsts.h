@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -271,7 +271,7 @@ struct ModronLnrlOptions {
 #define OLDFREE_INSUFFICIENT					((uintptr_t)(1024 * 128))
 #define MINIMUM_TLHSIZE_MULTIPLIER				2
 #define MINIMUM_CONTRACTION_RATIO_DIVISOR		100
-#define MINIMUM_CONTRACTION_RATIO_MULTIPLIER	10
+#define DEFAULT_MINIMUM_CONTRACTION_RATIO	10
 
 #define DESIRED_SUBAREA_SIZE		((uintptr_t)(4*1024*1024))
 
@@ -420,16 +420,21 @@ typedef enum {
 	NO_CONTRACT = 1,
 	GC_RATIO_TOO_LOW,
 	FREE_SPACE_GREATER_MAXF,
+	FREE_SPACE_HIGH_OR_GC_LOW,
+	EDEN_CONTRACTING,
 	SCAV_RATIO_TOO_LOW,
 	HEAP_RESIZE,
 	SATISFY_EXPAND,
-	FORCED_NURSERY_CONTRACT
+	FORCED_NURSERY_CONTRACT,
+	SOFT_MX_CONTRACT,
 } ContractReason;
 
 typedef enum {
 	NO_EXPAND = 1,
 	GC_RATIO_TOO_HIGH,
 	FREE_SPACE_LESS_MINF,
+	FREE_SPACE_LOW_OR_GC_HIGH,
+	EDEN_EXPANDING,
 	SCAV_RATIO_TOO_HIGH,
 	SATISFY_COLLECTOR,
 	EXPAND_DESPERATE,
@@ -505,7 +510,7 @@ typedef enum {
 #define OMR_SCV_TENURE_RATIO_LOW 10
 #define OMR_SCV_TENURE_RATIO_HIGH 30
 #define OMR_SCV_REMSET_FRAGMENT_SIZE 32
-#define OMR_SCV_REMSET_SIZE 16384
+#define OMR_SCV_REMSET_SIZE 4096
 
 #define J9MODRON_ALLOCATION_MANAGER_HINT_MAX_WALK 20
 
@@ -542,6 +547,9 @@ typedef enum {
 #else /* defined(AIXPPC) */
 #define SUBALLOCATOR_ALIGNMENT (8*1024*1024)
 #endif /* defined(AIXPPC) */
+
+#define MAXIMUM_HEAP_SIZE_RECOMMENDED_FOR_COMPRESSEDREFS            ((U_64)57 * 1024 * 1024 * 1024)
+#define MAXIMUM_HEAP_SIZE_RECOMMENDED_FOR_3BIT_SHIFT_COMPRESSEDREFS ((U_64)25 * 1024 * 1024 * 1024)
 
 #if defined(OMR_GC_REALTIME)
 #define METRONOME_DEFAULT_HRT_PERIOD_MICRO 1000 /* This gives vanilla linux a chance to use the HRT */

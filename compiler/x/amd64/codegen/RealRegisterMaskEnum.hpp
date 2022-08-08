@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2016 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -53,34 +53,22 @@
    st7Mask           = 0x00000080,
    AvailableFPRMask  = 0x000000FF,
 
-   // MMXR
-   //
-   mm0Mask           = 0x00010000,
-   mm1Mask           = 0x00020000,
-   mm2Mask           = 0x00040000,
-   mm3Mask           = 0x00080000,
-   mm4Mask           = 0x00100000,
-   mm5Mask           = 0x00200000,
-   mm6Mask           = 0x00400000,
-   mm7Mask           = 0x00800000,
-   AvailableMMRMask  = 0x00FF0000,
-
    // XMMR
    //
-   xmm0Mask          = 0x00000001 << XMMRMaskOffset,
-   xmm1Mask          = 0x00000002 << XMMRMaskOffset,
-   xmm2Mask          = 0x00000004 << XMMRMaskOffset,
-   xmm3Mask          = 0x00000008 << XMMRMaskOffset,
-   xmm4Mask          = 0x00000010 << XMMRMaskOffset,
-   xmm5Mask          = 0x00000020 << XMMRMaskOffset,
-   xmm6Mask          = 0x00000040 << XMMRMaskOffset,
-   xmm7Mask          = 0x00000080 << XMMRMaskOffset,
-   xmm8Mask          = 0x00000100 << XMMRMaskOffset,
-   xmm9Mask          = 0x00000200 << XMMRMaskOffset,
-   xmm10Mask         = 0x00000400 << XMMRMaskOffset,
-   xmm11Mask         = 0x00000800 << XMMRMaskOffset,
-   xmm12Mask         = 0x00001000 << XMMRMaskOffset,
-   xmm13Mask         = 0x00002000 << XMMRMaskOffset,
-   xmm14Mask         = 0x00004000 << XMMRMaskOffset,
-   xmm15Mask         = 0x00008000 << XMMRMaskOffset,
-   AvailableXMMRMask = 0x0000FFFF << XMMRMaskOffset,
+   xmm0Mask          = 0x00000001,
+   xmm1Mask          = 0x00000002,
+   xmm2Mask          = 0x00000004,
+   xmm3Mask          = 0x00000008,
+   xmm4Mask          = 0x00000010,
+   xmm5Mask          = 0x00000020,
+   xmm6Mask          = 0x00000040,
+   xmm7Mask          = 0x00000080,
+   xmm8Mask          = 0x00000100,
+   xmm9Mask          = 0x00000200,
+   xmm10Mask         = 0x00000400,
+   xmm11Mask         = 0x00000800,
+   xmm12Mask         = 0x00001000,
+   xmm13Mask         = 0x00002000,
+   xmm14Mask         = 0x00004000,
+   xmm15Mask         = 0x00008000,
+   AvailableXMMRMask = 0x0000FFFF,

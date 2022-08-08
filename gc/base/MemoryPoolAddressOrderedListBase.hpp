@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -58,6 +58,7 @@ protected:
 	MM_SweepPoolManagerAddressOrderedListBase* _sweepPoolManager;		/**< pointer to SweepPoolManager class */
 	MM_HeapLinkedFreeHeader *_lastFreeEntry;							/**< address of the last free entry in the pool; valid after compact; NOT maintained during allocation */ 
 
+	uintptr_t _adjustedBytesForCardAlignment;		/* due to Dirty Card Alignment, number of free memory bytes can not be reused as survivor bytes(it should be counted as a part of darkmatter bytes, balanced gc only) */
 public:
 	
 /*
@@ -66,20 +67,6 @@ public:
 private:
 
 protected:
-/**
- * Update memory pool statistical data
- * 
- * @param freeBytes free bytes added
- * @param freeEntryCount free memory elements added
- * @param largestFreeEntry largest free memory element size 
- */
- 	void updateMemoryPoolStatistics(MM_EnvironmentBase *env, uintptr_t freeBytes, uintptr_t freeEntryCount, uintptr_t largestFreeEntry)
-	{
-		setFreeMemorySize(freeBytes);
-		setFreeEntryCount(freeEntryCount);
-		setLargestFreeEntry(largestFreeEntry);
-	}
-
 	MMINLINE bool internalRecycleHeapChunk(void *addrBase, void *addrTop, MM_HeapLinkedFreeHeader *next)
 	{
 		/* Determine if the heap chunk belongs in the free list */
@@ -187,19 +174,6 @@ protected:
 	void connectFinalMemoryToPool(MM_EnvironmentBase *env, void *address, uintptr_t size);
 	void abandonMemoryInPool(MM_EnvironmentBase *env, void *address, uintptr_t size);
 
-
-	/**
-	 * Check, can free memory element be connected to memory pool
-	 * 
-	 * @param address free memory start address
-	 * @param size free memory size in bytes
-	 * @return true if free memory element would be accepted
-	 */
-	MMINLINE bool canMemoryBeConnectedToPool(MM_EnvironmentBase* env, void* address, uintptr_t size)
-	{
-		return size >= getMinimumFreeEntrySize();
-	}
-	
 public:
 	virtual void acquireResetLock(MM_EnvironmentBase* env);
 	virtual void releaseResetLock(MM_EnvironmentBase* env);
@@ -229,7 +203,6 @@ public:
 	 * or NULL for superpools
 	 */
 	MMINLINE MM_SweepPoolManager *getSweepPoolManager()
-//	MMINLINE MM_SweepPoolManagerAddressOrderedListBase *getSweepPoolManager()
 	{
 		/*
 		 * This function must be called for leaf pools only
@@ -242,7 +215,23 @@ public:
 	
 	virtual void printCurrentFreeList(MM_EnvironmentBase* env, const char* area)=0;
 
-	virtual void recalculateMemoryPoolStatistics(MM_EnvironmentBase* env)=0;
+	void resetAdjustedBytesForCardAlignment()
+	{
+		_adjustedBytesForCardAlignment = 0;
+	}
+
+	/**
+	 * Check, can free memory element be connected to memory pool
+	 *
+	 * @param address free memory start address
+	 * @param size free memory size in bytes
+	 * @return true if free memory element would be accepted
+	 */
+	MMINLINE bool canMemoryBeConnectedToPool(MM_EnvironmentBase* env, void* address, uintptr_t size)
+	{
+		return size >= getMinimumFreeEntrySize();
+	}
+
 #if defined(OMR_GC_IDLE_HEAP_MANAGER)
 	uintptr_t releaseFreeEntryMemoryPages(MM_EnvironmentBase* env, MM_HeapLinkedFreeHeader* freeEntry);
 #endif
@@ -255,6 +244,7 @@ public:
 		,_sweepPoolState(NULL)
 		,_sweepPoolManager(NULL)
 		,_lastFreeEntry(NULL)
+		,_adjustedBytesForCardAlignment(0)
 	{
 //		_typeId = __FUNCTION__;
 	};
@@ -265,6 +255,7 @@ public:
 		,_sweepPoolState(NULL)
 		,_sweepPoolManager(NULL)
 		,_lastFreeEntry(NULL)
+		,_adjustedBytesForCardAlignment(0)
 	{
 //		_typeId = __FUNCTION__;
 	};

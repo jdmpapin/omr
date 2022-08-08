@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2015 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -38,20 +38,24 @@
 #include "SweepPoolManager.hpp"
 #include "ParallelSweepChunk.hpp"
 #include "SweepPoolState.hpp"
+#include "MemoryPoolAddressOrderedListBase.hpp"
 
 class MM_AllocateDescription;
 class MM_EnvironmentBase;
-class MM_MemoryPool;
 class MM_HeapLinkedFreeHeader;
 
 class MM_SweepPoolManagerAddressOrderedListBase : public MM_SweepPoolManager
 {
 private:
-
 protected:
+public:
 
+private:
+protected:
 	MMINLINE void calculateTrailingDetails(MM_ParallelSweepChunk *sweepChunk, uintptr_t *trailingCandidate, uintptr_t trailingCandidateSlotCount);
 	MMINLINE virtual void connectChunkPostProcess(MM_ParallelSweepChunk *chunk, MM_SweepPoolState *sweepState, MM_HeapLinkedFreeHeader* splitCandidate, MM_HeapLinkedFreeHeader* splitCandidatePreviousEntry){}
+	MMINLINE virtual void addFreeMemoryPostProcess(MM_EnvironmentBase *env, MM_MemoryPoolAddressOrderedListBase *memoryPool, void *addrBase, void *addrTop, bool needSync, void *oldAddrTop = NULL) {}
+
 	MMINLINE void updateLargestFreeEntryInChunk(MM_ParallelSweepChunk *chunk, MM_SweepPoolState *sweepState, MM_HeapLinkedFreeHeader* previousFreeEntry)
 	{
 		if (chunk->_largestFreeEntry > sweepState->_largestFreeEntry) {

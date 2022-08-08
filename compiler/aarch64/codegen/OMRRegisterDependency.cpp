@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -34,6 +34,15 @@
 // Replace this by #include "codegen/Instruction.hpp" when available for aarch64
 namespace TR { class Instruction; }
 
+OMR::ARM64::RegisterDependencyConditions::RegisterDependencyConditions(uint16_t numPreConds, uint16_t numPostConds, TR_Memory * m)
+   : _preConditions(new (numPreConds, m) TR::RegisterDependencyGroup),
+      _postConditions(new (numPostConds, m) TR::RegisterDependencyGroup),
+      _numPreConditions(numPreConds),
+      _addCursorForPre(0),
+      _numPostConditions(numPostConds),
+      _addCursorForPost(0)
+   {}
+
 OMR::ARM64::RegisterDependencyConditions::RegisterDependencyConditions(
                                        TR::CodeGenerator *cg,
                                        TR::Node          *node,
@@ -47,8 +56,8 @@ OMR::ARM64::RegisterDependencyConditions::RegisterDependencyConditions(
 
    cg->comp()->incVisitCount();
 
-   _preConditions = new (totalNum, cg->trMemory()) TR_ARM64RegisterDependencyGroup;
-   _postConditions = new (totalNum, cg->trMemory()) TR_ARM64RegisterDependencyGroup;
+   _preConditions = new (totalNum, cg->trMemory()) TR::RegisterDependencyGroup;
+   _postConditions = new (totalNum, cg->trMemory()) TR::RegisterDependencyGroup;
    _numPreConditions = totalNum;
    _addCursorForPre = 0;
    _numPostConditions = totalNum;
@@ -89,7 +98,7 @@ OMR::ARM64::RegisterDependencyConditions::RegisterDependencyConditions(
          {
          TR_RegisterKinds kind = reg->getKind();
 
-         TR_ASSERT_FATAL((kind == TR_GPR) || (kind == TR_FPR), "Invalid register kind.");
+         TR_ASSERT_FATAL((kind == TR_GPR) || (kind == TR_FPR) || (kind == TR_VRF), "Invalid register kind.");
 
          if (kind == TR_GPR)
             {
@@ -102,6 +111,11 @@ OMR::ARM64::RegisterDependencyConditions::RegisterDependencyConditions(
                copyReg->setPinningArrayPointer(reg->getPinningArrayPointer());
                }
             iCursor = generateMovInstruction(cg, node, copyReg, reg, true, iCursor);
+            }
+         else if (kind == TR_VRF)
+            {
+               copyReg = cg->allocateRegister(TR_VRF);
+               iCursor = generateTrg1Src2Instruction(cg, TR::InstOpCode::vorr16b, node, copyReg, reg, reg, iCursor);
             }
          else
             {
@@ -134,6 +148,74 @@ OMR::ARM64::RegisterDependencyConditions::RegisterDependencyConditions(
 void OMR::ARM64::RegisterDependencyConditions::unionNoRegPostCondition(TR::Register *reg, TR::CodeGenerator *cg)
    {
    addPostCondition(reg, TR::RealRegister::NoReg);
+   }
+
+void OMR::ARM64::RegisterDependencyConditions::addPreCondition(TR::Register *vr, TR::RealRegister::RegNum rr, uint8_t flag)
+   {
+   TR_ASSERT(_addCursorForPre < _numPreConditions, " Pre Condition array bounds overflow");
+   _preConditions->setDependencyInfo(_addCursorForPre++, vr, rr, flag);
+   }
+
+void OMR::ARM64::RegisterDependencyConditions::addPostCondition(TR::Register *vr, TR::RealRegister::RegNum rr, uint8_t flag)
+   {
+   TR_ASSERT(_addCursorForPost < _numPostConditions, " Post Condition array bounds overflow");
+   _postConditions->setDependencyInfo(_addCursorForPost++, vr, rr, flag);
+   }
+
+void OMR::ARM64::RegisterDependencyConditions::assignPreConditionRegisters(TR::Instruction *currentInstruction, TR_RegisterKinds kindToBeAssigned, TR::CodeGenerator *cg)
+   {
+   if (_preConditions != NULL)
+      {
+      cg->clearRegisterAssignmentFlags();
+      cg->setRegisterAssignmentFlag(TR_PreDependencyCoercion);
+      _preConditions->assignRegisters(currentInstruction, kindToBeAssigned, _addCursorForPre, cg);
+      }
+   }
+
+void OMR::ARM64::RegisterDependencyConditions::assignPostConditionRegisters(TR::Instruction *currentInstruction, TR_RegisterKinds kindToBeAssigned, TR::CodeGenerator *cg)
+   {
+   if (_postConditions != NULL)
+      {
+      cg->clearRegisterAssignmentFlags();
+      cg->setRegisterAssignmentFlag(TR_PostDependencyCoercion);
+      _postConditions->assignRegisters(currentInstruction, kindToBeAssigned, _addCursorForPost, cg);
+      }
+   }
+
+TR::Register *OMR::ARM64::RegisterDependencyConditions::searchPreConditionRegister(TR::RealRegister::RegNum rr)
+   {
+   return(_preConditions==NULL?NULL:_preConditions->searchForRegister(rr, _addCursorForPre));
+   }
+
+TR::Register *OMR::ARM64::RegisterDependencyConditions::searchPostConditionRegister(TR::RealRegister::RegNum rr)
+   {
+   return(_postConditions==NULL?NULL:_postConditions->searchForRegister(rr, _addCursorForPost));
+   }
+
+uint32_t OMR::ARM64::RegisterDependencyConditions::setNumPreConditions(uint16_t n, TR_Memory * m)
+   {
+   if (_preConditions == NULL)
+      {
+      _preConditions = new (n, m) TR::RegisterDependencyGroup;
+      }
+   if (_addCursorForPre > n)
+      {
+      _addCursorForPre = n;
+      }
+   return (_numPreConditions = n);
+   }
+
+uint32_t OMR::ARM64::RegisterDependencyConditions::setNumPostConditions(uint16_t n, TR_Memory * m)
+   {
+   if (_postConditions == NULL)
+      {
+      _postConditions = new (n, m) TR::RegisterDependencyGroup;
+      }
+   if (_addCursorForPost > n)
+      {
+      _addCursorForPost = n;
+      }
+   return (_numPostConditions = n);
    }
 
 bool OMR::ARM64::RegisterDependencyConditions::refsRegister(TR::Register *r)
@@ -324,12 +406,32 @@ OMR::ARM64::RegisterDependencyConditions::clone(
 void OMR::ARM64::RegisterDependencyConditions::stopUsingDepRegs(TR::CodeGenerator *cg, TR::Register *returnRegister)
    {
    if (_preConditions != NULL)
-      _preConditions->stopUsingDepRegs(getAddCursorForPre(), returnRegister, cg);
+      _preConditions->stopUsingDepRegs(getAddCursorForPre(), NULL, returnRegister, cg);
    if (_postConditions != NULL)
-      _postConditions->stopUsingDepRegs(getAddCursorForPost(), returnRegister, cg);
+      _postConditions->stopUsingDepRegs(getAddCursorForPost(), NULL, returnRegister, cg);
    }
 
-void TR_ARM64RegisterDependencyGroup::assignRegisters(
+void OMR::ARM64::RegisterDependencyConditions::stopUsingDepRegs(TR::CodeGenerator *cg, int numRetReg, TR::Register **retReg)
+   {
+   if (_preConditions != NULL)
+      _preConditions->stopUsingDepRegs(getAddCursorForPre(), numRetReg, retReg, cg);
+   if (_postConditions != NULL)
+      _postConditions->stopUsingDepRegs(getAddCursorForPost(), numRetReg, retReg, cg);
+   }
+
+
+/**
+ * @brief Answers if the register dependency is KillVectorRegs
+ *
+ * @param[in] dep : register dependency
+ * @return true if the register dependency is KillVectorRegs
+ */
+static bool killsVectorRegs(TR::RegisterDependency *dep)
+   {
+   return dep->getRealRegister() == TR::RealRegister::KillVectorRegs;
+   }
+
+void OMR::ARM64::RegisterDependencyGroup::assignRegisters(
                         TR::Instruction *currentInstruction,
                         TR_RegisterKinds kindToBeAssigned,
                         uint32_t numberOfRegisters,
@@ -343,70 +445,72 @@ void TR_ARM64RegisterDependencyGroup::assignRegisters(
    uint32_t i, j;
    bool changed;
 
-   if (!comp->getOption(TR_DisableOOL))
+   for (i = 0; i< numberOfRegisters; i++)
       {
-      for (i = 0; i< numberOfRegisters; i++)
+      virtReg = _dependencies[i].getRegister();
+      if (_dependencies[i].isSpilledReg())
          {
-         virtReg = _dependencies[i].getRegister();
-         if (_dependencies[i].isSpilledReg())
+         TR_ASSERT(virtReg->getBackingStorage(), "should have a backing store if SpilledReg");
+         if (virtReg->getAssignedRealRegister())
             {
-            TR_ASSERT(virtReg->getBackingStorage(), "should have a backing store if SpilledReg");
-            if (virtReg->getAssignedRealRegister())
-               {
-               // this happens when the register was first spilled in main line path then was reverse spilled
-               // and assigned to a real register in OOL path. We protected the backing store when doing
-               // the reverse spill so we could re-spill to the same slot now
-               traceMsg (comp,"\nOOL: Found register spilled in main line and re-assigned inside OOL");
-               TR::Node *currentNode = currentInstruction->getNode();
-               TR::RealRegister *assignedReg = toRealRegister(virtReg->getAssignedRegister());
-               TR::MemoryReference *tempMR = new (cg->trHeapMemory()) TR::MemoryReference(currentNode, (TR::SymbolReference*)virtReg->getBackingStorage()->getSymbolReference(), cg);
-               TR_RegisterKinds rk = virtReg->getKind();
-               TR::InstOpCode::Mnemonic opCode;
-               switch (rk)
-                  {
-                  case TR_GPR:
-                     opCode = TR::InstOpCode::ldrimmx;
-                     break;
-                  case TR_FPR:
-                     opCode = TR::InstOpCode::vldrimmd;
-                     break;
-                  default:
-                     TR_ASSERT(0, "\nRegister kind not supported in OOL spill\n");
-                     break;
-                  }
-
-               TR::Instruction *inst = generateTrg1MemInstruction(cg, opCode, currentNode, assignedReg, tempMR, currentInstruction);
-
-               assignedReg->setAssignedRegister(NULL);
-               virtReg->setAssignedRegister(NULL);
-               assignedReg->setState(TR::RealRegister::Free);
-
-               if (comp->getDebug())
-                  cg->traceRegisterAssignment("Generate reload of virt %s due to spillRegIndex dep at inst %p\n", cg->comp()->getDebug()->getName(virtReg), currentInstruction);
-               cg->traceRAInstruction(inst);
-               }
-
-            if (!(std::find(cg->getSpilledRegisterList()->begin(), cg->getSpilledRegisterList()->end(), virtReg) != cg->getSpilledRegisterList()->end()))
-               cg->getSpilledRegisterList()->push_front(virtReg);
-            }
-         // we also need to free up all locked backing storage if we are exiting the OOL during backwards RA assignment
-         else if (currentInstruction->isLabel() && virtReg->getAssignedRealRegister())
-            {
-            TR::ARM64LabelInstruction *labelInstr = (TR::ARM64LabelInstruction *)currentInstruction;
-            TR_BackingStore *location = virtReg->getBackingStorage();
+            // this happens when the register was first spilled in main line path then was reverse spilled
+            // and assigned to a real register in OOL path. We protected the backing store when doing
+            // the reverse spill so we could re-spill to the same slot now
+            traceMsg (comp,"\nOOL: Found register spilled in main line and re-assigned inside OOL");
+            TR::Node *currentNode = currentInstruction->getNode();
+            TR::RealRegister *assignedReg = toRealRegister(virtReg->getAssignedRegister());
+            TR::MemoryReference *tempMR = TR::MemoryReference::createWithSymRef(cg, currentNode, (TR::SymbolReference*)virtReg->getBackingStorage()->getSymbolReference());
             TR_RegisterKinds rk = virtReg->getKind();
-            int32_t dataSize;
-            if (labelInstr->getLabelSymbol()->isStartOfColdInstructionStream() && location)
+            TR::InstOpCode::Mnemonic opCode;
+            switch (rk)
                {
-               traceMsg (comp,"\nOOL: Releasing backing storage (%p)\n", location);
-               if (rk == TR_GPR)
-                  dataSize = TR::Compiler->om.sizeofReferenceAddress();
-               else
-                  dataSize = 8;
-               location->setMaxSpillDepth(0);
-               cg->freeSpill(location, dataSize, 0);
-               virtReg->setBackingStorage(NULL);
+               case TR_GPR:
+                  opCode = TR::InstOpCode::ldrimmx;
+                  break;
+               case TR_FPR:
+                  opCode = TR::InstOpCode::vldrimmd;
+                  break;
+               case TR_VRF:
+                  opCode = TR::InstOpCode::vldrimmq;
+                  break;
+               default:
+                  TR_ASSERT(0, "\nRegister kind not supported in OOL spill");
+                  break;
                }
+
+            TR::Instruction *inst = generateTrg1MemInstruction(cg, opCode, currentNode, assignedReg, tempMR, currentInstruction);
+
+            assignedReg->setAssignedRegister(NULL);
+            virtReg->setAssignedRegister(NULL);
+            assignedReg->setState(TR::RealRegister::Free);
+
+            if (comp->getDebug())
+               cg->traceRegisterAssignment("Generate reload of virt %s due to spillRegIndex dep at inst %p\n", cg->comp()->getDebug()->getName(virtReg), currentInstruction);
+            cg->traceRAInstruction(inst);
+            }
+
+         if (!(std::find(cg->getSpilledRegisterList()->begin(), cg->getSpilledRegisterList()->end(), virtReg) != cg->getSpilledRegisterList()->end()))
+            cg->getSpilledRegisterList()->push_front(virtReg);
+         }
+      // we also need to free up all locked backing storage if we are exiting the OOL during backwards RA assignment
+      else if (currentInstruction->isLabel() && virtReg->getAssignedRealRegister())
+         {
+         TR::ARM64LabelInstruction *labelInstr = (TR::ARM64LabelInstruction *)currentInstruction;
+         TR_BackingStore *location = virtReg->getBackingStorage();
+         TR_RegisterKinds rk = virtReg->getKind();
+         int32_t dataSize;
+         if (labelInstr->getLabelSymbol()->isStartOfColdInstructionStream() && location)
+            {
+            traceMsg (comp,"\nOOL: Releasing backing storage (%p)\n", location);
+            if (rk == TR_GPR)
+               dataSize = TR::Compiler->om.sizeofReferenceAddress();
+            else if (rk == TR_FPR)
+               dataSize = 8;
+            else /* TR_VRF */
+               dataSize = 16;
+            location->setMaxSpillDepth(0);
+            cg->freeSpill(location, dataSize, 0);
+            virtReg->setBackingStorage(NULL);
             }
          }
       }
@@ -434,6 +538,11 @@ void TR_ARM64RegisterDependencyGroup::assignRegisters(
                }
             }
          }
+      // Check for directive to spill vector registers.
+      if (killsVectorRegs(&_dependencies[i]))
+         {
+         machine->spillAllVectorRegisters(currentInstruction);
+         }
       }
 
    do
@@ -448,6 +557,7 @@ void TR_ARM64RegisterDependencyGroup::assignRegisters(
 
          if (!regDep.isNoReg() &&
              !regDep.isSpilledReg() &&
+             !killsVectorRegs(&regDep) &&
              dependentRealReg->getState() == TR::RealRegister::Free)
             {
             machine->coerceRegisterAssignment(currentInstruction, virtReg, dependentRegNum);
@@ -473,6 +583,7 @@ void TR_ARM64RegisterDependencyGroup::assignRegisters(
          dependentRealReg = machine->getRealRegister(dependentRegNum);
          if (!regDep.isNoReg() &&
              !regDep.isSpilledReg() &&
+             !killsVectorRegs(&regDep) &&
              dependentRealReg != assignedRegister)
             {
             machine->coerceRegisterAssignment(currentInstruction, virtReg, dependentRegNum);
@@ -530,4 +641,104 @@ void TR_ARM64RegisterDependencyGroup::assignRegisters(
          machine->decFutureUseCountAndUnlatch(currentInstruction, dependentRegister);
          }
       }
+   }
+
+void
+OMR::ARM64::RegisterDependencyConditions::stopUsingDepRegs(TR::CodeGenerator *cg, TR::Register *ret1, TR::Register *ret2)
+   {
+   if (_preConditions != NULL)
+      _preConditions->stopUsingDepRegs(_addCursorForPre, ret1, ret2, cg);
+   if (_postConditions != NULL)
+      _postConditions->stopUsingDepRegs(_addCursorForPost, ret1, ret2, cg);
+   }
+
+void TR_ARM64ScratchRegisterDependencyConditions::addDependency(TR::CodeGenerator *cg, TR::Register *vr, TR::RealRegister::RegNum rr, uint8_t flag)
+   {
+   TR_ASSERT_FATAL(_numGPRDeps < TR::RealRegister::LastAssignableGPR - TR::RealRegister::FirstGPR + 1, "Too many GPR dependencies");
+
+   bool isGPR = rr <= TR::RealRegister::LastAssignableGPR;
+   TR_ASSERT_FATAL(isGPR, "Expecting GPR only");
+   if (!vr)
+      {
+      vr = cg->allocateRegister(TR_GPR);
+      cg->stopUsingRegister(vr);
+      }
+   _gprDeps[_numGPRDeps].setRegister(vr);
+   _gprDeps[_numGPRDeps].assignFlags(flag);
+   _gprDeps[_numGPRDeps].setRealRegister(rr);
+   ++_numGPRDeps;
+   }
+
+void TR_ARM64ScratchRegisterDependencyConditions::unionDependency(TR::CodeGenerator *cg, TR::Register *vr, TR::RealRegister::RegNum rr, uint8_t flag)
+   {
+   TR_ASSERT_FATAL(_numGPRDeps < TR::RealRegister::LastAssignableGPR - TR::RealRegister::FirstGPR + 1, "Too many GPR dependencies");
+
+   bool isGPR = rr <= TR::RealRegister::LastAssignableGPR;
+   TR_ASSERT_FATAL(isGPR, "Expecting GPR only");
+   TR_ASSERT_FATAL(vr, "Expecting non-null virtual register");
+
+   for (int i = 0; i < _numGPRDeps; i++)
+      {
+      if (_gprDeps[i].getRegister() == vr)
+         {
+         // Keep the stronger of the two constraints
+         //
+         TR::RealRegister::RegNum min = std::min(rr, _gprDeps[i].getRealRegister());
+         TR::RealRegister::RegNum max = std::max(rr, _gprDeps[i].getRealRegister());
+         if (min == TR::RealRegister::NoReg)
+            {
+            // Anything is stronger than NoReg
+            _gprDeps[i].setRegister(vr);
+            _gprDeps[i].assignFlags(flag);
+            _gprDeps[i].setRealRegister(max);
+            }
+         else
+            {
+            TR_ASSERT_FATAL(min == max, "Specific register dependency is only compatible with itself");
+            // Nothing to do
+            }
+         return;
+         }
+      }
+
+   // vr is not in the deps list, add a new one
+   _gprDeps[_numGPRDeps].setRegister(vr);
+   _gprDeps[_numGPRDeps].assignFlags(flag);
+   _gprDeps[_numGPRDeps].setRealRegister(rr);
+   ++_numGPRDeps;
+   }
+
+void TR_ARM64ScratchRegisterDependencyConditions::addScratchRegisters(TR::CodeGenerator *cg, TR_ARM64ScratchRegisterManager *srm)
+   {
+   auto list = srm->getManagedScratchRegisterList();
+   ListIterator<TR_ManagedScratchRegister> iterator(&list);
+   TR_ManagedScratchRegister *msr = iterator.getFirst();
+
+   while (msr)
+      {
+      unionDependency(cg, msr->_reg, TR::RealRegister::NoReg);
+      msr = iterator.getNext();
+      }
+   }
+
+TR::RegisterDependencyConditions* TR_ARM64ScratchRegisterDependencyConditions::createDependencyConditions(TR::CodeGenerator *cg,
+                                                                                                          TR_ARM64ScratchRegisterDependencyConditions *pre,
+                                                                                                          TR_ARM64ScratchRegisterDependencyConditions *post)
+   {
+   int32_t preCount = pre ? pre->getNumberOfDependencies() : 0;
+   int32_t postCount = post ? post->getNumberOfDependencies() : 0;
+
+   TR::RegisterDependencyConditions *dependencies = new (cg->trHeapMemory()) TR::RegisterDependencyConditions(preCount,
+                                                                                                                  postCount,
+                                                                                                                  cg->trMemory());
+   for (int i = 0; i < (pre ? pre->_numGPRDeps : 0); ++i)
+      {
+      dependencies->addPreCondition(pre->_gprDeps[i].getRegister(), pre->_gprDeps[i].getRealRegister(), pre->_gprDeps[i].getFlags());
+      }
+   for (int i = 0; i < (post ? post->_numGPRDeps : 0); ++i)
+      {
+      dependencies->addPostCondition(post->_gprDeps[i].getRegister(), post->_gprDeps[i].getRealRegister(), post->_gprDeps[i].getFlags());
+      }
+
+   return dependencies;
    }

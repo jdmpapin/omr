@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -54,7 +54,7 @@
 #include "x/codegen/DataSnippet.hpp"
 #include "x/codegen/OutlinedInstructions.hpp"
 #include "x/codegen/X86Instruction.hpp"
-#include "x/codegen/X86Ops.hpp"
+#include "codegen/InstOpCode.hpp"
 #include "x/codegen/X86Register.hpp"
 #include "env/CompilerEnv.hpp"
 
@@ -218,7 +218,7 @@ TR_Debug::printPrefix(TR::FILE *pOutFile, TR::Instruction  *instr)
 
 void
 TR_Debug::printDependencyConditions(
-   TR_X86RegisterDependencyGroup *conditions,
+   TR::RegisterDependencyGroup *conditions,
    uint8_t                         numConditions,
    char                           *prefix,
    TR::FILE *pOutFile)
@@ -301,7 +301,7 @@ TR_Debug::printFullRegisterDependencyInfo(TR::FILE *pOutFile, TR::RegisterDepend
 
 void
 TR_Debug::dumpDependencyGroup(TR::FILE *                         pOutFile,
-                              TR_X86RegisterDependencyGroup *group,
+                              TR::RegisterDependencyGroup *group,
                               int32_t                         numConditions,
                               char                           *prefix,
                               bool                            omitNullDependencies)
@@ -534,7 +534,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::X86LabelInstruction  * instr)
    printPrefix(pOutFile, instr);
    TR::LabelSymbol *label   = instr->getLabelSymbol();
    TR::Snippet *snippet = label ? label->getSnippet() : NULL;
-   if (instr->getOpCodeValue() == LABEL)
+   if (instr->getOpCodeValue() == TR::InstOpCode::label)
       {
       print(pOutFile, label);
 
@@ -608,7 +608,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::X86FenceInstruction  * instr)
 
       if (!_comp->getOption(TR_MaskAddresses))
          {
-         for (int32_t i = 0; i < instr->getFenceNode()->getNumRelocations(); ++i)
+         for (auto i = 0U; i < instr->getFenceNode()->getNumRelocations(); ++i)
             trfprintf(pOutFile," " POINTER_PRINTF_FORMAT, instr->getFenceNode()->getRelocationDestination(i));
          }
       trfprintf(pOutFile, " ]");
@@ -1470,14 +1470,17 @@ TR_Debug::print(TR::FILE *pOutFile, TR::MemoryReference  * mr, TR_RegisterSizes 
    if (pOutFile == NULL)
       return;
 
-   const char *typeSpecifier[7] = {
+   const char *typeSpecifier[10] = {
       "byte",     // TR_ByteReg
       "word",     // TR_HalfWordReg
       "dword",    // TR_WordReg
       "qword",    // TR_DoubleWordReg
       "oword",    // TR_QuadWordReg
       "dword",    // TR_FloatReg
-      "qword" };  // TR_DoubleReg
+      "qword",    // TR_DoubleReg
+      "xmmword",  // TR_VectorReg128
+      "ymmword",  // TR_VectorReg256
+      "zmmword"}; // TR_VectorReg512
 
    TR_RegisterSizes addressSize = (_comp->target().cpu.isAMD64() ? TR_DoubleWordReg : TR_WordReg);
    bool hasTerm = false;
@@ -1713,8 +1716,25 @@ TR_Debug::getTargetSizeFromInstruction(TR::Instruction  *instr)
    {
    TR_RegisterSizes targetSize;
 
-   if (instr->getOpCode().hasXMMTarget() != 0)
+   OMR::X86::Encoding encoding = instr->getEncodingMethod();
+
+   if (encoding == OMR::X86::Default)
+      {
+      encoding = static_cast<OMR::X86::Encoding>(instr->getOpCode().info().vex_l);
+      }
+
+   if (encoding == OMR::X86::VEX_L128 || encoding == OMR::X86::EVEX_L128)
+      targetSize = TR_VectorReg128;
+   else if (encoding == OMR::X86::VEX_L256 || encoding == OMR::X86::EVEX_L256)
+      targetSize = TR_VectorReg256;
+   else if (encoding == OMR::X86::EVEX_L512)
+      targetSize = TR_VectorReg512;
+   else if (instr->getOpCode().hasXMMTarget() != 0)
       targetSize = TR_QuadWordReg;
+   else if (instr->getOpCode().hasYMMTarget())
+      targetSize = TR_VectorReg256;
+   else if (instr->getOpCode().hasZMMTarget())
+      targetSize = TR_VectorReg512;
    else if (instr->getOpCode().hasIntTarget() != 0)
       targetSize = TR_WordReg;
    else if (instr->getOpCode().hasShortTarget() != 0)
@@ -1734,9 +1754,26 @@ TR_Debug::getSourceSizeFromInstruction(TR::Instruction  *instr)
    {
    TR_RegisterSizes sourceSize;
 
-   if (instr->getOpCode().hasXMMSource() != 0)
+   OMR::X86::Encoding encoding = instr->getEncodingMethod();
+
+   if (encoding == OMR::X86::Default)
+      {
+      encoding = static_cast<OMR::X86::Encoding>(instr->getOpCode().info().vex_l);
+      }
+
+   if (encoding == OMR::X86::VEX_L128 || encoding == OMR::X86::EVEX_L128)
+      sourceSize = TR_VectorReg128;
+   else if (encoding == OMR::X86::VEX_L256 || encoding == OMR::X86::EVEX_L256)
+      sourceSize = TR_VectorReg256;
+   else if (encoding == OMR::X86::EVEX_L512)
+      sourceSize = TR_VectorReg512;
+   else if (instr->getOpCode().hasXMMSource() != 0)
       sourceSize = TR_QuadWordReg;
-   else if (instr->getOpCode().hasIntSource()!= 0)
+   else if (instr->getOpCode().hasYMMSource())
+      sourceSize = TR_VectorReg256;
+   else if (instr->getOpCode().hasZMMSource())
+      sourceSize = TR_VectorReg512;
+   else if (instr->getOpCode().hasIntSource() != 0)
       sourceSize = TR_WordReg;
    else if (instr->getOpCode().hasShortSource() != 0)
       sourceSize = TR_HalfWordReg;
@@ -1820,6 +1857,8 @@ TR_Debug::print(TR::FILE *pOutFile, TR::RealRegister * reg, TR_RegisterSizes siz
       case TR_DoubleReg:
          trfprintf(pOutFile, "%s", getName(reg));
          break;
+      case TR_VectorReg256:
+      case TR_VectorReg512:
       case TR_QuadWordReg:
       case TR_DoubleWordReg:
       case TR_HalfWordReg:
@@ -1939,55 +1978,39 @@ TR_Debug::getName(uint32_t realRegisterIndex, TR_RegisterSizes size)
          switch (size) { case 2: case -1: return "st(6)";   default: return unknownRegisterName('s'); }
       case TR::RealRegister::st7:
          switch (size) { case 2: case -1: return "st(7)";   default: return unknownRegisterName('s'); }
-      case TR::RealRegister::mm0:
-         switch (size) { case 3: case -1: return "mm0";   default: return unknownRegisterName('m'); }
-      case TR::RealRegister::mm1:
-         switch (size) { case 3: case -1: return "mm1";   default: return unknownRegisterName('m'); }
-      case TR::RealRegister::mm2:
-         switch (size) { case 3: case -1: return "mm2";   default: return unknownRegisterName('m'); }
-      case TR::RealRegister::mm3:
-         switch (size) { case 3: case -1: return "mm3";   default: return unknownRegisterName('m'); }
-      case TR::RealRegister::mm4:
-         switch (size) { case 3: case -1: return "mm4";   default: return unknownRegisterName('m'); }
-      case TR::RealRegister::mm5:
-         switch (size) { case 3: case -1: return "mm5";   default: return unknownRegisterName('m'); }
-      case TR::RealRegister::mm6:
-         switch (size) { case 3: case -1: return "mm6";   default: return unknownRegisterName('m'); }
-      case TR::RealRegister::mm7:
-         switch (size) { case 3: case -1: return "mm7";   default: return unknownRegisterName('m'); }
       case TR::RealRegister::xmm0:
-         switch (size) { case 4: case -1: return "xmm0";  default: return "?mm0"; }
+         switch (size) { case 4: case -1: return "xmm0";  case TR_VectorReg256: return "ymm0"; case TR_VectorReg512: return "zmm0"; default: return "?mm0"; }
       case TR::RealRegister::xmm1:
-         switch (size) { case 4: case -1: return "xmm1";  default: return "?mm1"; }
+         switch (size) { case 4: case -1: return "xmm1";  case TR_VectorReg256: return "ymm1"; case TR_VectorReg512: return "zmm1"; default: return "?mm1"; }
       case TR::RealRegister::xmm2:
-         switch (size) { case 4: case -1: return "xmm2";  default: return "?mm2"; }
+         switch (size) { case 4: case -1: return "xmm2";  case TR_VectorReg256: return "ymm2"; case TR_VectorReg512: return "zmm2"; default: return "?mm2"; }
       case TR::RealRegister::xmm3:
-         switch (size) { case 4: case -1: return "xmm3";  default: return "?mm3"; }
+         switch (size) { case 4: case -1: return "xmm3";  case TR_VectorReg256: return "ymm3"; case TR_VectorReg512: return "zmm3"; default: return "?mm3"; }
       case TR::RealRegister::xmm4:
-         switch (size) { case 4: case -1: return "xmm4";  default: return "?mm4"; }
+         switch (size) { case 4: case -1: return "xmm4";  case TR_VectorReg256: return "ymm4"; case TR_VectorReg512: return "zmm4"; default: return "?mm4"; }
       case TR::RealRegister::xmm5:
-         switch (size) { case 4: case -1: return "xmm5";  default: return "?mm5"; }
+         switch (size) { case 4: case -1: return "xmm5";  case TR_VectorReg256: return "ymm5"; case TR_VectorReg512: return "zmm5"; default: return "?mm5"; }
       case TR::RealRegister::xmm6:
-         switch (size) { case 4: case -1: return "xmm6";  default: return "?mm6"; }
+         switch (size) { case 4: case -1: return "xmm6";  case TR_VectorReg256: return "ymm6"; case TR_VectorReg512: return "zmm6"; default: return "?mm6"; }
       case TR::RealRegister::xmm7:
-         switch (size) { case 4: case -1: return "xmm7";  default: return "?mm7"; }
+         switch (size) { case 4: case -1: return "xmm7";  case TR_VectorReg256: return "ymm7"; case TR_VectorReg512: return "zmm7"; default: return "?mm7"; }
 #ifdef TR_TARGET_64BIT
       case TR::RealRegister::xmm8:
-         switch (size) { case 4: case -1: return "xmm8";  default: return "?mm8"; }
+         switch (size) { case 4: case -1: return "xmm8";  case TR_VectorReg256: return "ymm8"; case TR_VectorReg512: return "zmm8"; default: return "?mm8"; }
       case TR::RealRegister::xmm9:
-         switch (size) { case 4: case -1: return "xmm9";  default: return "?mm9"; }
+         switch (size) { case 4: case -1: return "xmm9";  case TR_VectorReg256: return "ymm9"; case TR_VectorReg512: return "zmm9"; default: return "?mm9"; }
       case TR::RealRegister::xmm10:
-         switch (size) { case 4: case -1: return "xmm10"; default: return "?mm10"; }
+         switch (size) { case 4: case -1: return "xmm10"; case TR_VectorReg256: return "ymm10"; case TR_VectorReg512: return "zmm10"; default: return "?mm10"; }
       case TR::RealRegister::xmm11:
-         switch (size) { case 4: case -1: return "xmm11"; default: return "?mm11"; }
+         switch (size) { case 4: case -1: return "xmm11"; case TR_VectorReg256: return "ymm11"; case TR_VectorReg512: return "zmm11"; default: return "?mm11"; }
       case TR::RealRegister::xmm12:
-         switch (size) { case 4: case -1: return "xmm12"; default: return "?mm12"; }
+         switch (size) { case 4: case -1: return "xmm12"; case TR_VectorReg256: return "ymm12"; case TR_VectorReg512: return "zmm12"; default: return "?mm12"; }
       case TR::RealRegister::xmm13:
-         switch (size) { case 4: case -1: return "xmm13"; default: return "?mm13"; }
+         switch (size) { case 4: case -1: return "xmm13"; case TR_VectorReg256: return "ymm13"; case TR_VectorReg512: return "zmm13"; default: return "?mm13"; }
       case TR::RealRegister::xmm14:
-         switch (size) { case 4: case -1: return "xmm14"; default: return "?mm14"; }
+         switch (size) { case 4: case -1: return "xmm14"; case TR_VectorReg256: return "ymm14"; case TR_VectorReg512: return "zmm14"; default: return "?mm14"; }
       case TR::RealRegister::xmm15:
-         switch (size) { case 4: case -1: return "xmm15"; default: return "?mm15"; }
+         switch (size) { case 4: case -1: return "xmm15"; case TR_VectorReg256: return "ymm15"; case TR_VectorReg512: return "zmm15"; default: return "?mm15"; }
 #endif
       default: TR_ASSERT( 0, "unexpected register number"); return unknownRegisterName();
       }
@@ -2025,7 +2048,7 @@ TR_Debug::getName(TR::RealRegister * reg, TR_RegisterSizes size)
          }
       }
 
-   if (reg->getKind() == TR_FPR || reg->getKind() == TR_VRF)
+   if ((reg->getKind() == TR_FPR && size != TR_VectorReg256 && size != TR_VectorReg512) || reg->getKind() == TR_VRF)
       size = TR_QuadWordReg;
 
    return getName(reg->getRegisterNumber(), size);
@@ -2229,7 +2252,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::X86CallSnippet  * snippet)
          intptr_t ramMethod = (intptr_t)methodSymbol->getMethodAddress();
 
          printPrefix(pOutFile, NULL, bufferPos, 10);
-         trfprintf(pOutFile, "mov \trdi, 0x%x\t\t# MOV8RegImm64",ramMethod);
+         trfprintf(pOutFile, "mov \trdi, 0x%x\t\t# TR::InstOpCode::MOV8RegImm64",ramMethod);
          bufferPos+=10;
 
          printPrefix(pOutFile, NULL, bufferPos, 5);
@@ -2404,34 +2427,34 @@ TR_Debug::printArgumentFlush(TR::FILE *              pOutFile,
 
 static const char * opCodeToNameMap[] =
    {
-#define INSTRUCTION(name, mnemonic, binary, property0, property1) #name
+#define INSTRUCTION(name, mnemonic, binary, property0, property1, features) #name
 #include "codegen/X86Ops.ins"
 #undef INSTRUCTION
    };
 
 static const char * opCodeToMnemonicMap[] =
    {
-#define INSTRUCTION(name, mnemonic, binary, property0, property1) #mnemonic
+#define INSTRUCTION(name, mnemonic, binary, property0, property1, features) #mnemonic
 #include "codegen/X86Ops.ins"
 #undef INSTRUCTION
    };
 
 const char *
-TR_Debug::getOpCodeName(TR_X86OpCode  * opCode)
+TR_Debug::getOpCodeName(TR::InstOpCode  * opCode)
    {
    return opCodeToNameMap[opCode->getOpCodeValue()];
    }
 
 const char *
-TR_Debug::getMnemonicName(TR_X86OpCode  * opCode)
+TR_Debug::getMnemonicName(TR::InstOpCode  * opCode)
    {
    if (_comp->target().isLinux())
       {
       int32_t o = opCode->getOpCodeValue();
-      if (o == (int32_t) DQImm64) return dqString();
-      if (o == (int32_t) DDImm4) return ddString();
-      if (o == (int32_t) DWImm2) return dwString();
-      if (o == (int32_t) DBImm1) return dbString();
+      if (o == (int32_t) TR::InstOpCode::DQImm64) return dqString();
+      if (o == (int32_t) TR::InstOpCode::DDImm4) return ddString();
+      if (o == (int32_t) TR::InstOpCode::DWImm2) return dwString();
+      if (o == (int32_t) TR::InstOpCode::DBImm1) return dbString();
       }
    return opCodeToMnemonicMap[opCode->getOpCodeValue()];
    }

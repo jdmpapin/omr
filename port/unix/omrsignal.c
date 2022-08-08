@@ -1554,60 +1554,63 @@ static int32_t
 initializeSignalTools(OMRPortLibrary *portLibrary)
 {
 #if defined(OSX)
-	char semNames[6][128] = {{0}};
+	char semName[31 /* SEM_NAME_LEN */ + 1];
 #endif /* defined(OSX) */
 	
 	/* use this to record the end of the list of signal infos */
 	if (omrthread_tls_alloc(&tlsKey)) {
-		return -1;
+		return OMRPORT_ERROR_STARTUP_SIGNAL_TOOLS1;
 	}
 
 	/* use this to record the last signal that occurred such that we can call omrsig_handler in omrexit_shutdown_and_exit */
 	if (omrthread_tls_alloc(&tlsKeyCurrentSignal)) {
-		return -1;
+		return OMRPORT_ERROR_STARTUP_SIGNAL_TOOLS2;
 	}
 
 #if defined(OMR_PORT_ZOS_CEEHDLRSUPPORT)
 	if (0 != ceehdlr_startup(portLibrary)) {
-		return -1;
+		return OMRPORT_ERROR_STARTUP_SIGNAL_TOOLS3;
 	}
 #endif /* defined(OMR_PORT_ZOS_CEEHDLRSUPPORT) */
 
 	if (omrthread_monitor_init_with_name(&registerHandlerMonitor, 0, "portLibrary_omrsig_registerHandler_monitor")) {
-		return -1;
+		return OMRPORT_ERROR_STARTUP_SIGNAL_TOOLS4;
 	}
 
 	if (omrthread_monitor_init_with_name(&asyncReporterShutdownMonitor, 0, "portLibrary_omrsig_asynch_reporter_shutdown_monitor")) {
-		return -1;
+		return OMRPORT_ERROR_STARTUP_SIGNAL_TOOLS5;
 	}
 
 	if (omrthread_monitor_init_with_name(&asyncMonitor, 0, "portLibrary_omrsig_async_monitor")) {
-		return -1;
+		return OMRPORT_ERROR_STARTUP_SIGNAL_TOOLS6;
 	}
 
 #if !defined(J9ZOS390)
 #if defined(OSX)
-	/* OSX only has named semaphores. They are not shared across processes, so unlink immediately. */
-	portLibrary->str_printf(portLibrary, semNames[0], 128, "/omr/wakeUpASyncReporter-%d", getpid());
-#define SIGSEM_NAME(_i) semNames[_i]
+	/* OSX only has named semaphores. They are not shared across processes, so unlink immediately.
+	 * The semaphore name length must fit within the SEM_NAME_LEN (31) limit.
+	 */
+	portLibrary->str_printf(portLibrary, semName, sizeof(semName), "/omr-WUASR%x-%x", (uint32_t)getpid(), (uint32_t)portLibrary->time_nano_time(portLibrary));
+#define SIGSEM_NAME semName
 #else /* defined(OSX) */
-#define SIGSEM_NAME(_i) NULL
+#define SIGSEM_NAME NULL
 #endif /* defined(OSX) */
 
 	/* The asynchronous signal reporter will wait on this semaphore  */
-	if (SIGSEM_ERROR == SIGSEM_INIT(wakeUpASyncReporter, SIGSEM_NAME(0))) {
-		return -1;
+	if (SIGSEM_ERROR == SIGSEM_INIT(wakeUpASyncReporter, SIGSEM_NAME)) {
+		perror("initializeSignalTools() SIGSEM_INIT");
+		return OMRPORT_ERROR_STARTUP_SIGNAL_TOOLS7;
 	}
-	SIGSEM_UNLINK(SIGSEM_NAME(0));
+	SIGSEM_UNLINK(SIGSEM_NAME);
 #undef SIGSEM_NAME
 
 #else /* !defined(J9ZOS390) */
 	if (pthread_mutex_init(&wakeUpASyncReporterMutex, NULL)) {
-		return -1;
+		return OMRPORT_ERROR_STARTUP_SIGNAL_TOOLS8;
 	}
 
 	if (pthread_cond_init(&wakeUpASyncReporterCond, NULL)) {
-		return -1;
+		return OMRPORT_ERROR_STARTUP_SIGNAL_TOOLS9;
 	}
 
 	if (TRUE == checkIfResumableTrapsSupported(portLibrary)) {
@@ -1627,7 +1630,7 @@ initializeSignalTools(OMRPortLibrary *portLibrary)
 			NULL,
 			J9THREAD_CATEGORY_SYSTEM_THREAD)
 	) {
-		return -1;
+		return OMRPORT_ERROR_STARTUP_SIGNAL_TOOLS10;
 	}
 #endif /* defined(OMR_PORT_ASYNC_HANDLER) */
 

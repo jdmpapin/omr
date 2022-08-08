@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -220,7 +220,6 @@ OMR::Compilation::Compilation(
    _method(compilee),
    _arenaAllocator(TR::Allocator(self()->allocator("Arena"))),
    _aliasRegion(heapMemoryRegion),
-   _allocatorName(NULL),
    _ilGenerator(0),
    _ilValidator(NULL),
    _optimizer(0),
@@ -241,11 +240,7 @@ OMR::Compilation::Compilation(
    _staticPICSites(getTypedAllocator<TR::Instruction*>(self()->allocator())),
    _staticHCRPICSites(getTypedAllocator<TR::Instruction*>(self()->allocator())),
    _staticMethodPICSites(getTypedAllocator<TR::Instruction*>(self()->allocator())),
-   _snippetsToBePatchedOnClassUnload(getTypedAllocator<TR::Snippet*>(self()->allocator())),
-   _methodSnippetsToBePatchedOnClassUnload(getTypedAllocator<TR::Snippet*>(self()->allocator())),
-   _snippetsToBePatchedOnClassRedefinition(getTypedAllocator<TR::Snippet*>(self()->allocator())),
    _genILSyms(getTypedAllocator<TR::ResolvedMethodSymbol*>(self()->allocator())),
-   _noEarlyInline(true),
    _returnInfo(TR_VoidReturn),
    _visitCount(0),
    _nodeCount(0),
@@ -323,7 +318,7 @@ OMR::Compilation::Compilation(
    _metadataAssumptionList = NULL;
 #endif
    _symRefTab = new (_trMemory->trHeapMemory()) TR::SymbolReferenceTable(_method->maxBytecodeIndex(), self());
-   _compilationNodes = new (_trMemory->trHeapMemory()) TR::NodePool(self(), self()->allocator());
+   _compilationNodes = new (_trMemory->trHeapMemory()) TR::NodePool(self());
 
 #ifdef J9_PROJECT_SPECIFIC
    // The following must stay before the first assumption gets created which could happen
@@ -361,10 +356,6 @@ OMR::Compilation::Compilation(
 
       if (optimizationPlan->isGPUCompileCPUCode())
           _flags.set(IsGPUCompileCPUCode);
-
-
-      self()->setGPUBlockDimX(optimizationPlan->getGPUBlockDimX());
-      self()->setGPUParms(optimizationPlan->getGPUParms());
       }
 
    // if we are not in the selective NoOptServer mode
@@ -383,7 +374,6 @@ OMR::Compilation::Compilation(
       {
       if(self()->getMethodHotness() <= warm)
          {
-         if (!self()->target().cpu.isPower()) // Temporarily exclude PPC due to perf regression
             self()->setOption(TR_DisableInternalPointers);
          }
       }
@@ -391,11 +381,8 @@ OMR::Compilation::Compilation(
    //_methodSymbol must be done after symRefTab, but before codegen
    // _methodSymbol must be initialized here because creating a jitted method symbol
    //   actually inspects TR::comp()->_methodSymbol (to compare against the new object)
-   _methodSymbol = NULL;
-      {
-      _methodSymbol = TR::ResolvedMethodSymbol::createJittedMethodSymbol(self()->trHeapMemory(), compilee, self());
-      }
-
+   _methodSymbol = TR::ResolvedMethodSymbol::createJittedMethodSymbol(self()->trHeapMemory(), compilee, self());
+   
    // initPersistentCPUField and createOpCode must be done after method symbol creation
 
    if (self()->getOption(TR_EnableNodeGC))
@@ -449,7 +436,7 @@ OMR::Compilation::Compilation(
       self()->setOption(TR_EnableOSR); // OSR must be enabled for NextGenHCR
       }
 
-   if (self()->isDLT() || (((self()->getMethodHotness() < warm) || self()->compileRelocatableCode() || self()->isProfilingCompilation()) && !enableOSRAtAllOptLevels && !_options->getOption(TR_FullSpeedDebug)))
+   if (self()->isDLT() || (((self()->getMethodHotness() < warm) || self()->compileRelocatableCode() || (self()->isProfilingCompilation() && self()->getProfilingMode() != JProfiling)) && !enableOSRAtAllOptLevels && !_options->getOption(TR_FullSpeedDebug)))
       {
       self()->setOption(TR_DisableOSR);
       _options->setOption(TR_EnableOSR, false);
@@ -561,13 +548,6 @@ OMR::Compilation::getHotnessName()
    {
    return TR::Compilation::getHotnessName(self()->getMethodHotness());
    }
-
-
-TR::ResolvedMethodSymbol * OMR::Compilation::createJittedMethodSymbol(TR_ResolvedMethod *resolvedMethod)
-   {
-   return TR::ResolvedMethodSymbol::createJittedMethodSymbol(self()->trHeapMemory(), resolvedMethod, self());
-   }
-
 
 bool OMR::Compilation::canAffordOSRControlFlow()
    {
@@ -783,7 +763,7 @@ OMR::Compilation::getOSRTransitionTarget()
 bool
 OMR::Compilation::isOSRTransitionTarget(TR::OSRTransitionTarget target)
    {
-   return target & self()->getOSRTransitionTarget();
+   return (target & self()->getOSRTransitionTarget()) != 0;
    }
 
 /*
@@ -1142,7 +1122,7 @@ int32_t OMR::Compilation::compile()
          {
          int32_t jittedBodyHash = strHash(self()->signature());
          char callerBuf[501], calleeBuf[501];
-         TR_VerboseLog::vlogAcquire();
+         TR_VerboseLog::CriticalSection vlogLock;
          TR_VerboseLog::writeLine(TR_Vlog_INL, "%d methods inlined into %x %s @ %p", self()->getNumInlinedCallSites(), jittedBodyHash, self()->signature(), self()->cg()->getCodeStart());
          for (int32_t i = 0; i < self()->getNumInlinedCallSites(); i++)
             {
@@ -1200,7 +1180,6 @@ int32_t OMR::Compilation::compile()
                   }
                }
             }
-         TR_VerboseLog::vlogRelease();
          }
 #endif
       }
@@ -1294,36 +1273,29 @@ bool OMR::Compilation::incInlineDepth(TR::ResolvedMethodSymbol * method, TR::Nod
    int32_t cpIndex = callSymRef->getCPIndex();
    TR_ByteCodeInfo &bcInfo = callNode->getByteCodeInfo();
 
+   TR_AOTMethodInfo *aotMethodInfo = NULL;
    if (self()->compileRelocatableCode())
       {
-      TR_AOTMethodInfo *aotMethodInfo = (TR_AOTMethodInfo *)self()->trMemory()->allocateHeapMemory(sizeof(TR_AOTMethodInfo));
+      aotMethodInfo = reinterpret_cast<TR_AOTMethodInfo *>(self()->trMemory()->allocateHeapMemory(sizeof(TR_AOTMethodInfo)));
       aotMethodInfo->resolvedMethod = method->getResolvedMethod();
       aotMethodInfo->cpIndex = cpIndex;
       aotMethodInfo->receiver = receiverClass;
       aotMethodInfo->callSymRef = callSymRef;
       aotMethodInfo->reloKind = self()->getReloTypeForMethodToBeInlined(guard, callNode, receiverClass);
-
-      return self()->incInlineDepth(reinterpret_cast<TR_OpaqueMethodBlock *>(aotMethodInfo), method, bcInfo, callSymRef, directCall, argInfo);
       }
-   else
-      {
-      return self()->incInlineDepth(method->getResolvedMethod()->getPersistentIdentifier(), method, bcInfo, callSymRef, directCall, argInfo);
-      }
+   return self()->incInlineDepth(method->getResolvedMethod()->getPersistentIdentifier(), method, bcInfo, callSymRef, directCall, argInfo, aotMethodInfo);
    }
 
 bool OMR::Compilation::incInlineDepth(TR::ResolvedMethodSymbol * method, TR_ByteCodeInfo & bcInfo, int32_t cpIndex, TR::SymbolReference *callSymRef, bool directCall, TR_PrexArgInfo *argInfo)
    {
+   TR_AOTMethodInfo *aotMethodInfo = NULL;
    if (self()->compileRelocatableCode())
       {
-      TR_AOTMethodInfo *aotMethodInfo = (TR_AOTMethodInfo *)self()->trMemory()->allocateHeapMemory(sizeof(TR_AOTMethodInfo));
+      aotMethodInfo = reinterpret_cast<TR_AOTMethodInfo *>(self()->trMemory()->allocateHeapMemory(sizeof(TR_AOTMethodInfo)));
       aotMethodInfo->resolvedMethod = method->getResolvedMethod();
       aotMethodInfo->cpIndex = cpIndex;
-      return self()->incInlineDepth((TR_OpaqueMethodBlock*)aotMethodInfo, method, bcInfo, callSymRef, directCall, argInfo);
       }
-   else
-      {
-      return self()->incInlineDepth(method->getResolvedMethod()->getPersistentIdentifier(), method, bcInfo, callSymRef, directCall, argInfo);
-      }
+   return self()->incInlineDepth(method->getResolvedMethod()->getPersistentIdentifier(), method, bcInfo, callSymRef, directCall, argInfo, aotMethodInfo);
    }
 
 ncount_t OMR::Compilation::generateAccurateNodeCount()
@@ -1358,12 +1330,12 @@ bool OMR::Compilation::foundOnTheStack(TR_ResolvedMethod *method, int32_t occurr
   return false;
   }
 
-bool OMR::Compilation::incInlineDepth(TR_OpaqueMethodBlock *methodInfo, TR::ResolvedMethodSymbol * method, TR_ByteCodeInfo & bcInfo, TR::SymbolReference *callSymRef, bool directCall, TR_PrexArgInfo *argInfo)
+bool OMR::Compilation::incInlineDepth(TR_OpaqueMethodBlock *methodInfo, TR::ResolvedMethodSymbol * method, TR_ByteCodeInfo & bcInfo, TR::SymbolReference *callSymRef, bool directCall, TR_PrexArgInfo *argInfo, TR_AOTMethodInfo *aotMethodInfo)
    {
    int32_t maxCallerIndex = TR_ByteCodeInfo::maxCallerIndex;
    //This restriction is due to a limited number of bits allocated to callerIndex in TR_ByteCodeInfo
    //For example, in Java TR_ByteCodeInfo::maxCallerIndex is set to 4095 (12 bits and one used for signness)
-   if (self()->getNumInlinedCallSites() >= maxCallerIndex)
+   if (self()->getNumInlinedCallSites() >= unsigned(maxCallerIndex))
       {
       traceMsg(self(), "The maximum number of inlined methods %d is reached\n", TR_ByteCodeInfo::maxCallerIndex);
       return false;
@@ -1382,7 +1354,7 @@ bool OMR::Compilation::incInlineDepth(TR_OpaqueMethodBlock *methodInfo, TR::Reso
       }
 
 
-   uint32_t callSiteIndex = _inlinedCallSites.add( TR_InlinedCallSiteInfo(methodInfo, bcInfo, method, callSymRef, directCall) );
+   uint32_t callSiteIndex = _inlinedCallSites.add( TR_InlinedCallSiteInfo(methodInfo, bcInfo, method, callSymRef, directCall, aotMethodInfo) );
    _inlinedCallStack.push(callSiteIndex);
    _inlinedCallArgInfoStack.push(argInfo);
 
@@ -1406,7 +1378,7 @@ void OMR::Compilation::decInlineDepth(bool removeInlinedCallSitesEntry)
    {
    if (removeInlinedCallSitesEntry)
       {
-      while (self()->getCurrentInlinedSiteIndex() < _inlinedCallSites.size())
+      while (unsigned(self()->getCurrentInlinedSiteIndex()) < _inlinedCallSites.size())
          _inlinedCallSites.remove(self()->getCurrentInlinedSiteIndex());
       if (self()->getOption(TR_EnableOSR))
          {
@@ -1799,7 +1771,7 @@ TR_OpaqueMethodBlock *OMR::Compilation::getMethodFromNode(TR::Node * node)
    TR_ByteCodeInfo bcInfo = node->getByteCodeInfo();
    TR_OpaqueMethodBlock *method = NULL;
    if (bcInfo.getCallerIndex() >= 0 && self()->getNumInlinedCallSites() > 0)
-      method = self()->compileRelocatableCode() ? ((TR_ResolvedMethod *)node->getAOTMethod())->getPersistentIdentifier() : self()->getInlinedCallSite(bcInfo.getCallerIndex())._methodInfo;
+      method = self()->getInlinedCallSite(bcInfo.getCallerIndex())._methodInfo;
    else
       method = self()->getCurrentMethod()->getPersistentIdentifier();
    return method;
@@ -2378,7 +2350,7 @@ OMR::Compilation::setOSRCallSiteRemat(uint32_t callSiteIndex, TR::SymbolReferenc
    // Check the pending push is valid
    uint32_t callerNumPPSlots = self()->getOSRCallSiteRematSize(callSiteIndex);
    TR_ASSERT(ppSymRef->getSymbol()->isPendingPush(), "can only perform call site remat on pending pushes");
-   TR_ASSERT(slot >= 0 && slot < callerNumPPSlots, "can only perform call site remat for the caller's pending pushes");
+   TR_ASSERT(slot >= 0 && unsigned(slot) < callerNumPPSlots, "can only perform call site remat for the caller's pending pushes");
 #endif
 
    table[slot * 2] = ppSymRef->getReferenceNumber();
@@ -2403,6 +2375,12 @@ void
 OMR::Compilation::setCannotAttemptOSRDuring(uint32_t index, bool cannotOSR)
    {
    _inlinedCallSites[index].setCannotAttemptOSRDuring(cannotOSR);
+   }
+
+TR_AOTMethodInfo *
+OMR::Compilation::getInlinedAOTMethodInfo(uint32_t index)
+   {
+   return _inlinedCallSites[index].aotMethodInfo();
    }
 
 TR_InlinedCallSite *
@@ -2513,7 +2491,7 @@ OMR::Compilation::getHCRMode()
    {
    if (!self()->getOption(TR_EnableHCR))
       return TR::none;
-   if (self()->isDLT() || self()->isProfilingCompilation() || self()->getOptLevel() <= cold)
+   if (self()->isDLT() || (self()->isProfilingCompilation() && self()->getProfilingMode() != JProfiling) || self()->getOptLevel() <= cold)
       return TR::traditional;
    return self()->getOption(TR_EnableOSR) && !self()->getOption(TR_DisableNextGenHCR) ? TR::osr : TR::traditional;
    }
@@ -2798,4 +2776,10 @@ const TR::TypeLayout* OMR::Compilation::typeLayout(TR_OpaqueClassBlock * clazz)
       _typeLayoutMap.insert(std::make_pair(clazz, layout));
       return layout;
       }
+   }
+
+TR::list<TR::Snippet*> *
+OMR::Compilation::getSnippetsToBePatchedOnClassRedefinition()
+   {
+   return self()->cg()->getSnippetsToBePatchedOnClassRedefinition();
    }

@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2022 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -149,6 +149,7 @@ set(OMR_GC_MODRON_COMPACTION OFF CACHE BOOL "TODO: Document")
 set(OMR_GC_MODRON_CONCURRENT_MARK OFF CACHE BOOL "TODO: Document")
 set(OMR_GC_MODRON_SCAVENGER OFF CACHE BOOL "TODO: Document")
 set(OMR_GC_DOUBLE_MAP_ARRAYLETS OFF CACHE BOOL "TODO: Document")
+set(OMR_GC_DOUBLE_MAPPING_FOR_SPARSE_HEAP_ALLOCATION OFF CACHE BOOL "TODO: Document")
 set(OMR_GC_CONCURRENT_SCAVENGER OFF CACHE BOOL "TODO: Document")
 set(OMR_GC_CONCURRENT_SWEEP OFF CACHE BOOL "TODO: Document")
 set(OMR_GC_IDLE_HEAP_MANAGER OFF CACHE BOOL "TODO: Document")
@@ -198,8 +199,7 @@ if(OMR_THR_YIELD_ALG)
 		MESSAGE "OMR_THR_YIELD_ALG enabled, but not supported on current platform"
 	)
 endif()
-#TODO set to disabled. Stuff fails to compile when its on
-set(OMR_THR_TRACING OFF CACHE BOOL "TODO: Document")
+# TODO set to disabled. Stuff fails to compile when its on
 set(OMR_THR_MCS_LOCKS OFF CACHE BOOL "Enable the usage of the MCS lock in the OMR thread monitor.")
 
 #TODO this should maybe be a OMRTHREAD_LIB string variable?
@@ -208,11 +208,11 @@ set(OMRTHREAD_UNIX_DEFAULT OFF)
 set(OMRTHREAD_AIX_DEFAULT OFF)
 set(OMRTHREAD_ZOS_DEFAULT OFF)
 
-if(OMR_HOST_OS STREQUAL "win")
+if(OMR_OS_WINDOWS)
 	set(OMRTHREAD_WIN32_DEFAULT ON)
-elseif(OMR_HOST_OS STREQUAL "aix")
+elseif(OMR_OS_AIX)
 	set(OMRTHREAD_AIX_DEFAULT ON)
-elseif(OMR_HOST_OS STREQUAL "zos")
+elseif(OMR_OS_ZOS)
 	set(OMRTHREAD_ZOS_DEFAULT ON)
 else()
 	set(OMRTHREAD_UNIX_DEFAULT ON)
@@ -236,7 +236,7 @@ set(OMR_OPT_CUDA OFF CACHE BOOL "Enable CUDA support in OMR. See also: OMR_CUDA_
 
 set(OMR_SANITIZE OFF CACHE STRING "Sanitizer selection. Only has an effect on GNU or Clang")
 
-if(OMR_HOST_OS STREQUAL "win")
+if(OMR_OS_WINDOWS)
 	set(OMR_WINDOWS_NOMINMAX ON CACHE BOOL "Define NOMINMAX in every compilation unit; prevents Windows headers from polluting the global namespace with 'min' and 'max' macros.")
 endif()
 

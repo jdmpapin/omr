@@ -353,6 +353,9 @@ public:
    inline void setConstantPoolAddress();
    inline bool isConstantPoolAddress();
 
+   inline void setStaticAddressWithinMethodBounds();
+   inline bool isStaticAddressWithinMethodBounds();
+
    // flag methods specific to resolved
    //
    inline bool isJittedMethod();
@@ -438,6 +441,9 @@ public:
    void setIsPendingPush() { _flags2.set(PendingPush); }
    bool isPendingPush()    { return _flags2.testAny(PendingPush); }
 
+   inline void setDummyResolvedMethod();
+   inline bool isDummyResolvedMethod();
+
    /**
     * Enum values for _flags field.
     */
@@ -513,6 +519,7 @@ public:
       CountForRecompile         = 0x02000000,
       RecompilationCounter      = 0x01000000,
       GCRPatchPoint             = 0x00400000,
+      StaticAddressWithinMethodBounds = 0x00800000, // Address is inside a method body and can be accessed with RIP addressing without relocations
 
       //Only Used by Symbols for which isResolvedMethod is true;
       IsJittedMethod            = 0x80000000,
@@ -566,6 +573,14 @@ public:
       NonSpecificConstObject    = 0x00002000, // Constant object not specific to a type
       BlockFrequency            = 0x00004000,
       RecompQueuedFlag          = 0x00008000,
+      /**
+       * This flag is used to identify symbols corresponding to dummy TR_ResolvedMethod
+       * that are not really resolved, but treated as such as the resolution mechanism
+       * involves resolving the arguments instead. An example of that is linkToStatic,
+       * which is a VM internal native call that is created for unresolved invokedynamic
+       * and invokehandle bytecodes.
+       */
+      DummyResolvedMethod       = 0x00010000,
       };
 
 protected:

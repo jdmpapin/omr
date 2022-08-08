@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -82,7 +82,7 @@ OMR::CFG::addNode(TR::CFGNode *n, TR_RegionStructure *parent, bool isEntryInPare
          TR_BlockStructure *blockStructure = block->getStructureOf();
          TR_StructureSubGraphNode *blockNode = NULL;
          if (!blockStructure)
-            blockStructure = new (structureRegion()) TR_BlockStructure(comp(), block->getNumber(), block);
+            blockStructure = new (structureMemoryRegion()) TR_BlockStructure(comp(), block->getNumber(), block);
          else
             {
             TR_StructureSubGraphNode *node;
@@ -101,7 +101,7 @@ OMR::CFG::addNode(TR::CFGNode *n, TR_RegionStructure *parent, bool isEntryInPare
 
          if (!blockNode)
             {
-            blockNode = new (structureRegion()) TR_StructureSubGraphNode(blockStructure);
+            blockNode = new (structureMemoryRegion()) TR_StructureSubGraphNode(blockStructure);
             if (!isEntryInParent)
                {
                parent->addSubNode(blockNode);
@@ -156,7 +156,7 @@ OMR::CFG::addEdge(TR::CFGNode *f, TR::CFGNode *t)
 
    TR_ASSERT(!f->hasExceptionSuccessor(t), "adding a non exception edge when there's already an exception edge");
 
-   TR::CFGEdge * e = TR::CFGEdge::createEdge(f, t, _internalRegion);
+   TR::CFGEdge * e = TR::CFGEdge::createEdge(f, t, _internalMemoryRegion);
    addEdge(e);
    return e;
    }
@@ -225,7 +225,7 @@ OMR::CFG::addExceptionEdgeUnchecked(
 
    TR_ASSERT(!f->hasSuccessor(t), "adding an exception edge when there's already a non exception edge");
 
-   TR::CFGEdge* e = TR::CFGEdge::createExceptionEdge(f,t, _internalRegion);
+   TR::CFGEdge* e = TR::CFGEdge::createExceptionEdge(f,t, _internalMemoryRegion);
    _numEdges++;
 
    // Tell the control tree to modify the structures containing this edge
@@ -248,7 +248,6 @@ OMR::CFG::addSuccessorEdges(TR::Block * block)
       {
       case TR::table:
       case TR::lookup:
-      case TR::trtLookup:
          {
          vcount_t visitCount = comp()->incVisitCount();
          int32_t n = node->getCaseIndexUpperBound();
@@ -291,8 +290,6 @@ OMR::CFG::addSuccessorEdges(TR::Block * block)
       case TR::athrow:
          addEdge(block, getEnd());
          break;
-      case TR::Ret:
-         break; // pseudo node representing a ret opcode
       case TR::NULLCHK:
          if (node->getFirstChild()->getOpCodeValue() == TR::athrow)
             addEdge(block, getEnd());
@@ -345,7 +342,7 @@ TR_Structure *
 OMR::CFG::invalidateStructure()
    {
    setStructure(NULL);
-   TR::Region::reset(_structureRegion, comp()->trMemory()->heapMemoryRegion());
+   TR::Region::reset(_structureMemoryRegion, comp()->trMemory()->heapMemoryRegion());
    return getStructure();
    }
 
@@ -368,7 +365,7 @@ bool OMR::alwaysTrue(TR::CFGEdge * e)
    }
 
 
-TR_OrderedExceptionHandlerIterator::TR_OrderedExceptionHandlerIterator(TR::Block * tryBlock, TR::Region &workingRegion)
+TR_OrderedExceptionHandlerIterator::TR_OrderedExceptionHandlerIterator(TR::Block * tryBlock, TR::Region &workingMemoryRegion)
    {
    if (tryBlock->getExceptionSuccessors().empty())
       _dim = 0;
@@ -385,7 +382,7 @@ TR_OrderedExceptionHandlerIterator::TR_OrderedExceptionHandlerIterator(TR::Block
          }
 
       _dim = handlerDim * inlineDim;
-      _handlers = (TR::Block **)workingRegion.allocate(_dim*sizeof(TR::Block *));
+      _handlers = (TR::Block **)workingMemoryRegion.allocate(_dim*sizeof(TR::Block *));
       memset(_handlers, 0, _dim*sizeof(TR::Block *));
 
       for (auto e = tryBlock->getExceptionSuccessors().begin(); e != tryBlock->getExceptionSuccessors().end(); ++e)
@@ -670,22 +667,22 @@ TR::CFGEdge * TR::CFGNode::getExceptionPredecessorEdge(TR::CFGNode * n)
 
 bool TR::CFGNode::hasSuccessor(TR::CFGNode * n)
    {
-   return (bool)getSuccessorEdge(n);
+   return getSuccessorEdge(n) != NULL;
    }
 
 bool TR::CFGNode::hasExceptionSuccessor(TR::CFGNode * n)
    {
-   return (bool)getExceptionSuccessorEdge(n);
+   return getExceptionSuccessorEdge(n) != NULL;
    }
 
 bool TR::CFGNode::hasPredecessor(TR::CFGNode * n)
    {
-   return (bool)getPredecessorEdge(n);
+   return getPredecessorEdge(n) != NULL;
    }
 
 bool TR::CFGNode::hasExceptionPredecessor(TR::CFGNode * n)
    {
-   return (bool)getExceptionPredecessorEdge(n);
+   return getExceptionPredecessorEdge(n) != NULL;
    }
 
 
@@ -705,7 +702,6 @@ TR::CFGNode *OMR::CFG::removeNode(TR::CFGNode *node)
    // Remove the exception successors first, so that try/finally structures get
    // cleaned up in the right order. Nobody else cares about the order.
    //
-   ListElement<TR::CFGEdge> *out;
    while (!node->getExceptionSuccessors().empty())
       removeEdge(node->getExceptionSuccessors().front());
 
@@ -1172,7 +1168,6 @@ OMR::CFG::removeUnreachableBlocks()
       // has predecessors, likely loop entry
       else
          {
-         ListElement<TR::CFGEdge> *in;
          while (!node->getExceptionPredecessors().empty())
             removeEdge(node->getExceptionPredecessors().front());
          while (!node->getPredecessors().empty())
@@ -1775,7 +1770,7 @@ OMR::CFG::clone()
    //
    setStructure(0);
 
-   TR_BlockCloner *cloner = new (structureRegion()) TR_BlockCloner(self(), false, true);
+   TR_BlockCloner *cloner = new (structureMemoryRegion()) TR_BlockCloner(self(), false, true);
    TR::Block *clonedBlock = cloner->cloneBlocks(comp()->getStartTree()->getNode()->getBlock(), lastTreeTop->getNode()->getBlock());
    lastTreeTop->join(clonedBlock->getEntry());
 
@@ -1960,7 +1955,7 @@ OMR::CFG::setUniformEdgeFrequenciesOnNode(TR::CFGNode *node, int32_t branchToCou
          addFrequency = false;
       }
 
-   int32_t size = node->getSuccessors().size();
+   int32_t size = static_cast<int32_t>(node->getSuccessors().size());
 
    for (auto e = node->getSuccessors().begin(); e != node->getSuccessors().end(); ++e)
       {
@@ -3276,7 +3271,7 @@ OMR::CFG::findReachableBlocks(TR_BitVector *result)
    }
 
 TR::Region&
-OMR::CFG::getInternalRegion()
+OMR::CFG::getInternalMemoryRegion()
    {
-   return self()->_internalRegion;
+   return self()->_internalMemoryRegion;
    }

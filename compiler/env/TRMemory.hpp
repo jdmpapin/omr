@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -451,8 +451,10 @@ public:
 
       Debug,
 
+      // JITServer types
       ClientSessionData,
       ROMClass,
+      JITServerAOTCache,
 
       SymbolValidationManager,
 
@@ -504,7 +506,6 @@ public:
    uintptr_t _signature;        // eyecatcher
 
    friend class TR_Memory;
-   friend class TR_DebugExt;
 
    /** Used by TR_PPCTableOfCnstants */
    static TR::PersistentInfo * getNonThreadSafePersistentInfo();
@@ -610,11 +611,8 @@ class Region;
 class StackMemoryRegion;
 }
 
-class TR_DebugExt;
-
 class TR_Memory : public TR_MemoryBase
    {
-   friend class TR_DebugExt;
 public:
    TR_HeapMemory  trHeapMemory()  { return this; }
    TR_StackMemory trStackMemory() { return this; }
@@ -840,13 +838,6 @@ public:
       deallocate(ptr, size, name);
       return ret;
       }
-
-   template <class ostr, class allocator> ostr& stats(ostr &o, allocator &a)
-      {
-      o << "TRPersistentMemoryAllocator stats:\n";
-      o << "not implemented\n";
-      return o;
-      }
    };
 
 template <TR_AllocationKind kind, uint32_t minbits, uint32_t maxbits = sizeof(void *)*4>
@@ -854,8 +845,6 @@ class TRMemoryAllocator {
   TR_Memory *memory;
   bool  scavenge;
   void *(freelist[maxbits - minbits]);
-  size_t stats_largeAlloc;
-  size_t statsArray[maxbits - minbits];
 
   static uint32_t bucket(size_t size) {
     uint32_t i=minbits;
@@ -869,29 +858,24 @@ class TRMemoryAllocator {
   }
 
 public:
-  TRMemoryAllocator(const TRMemoryAllocator<kind,minbits,maxbits> &a) : memory(a.memory), stats_largeAlloc(0), scavenge(a.scavenge) {
+  TRMemoryAllocator(const TRMemoryAllocator<kind,minbits,maxbits> &a) : memory(a.memory), scavenge(a.scavenge) {
     memset(&freelist, 0, sizeof(freelist));
-    memset(&statsArray, 0, sizeof(freelist));
   }
 
   TRMemoryAllocator<kind,minbits,maxbits> &operator= (const TRMemoryAllocator &a) {
-    stats_largeAlloc = 0;
     scavenge = a.scavenge;
     memset(&freelist, 0, sizeof(freelist));
-    memset(&statsArray, 0, sizeof(freelist));
   }
 
-  TRMemoryAllocator(TR_Memory *m) : memory(m), stats_largeAlloc(0), scavenge(true) {
+  TRMemoryAllocator(TR_Memory *m) : memory(m), scavenge(true) {
     memset(&freelist, 0, sizeof(freelist));
-    memset(&statsArray, 0, sizeof(freelist));
 
   }
 
   template <uint32_t mi, uint32_t ma>
   TRMemoryAllocator(const TRMemoryAllocator<kind, mi, ma> &a) : memory(a.memory),
-            stats_largeAlloc(0), scavenge(true) {
+            scavenge(true) {
     memset(&freelist, 0, sizeof(freelist));
-    memset(&statsArray, 0, sizeof(freelist));
   }
 
   static TRMemoryAllocator &instance()
@@ -908,7 +892,6 @@ public:
     uint32_t b = bucket(size);
 
     if (b>=maxbits) {
-      stats_largeAlloc += size;
       return  memory->allocateMemory(size, kind, TR_Memory::CS2);
     }
 
@@ -925,9 +908,8 @@ public:
 
     if (scavenge) {
       for (uint32_t i=b+1; i < maxbits; i++) {
-        uint32_t chunksize=0; uint32_t elements=0;
+        uint32_t elements=0;
         if (freelist[i-minbits]) {
-          chunksize = bucketsize(i);
           elements = (1 << (i-b)); // (2^i / 2^b)
 
           // remove this segment from its freelist
@@ -952,7 +934,6 @@ public:
       }
     }
 
-    statsArray[b-minbits] += bucketsize(b);
     return memory->allocateMemory(bucketsize(b), kind, TR_Memory::CS2);
   }
 
@@ -977,23 +958,6 @@ public:
     return ret;
   }
 
-  template <class ostr, class allocator> ostr& stats(ostr &o, allocator &a) {
-    o << "TRMemoryAllocator stats:\n";
-    for (int i=minbits; i < maxbits; i++) {
-      if (statsArray[i-minbits]) {
-        int32_t sz=0;
-        void *p = freelist[i-minbits];
-        while (p) {
-          sz += bucketsize(i);
-          p = *(void **)p;
-        }
-        o <<  "bucket[" << i-minbits << "] (" << bucketsize(i) << ") : allocated = "
-          << statsArray[i-minbits] <<  " bytes, freelist size = " << sz << "\n" ;
-      }
-    }
-
-    return o;
-  }
 };
 
 typedef TRMemoryAllocator<heapAlloc, 12, 28> TRCS2MemoryAllocator;
@@ -1003,47 +967,11 @@ namespace TR
    typedef CS2::heap_allocator< 65536, 12, TRCS2MemoryAllocator > ThreadLocalAllocator;
    typedef CS2::shared_allocator < ThreadLocalAllocator > Allocator;
 
-   typedef TRPersistentMemoryAllocator CS2PersistentAllocator;
-
-   typedef CS2::stat_allocator    < CS2PersistentAllocator > GlobalBaseAllocator;
-
-   class GlobalSingletonAllocator: public GlobalBaseAllocator
-      {
-   public:
-      static GlobalSingletonAllocator &instance()
-         {
-         if (_instance == NULL)
-            createInstance();
-
-         return *_instance;
-         }
-
-   private:
-      GlobalSingletonAllocator(const GlobalBaseAllocator &a) : GlobalBaseAllocator(a)
-         {
-         TR_ASSERT(!_instance, "GlobalSingletonAllocator must be initialized only once");
-         _instance = this;
-         }
-
-      static void createInstance();
-      static GlobalSingletonAllocator *_instance;
-      };
-
-   typedef CS2::shared_allocator < GlobalSingletonAllocator > GlobalAllocator;
-
-   static GlobalAllocator globalAllocator(const char *name = NULL)
-      {
-      return GlobalAllocator(GlobalSingletonAllocator::instance());
-      }
-
    /*
     * some common CS2 datatypes
     */
    typedef CS2::ASparseBitVector<TR::Allocator> SparseBitVector;
    typedef CS2::ABitVector<TR::Allocator>       BitVector;
-
-   typedef CS2::ASparseBitVector<TR::GlobalAllocator> GlobalSparseBitVector;
-   typedef CS2::ABitVector<TR::GlobalAllocator>       GlobalBitVector;
 
    class AllocatedMemoryMeter
       {
@@ -1177,7 +1105,7 @@ namespace TR
        */
       Metric Read(void) const { return _reading; }
 
-      static char* Name(bool csv = false)
+      static const char* Name(bool csv = false)
          {
          if (csv)
             return "Allocs";
@@ -1185,7 +1113,7 @@ namespace TR
             return "Memory Usage (bytes)";
          }
 
-      static char *UnitsText(bool alternativeFormat = false /* ignored */)
+      static const char *UnitsText(bool alternativeFormat = false /* ignored */)
          {
             return "allocated (% total)  freed (% total)  maxLive (% total)";
          }

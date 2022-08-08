@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -161,9 +161,9 @@ class OMR_EXTENSIBLE Block : public TR::CFGNode
    TR::TreeTop * prepend(TR::TreeTop * tt);
 
    TR::Block * split(TR::TreeTop * startOfNewBlock,  TR::CFG * cfg, bool fixupCommoning = false, bool copyExceptionSuccessors = true, TR::ResolvedMethodSymbol *methodSymbol = NULL);
-   
+
    TR::Block * splitPostGRA(TR::TreeTop *startOfNewBlock, TR::CFG *cfg, bool copyExceptionSuccessors = true, TR::ResolvedMethodSymbol *methodSymbol = NULL);
-   
+
 
    TR::Block * splitWithGivenMethodSymbol(TR::ResolvedMethodSymbol *methodSymbol, TR::TreeTop * startOfNewBlock,  TR::CFG * cfg, bool fixupCommoning = false, bool copyExceptionSuccessors = true);
 
@@ -233,7 +233,8 @@ class OMR_EXTENSIBLE Block : public TR::CFGNode
       CanCatchUserThrows          = 0x00000200,
       CanCatchOSR                 = 0x00000400,
       CanCatchOverflowCheck       = 0x00000800,
-      CanCatchEverything          = 0x000007FF, // Mask for all of the above
+      CanCatchNewvalue            = 0x00001000,
+      CanCatchEverything          = 0x00001FFF, // Mask for all of the above
       };
 
    bool     canCatchExceptions(uint32_t flags); // uses the above enum
@@ -408,9 +409,6 @@ class OMR_EXTENSIBLE Block : public TR::CFGNode
    void setIsSynchronizedHandler()                    { _flags.set(_isSynchronizedHandler); }
    bool isSynchronizedHandler()                       { return _flags.testAny(_isSynchronizedHandler); }
 
-   void setHasBeenVisited(bool b = true)              { _flags.set(_hasBeenVisited, b); }
-   bool hasBeenVisited()                              { return _flags.testAny(_hasBeenVisited); }
-
    void setIsPRECandidate(bool b)                     { _flags.set(_isPRECandidate, b); }
    bool isPRECandidate()                              { return _flags.testAny(_isPRECandidate); }
 
@@ -511,8 +509,6 @@ class OMR_EXTENSIBLE Block : public TR::CFGNode
 
    static StandardException _standardExceptions[];
 
-   static StandardException _valueTypesExceptions[];
-
    enum // flag bits for _flags
       {
       _isExtensionOfPreviousBlock           = 0x00000001,
@@ -524,7 +520,7 @@ class OMR_EXTENSIBLE Block : public TR::CFGNode
       _firstBlockInLoop                     = 0x00000020,
       _branchingBackwards                   = 0x00000040,
       _isSynchronizedHandler                = 0x00000100,
-      _hasBeenVisited                       = 0x00000400,
+      // Available                          = 0x00000400,
       _isPRECandidate                       = 0x00000800,
       _isAdded                              = 0x00001000,
       _isOSRInduceBlock                     = 0x00002000,

@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -27,7 +27,6 @@ omr_add_executable(omrthreadextendedtest
 	timeBaseTest.cpp
 )
 
-
 target_link_libraries(omrthreadextendedtest
 	omrGtestGlue
 	omrtestutil
@@ -37,12 +36,8 @@ target_link_libraries(omrthreadextendedtest
 	${OMR_PORT_LIB}
 )
 
-if(OMR_HOST_OS STREQUAL "zos")
-	target_link_libraries(omrthreadextendedtest j9a2e)
-endif()
-
 set_property(TARGET omrthreadextendedtest PROPERTY FOLDER fvtest)
 
-if (NOT OMR_HOST_OS STREQUAL "zos")
-	add_test(NAME threadextendedtest COMMAND omrthreadextendedtest --gtest_output=xml:${CMAKE_CURRENT_BINARY_DIR}/omrthreadextendedtest-results.xml)
+if(NOT OMR_OS_ZOS)
+	omr_add_test(NAME threadextendedtest COMMAND $<TARGET_FILE:omrthreadextendedtest> --gtest_output=xml:${CMAKE_CURRENT_BINARY_DIR}/omrthreadextendedtest-results.xml)
 endif()

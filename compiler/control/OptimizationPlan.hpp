@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -59,7 +59,6 @@ struct TR_MethodToBeCompiled;
 class TR_OptimizationPlan
    {
    public:
-   friend class TR_DebugExt;
    TR_PERSISTENT_ALLOC(TR_Memory::OptimizationPlan)
 
    // Eliminate explicit constructors so that we do not crash
@@ -166,6 +165,9 @@ class TR_OptimizationPlan
    bool isInducedByDLT() const { return _flags.testAny(InducedByDLT); }
    void setInducedByDLT(bool b) { _flags.set(InducedByDLT, b); }
 
+   bool getDisableEDO() const { return _flags.testAny(DisableEDO); }
+   void setDisableEDO(bool b) { _flags.set(DisableEDO, b); }
+
    // --------------------------------------------------------------------------
    // GPU
    //
@@ -220,7 +222,8 @@ class TR_OptimizationPlan
       DontFailOnPurpose       = 0x00100000, // Mostly needed to avoid failing for the purpose of upgrading to a higher opt level
       RelaxedCompilationLimits= 0x00200000, // Compilation can use larger limits because method is very very hot
       DowngradedDueToSamplingJProfiling=0x00400000, // Compilation was downgraded to cold just because we wanted to do JProfiling
-      InducedByDLT             =0x00800000, // Compilation that follows a DLT compilation
+      InducedByDLT            = 0x00800000, // Compilation that follows a DLT compilation
+      DisableEDO              = 0x01000000, // Do not insert EDO profiling trees for this compilation
    };
    private:
    TR_OptimizationPlan  *_next;       // to link events in the pool

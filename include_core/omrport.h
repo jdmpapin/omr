@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -827,6 +827,12 @@ typedef struct J9ProcessorInfos {
 #define OMRPORT_SLOPEN_NO_LOOKUP_MSG_FOR_NOT_FOUND  4
 #define OMRPORT_SLOPEN_OPEN_EXECUTABLE 8     /* Can be ORed without affecting existing flags. */
 
+#if defined(J9ZOS39064)
+#define OMRPORT_SLOPEN_ATTEMPT_31BIT_OPEN 16 /* Attempt 31-bit DLL load from 64-bit. */
+#define OMRPORT_SL_ZOS_31BIT_TARGET_HIGHTAG 0x3100000000000000l /* High-tag to signify 31-bit target handles and addresses. */
+#define OMRPORT_SL_ZOS_31BIT_TARGET_MASK 0xFFFFFFFF /* Mask used to convert 31-bit tagged handles/addresses to proper values. */
+#endif /* defined(J9ZOS39064) */
+
 #define OMRPORT_ARCH_X86       "x86"
 #define OMRPORT_ARCH_PPC       "ppc" 				/* in line with IBM JDK 1.22 and above for AIX and Linux/PPC */
 #define OMRPORT_ARCH_PPC64     "ppc64"
@@ -1153,6 +1159,10 @@ typedef struct J9ProcessorInfos {
 /* Windows current thread ANSI code page */
 #define J9STR_CODE_WINTHREADACP 8
 
+/* flags for omrstr_ftime_ex */
+#define OMRSTR_FTIME_FLAG_LOCAL 0 /* result should be produced for local timezone */
+#define OMRSTR_FTIME_FLAG_UTC   1 /* result should be produced for UTC timezone */
+
 #if defined(J9ZOS390)
 /*
  * OMR on z/OS translates the output of certain system calls such as getenv to ASCII using functions in atoe.c; see stdlib.h for a list.
@@ -1270,7 +1280,28 @@ typedef struct J9ThreadWalkState {
 	intptr_t error;
 	uintptr_t error_detail;
 	const char *error_string;
+	uint32_t options;
 } J9ThreadWalkState;
+
+/*
+ * Possible options in J9ThreadWalkState.
+ */
+
+/*
+ * Don't resolve symbols in stack frames in introspect_threads_XXX();
+ * caller will use introspect_backtrace_symbols_ex() as necessary.
+ */
+#define OMR_INTROSPECT_NO_SYMBOLS 1
+
+/*
+ * Possible options in calls to introspect_backtrace_symbols_ex().
+ */
+
+/*
+ * Do only basic, low cost symbol resolution. Currently, this is only
+ * relevant on Linux where full symbol resolution can be costly.
+ */
+#define OMR_BACKTRACE_SYMBOLS_BASIC 1
 
 typedef struct J9PortSysInfoLoadData {
 	double oneMinuteAverage;
@@ -1333,8 +1364,8 @@ typedef enum OMRProcessorArchitecture {
 	OMR_PROCESSOR_ARM_LAST = OMR_PROCESSOR_ARM_V7,
 
 	// ARM64 / AARCH64 Processors
-	OMR_PROCESSOR_ARM64_FISRT,
-	OMR_PROCESSOR_ARM64_UNKNOWN = OMR_PROCESSOR_ARM64_FISRT,
+	OMR_PROCESSOR_ARM64_FIRST,
+	OMR_PROCESSOR_ARM64_UNKNOWN = OMR_PROCESSOR_ARM64_FIRST,
 	OMR_PROCESSOR_ARM64_V8_A,
 	OMR_PROCESSOR_ARM64_LAST = OMR_PROCESSOR_ARM64_V8_A,
 
@@ -1419,7 +1450,7 @@ typedef enum OMRProcessorArchitecture {
 /* Holds processor type and features used with omrsysinfo_get_processor_description,
  * omrsysinfo_processor_has_feature and omrsysinfo_processor_set_feature
  */
-#define OMRPORT_SYSINFO_FEATURES_SIZE 5
+#define OMRPORT_SYSINFO_FEATURES_SIZE 7
 typedef struct OMRProcessorDesc {
 	OMRProcessorArchitecture processor;
 	OMRProcessorArchitecture physicalProcessor;
@@ -1568,6 +1599,10 @@ typedef struct OMRProcessorDesc {
 /* STFLE bit 152 - Vector packed decimal enhancement facility */
 #define OMR_FEATURE_S390_VECTOR_PACKED_DECIMAL_ENHANCEMENT_FACILITY 152
 
+/* zNext facilities */
+
+/* STFLE bit 192 - Vector-Packed-Decimal-Enhancement Facility 2 */
+#define OMR_FEATURE_S390_VECTOR_PACKED_DECIMAL_ENHANCEMENT_FACILITY_2 192
 
 /*  Linux on Z features
  *  Auxiliary Vector Hardware Capability (AT_HWCAP) features for Linux on Z.
@@ -1701,6 +1736,62 @@ typedef struct OMRProcessorDesc {
 #define OMR_FEATURE_X86_SHA                 96 + 29 /* Intel SHA Extensions */
 #define OMR_FEATURE_X86_AVX512BW            96 + 30 /* AVX512 Byte and Word */
 #define OMR_FEATURE_X86_AVX512VL            96 + 31 /* AVX512 Vector Length */
+
+/*  AArch64 Linux features
+ *  See https://www.kernel.org/doc/html/latest/arm64/elf_hwcaps.html.
+ */
+#define OMR_FEATURE_ARM64_FP                0 /* Floating Point without FP16 */
+#define OMR_FEATURE_ARM64_ASIMD             1 /* Advanced SIMD without FP16 */
+#define OMR_FEATURE_ARM64_EVTSTRM           2 /* Event Stream */
+#define OMR_FEATURE_ARM64_AES               3 /* FEAT_AES */
+#define OMR_FEATURE_ARM64_PMULL             4 /* FEAT_PMULL */
+#define OMR_FEATURE_ARM64_SHA1              5 /* FEAT_SHA1 */
+#define OMR_FEATURE_ARM64_SHA256            6 /* FEAT_SHA256 */
+#define OMR_FEATURE_ARM64_CRC32             7 /* FEAT_CRC32 */
+#define OMR_FEATURE_ARM64_LSE               8 /* FEAT_LSE */
+#define OMR_FEATURE_ARM64_FP16              9 /* FEAT_FP16 */
+#define OMR_FEATURE_ARM64_ASIMDHP          10 /* Advanced SIMD with FP16 */
+#define OMR_FEATURE_ARM64_CPUID            11 /* CPU ID/feature register */
+#define OMR_FEATURE_ARM64_RDM              12 /* FEAT_RDM */
+#define OMR_FEATURE_ARM64_JSCVT            13 /* FEAT_JSCVT */
+#define OMR_FEATURE_ARM64_FCMA             14 /* FEAT_FCMA */
+#define OMR_FEATURE_ARM64_LRCPC            15 /* FEAT_LRCPC */
+#define OMR_FEATURE_ARM64_DPB              16 /* FEAT_DPB */
+#define OMR_FEATURE_ARM64_SHA3             17 /* FEAT_SHA3 */
+#define OMR_FEATURE_ARM64_SM3              18 /* FEAT_SM3 */
+#define OMR_FEATURE_ARM64_SM4              19 /* FEAT_SM4 */
+#define OMR_FEATURE_ARM64_DOTPROD          20 /* FEAT_DotProd */
+#define OMR_FEATURE_ARM64_SHA512           21 /* FEAT_SHA512 */
+#define OMR_FEATURE_ARM64_SVE              22 /* FEAT_SVE */
+#define OMR_FEATURE_ARM64_FHM              23 /* FEAT_FHM */
+#define OMR_FEATURE_ARM64_DIT              24 /* FEAT_DIT */
+#define OMR_FEATURE_ARM64_LSE2             25 /* FEAT_LSE2 */
+#define OMR_FEATURE_ARM64_LRCPC2           26 /* FEAT_LRCPC2 */
+#define OMR_FEATURE_ARM64_FLAGM            27 /* FEAT_FlagM */
+#define OMR_FEATURE_ARM64_SSBS             28 /* FEAT_SSBS */
+#define OMR_FEATURE_ARM64_SB               29 /* FEAT_SB */
+#define OMR_FEATURE_ARM64_PAUTH            30 /* FEAT_PAuth */
+#define OMR_FEATURE_ARM64_PACG             31 /* PACGA instruction */
+
+#define OMR_FEATURE_ARM64_DPB2             32 /* FEAT_DPB2 */
+#define OMR_FEATURE_ARM64_SVE2             33 /* FEAT_SVE2 */
+#define OMR_FEATURE_ARM64_SVE_AES          34 /* FEAT_SVE_AES */
+#define OMR_FEATURE_ARM64_SVE_PMULL128     35 /* FEAT_SVE_PMULL128 */
+#define OMR_FEATURE_ARM64_SVE_BITPERM      36 /* FEAT_SVE_BitPerm */
+#define OMR_FEATURE_ARM64_SVE_SHA3         37 /* FEAT_SVE_SHA3 */
+#define OMR_FEATURE_ARM64_SVE_SM4          38 /* FEAT_SVE_SM4 */
+#define OMR_FEATURE_ARM64_FLAGM2           39 /* FEAT_FlagM2 */
+#define OMR_FEATURE_ARM64_FRINTTS          40 /* FEAT_FRINTTS */
+#define OMR_FEATURE_ARM64_SVE_I8MM         41 /* FEAT_I8MM */
+#define OMR_FEATURE_ARM64_F32MM            42 /* FEAT_F32MM */
+#define OMR_FEATURE_ARM64_F64MM            43 /* FEAT_F64MM */
+#define OMR_FEATURE_ARM64_SVE_BF16         44 /* FEAT_BF16 */
+#define OMR_FEATURE_ARM64_I8MM             45 /* FEAT_I8MM */
+#define OMR_FEATURE_ARM64_BF16             46 /* FEAT_BF16 */
+#define OMR_FEATURE_ARM64_DGH              47 /* FEAT_DGH */
+#define OMR_FEATURE_ARM64_RNG              48 /* FEAT_RNG */
+#define OMR_FEATURE_ARM64_BTI              49 /* FEAT_BTI */
+#define OMR_FEATURE_ARM64_MTE2             50 /* FEAT_MTE2 */
 
 struct OMRControlFileStatus;
 struct OMRPortShSemParameters;
@@ -2047,11 +2138,11 @@ typedef struct OMRPortLibrary {
 	void (*exit_shutdown_and_exit)(struct OMRPortLibrary *portLibrary, int32_t exitCode) ;
 	/** self_handle*/
 	void *self_handle;
-	/** see @ref omrdump.c::omrdump_create "omrdump_create"*/
+	/** see @ref omrosdump.c::omrdump_create "omrdump_create" */
 	uintptr_t (*dump_create)(struct OMRPortLibrary *portLibrary, char *filename, char *dumpType, void *userData) ;
-	/** see @ref omrdump.c::omrdump_startup "omrdump_startup"*/
+	/** see @ref omrosdump.c::omrdump_startup "omrdump_startup" */
 	int32_t (*dump_startup)(struct OMRPortLibrary *portLibrary) ;
-	/** see @ref omrdump.c::omrdump_shutdown "omrdump_shutdown"*/
+	/** see @ref omrosdump.c::omrdump_shutdown "omrdump_shutdown" */
 	void (*dump_shutdown)(struct OMRPortLibrary *portLibrary) ;
 	/** see @ref j9nls.c::j9nls_startup "j9nls_startup" Deprecated*/
 	int32_t (*nls_startup)(struct OMRPortLibrary *portLibrary) ;
@@ -2141,6 +2232,10 @@ typedef struct OMRPortLibrary {
 	int32_t (*file_blockingasync_lock_bytes)(struct OMRPortLibrary *portLibrary, intptr_t fd, int32_t lockFlags, uint64_t offset, uint64_t length) ;
 	/** see @ref omrstr.c::omrstr_ftime "omrstr_ftime"*/
 	uintptr_t (*str_ftime)(struct OMRPortLibrary *portLibrary, char *buf, uintptr_t bufLen, const char *format, int64_t timeMillis) ;
+	/** see @ref omrstr.c::omrstr_ftime_ex "omrstr_ftime_ex"*/
+	uintptr_t (*str_ftime_ex)(struct OMRPortLibrary *portLibrary, char *buf, uintptr_t bufLen, const char *format, int64_t timeMillis, uint32_t flags);
+	/** see @ref omrstr.c::omrstr_current_time_zone "omrstr_current_time_zone"*/
+	int32_t (*str_current_time_zone)(struct OMRPortLibrary *portLibrary, int32_t *secondsEast, char *zoneNameBuffer, size_t zoneNameBufferLen) ;
 	/** see @ref omrmmap.c::omrmmap_startup "omrmmap_startup"*/
 	int32_t (*mmap_startup)(struct OMRPortLibrary *portLibrary) ;
 	/** see @ref omrmmap.c::omrmmap_shutdown "omrmmap_shutdown"*/
@@ -2323,6 +2418,8 @@ typedef struct OMRPortLibrary {
 	uintptr_t (*introspect_backtrace_thread)(struct OMRPortLibrary *portLibrary, J9PlatformThread *thread, J9Heap *heap, void *signalInfo) ;
 	/** see @ref omrintrospect.c::omrintrospect_backtrace_symbols "omrintrospect_backtrace_symbols"*/
 	uintptr_t (*introspect_backtrace_symbols)(struct OMRPortLibrary *portLibrary, J9PlatformThread *thread, J9Heap *heap) ;
+	/** see @ref omrintrospect.c::omrintrospect_backtrace_symbols_ex "omrintrospect_backtrace_symbols_ex"*/
+	uintptr_t (*introspect_backtrace_symbols_ex)(struct OMRPortLibrary *portLibrary, J9PlatformThread *thread, J9Heap *heap, uint32_t options);
 	/** see @ref omrsyslog.c::omrsyslog_query "omrsyslog_query"*/
 	uintptr_t (*syslog_query)(struct OMRPortLibrary *portLibrary) ;
 	/** see @ref omrsyslog.c::omrsyslog_set "omrsyslog_set"*/
@@ -2858,7 +2955,9 @@ extern J9_CFUNC int32_t omrport_getVersion(struct OMRPortLibrary *portLibrary);
 #define omrfile_lock_bytes(param1,param2,param3,param4) privateOmrPortLibrary->file_lock_bytes(privateOmrPortLibrary, (param1), (param2), (param3), (param4))
 #define omrfile_convert_native_fd_to_omrfile_fd(param1) privateOmrPortLibrary->file_convert_native_fd_to_omrfile_fd(privateOmrPortLibrary, (param1))
 #define omrfile_convert_omrfile_fd_to_native_fd(param1) privateOmrPortLibrary->file_convert_omrfile_fd_to_native_fd(privateOmrPortLibrary,param1)
-#define omrstr_ftime(param1,param2,param3,param4) privateOmrPortLibrary->str_ftime(privateOmrPortLibrary, (param1), (param2), (param3), (param4))
+#define omrstr_ftime(param1,param2,param3,param4) privateOmrPortLibrary->str_ftime_ex(privateOmrPortLibrary, (param1), (param2), (param3), (param4), OMRSTR_FTIME_FLAG_LOCAL)
+#define omrstr_ftime_ex(param1,param2,param3,param4,param5) privateOmrPortLibrary->str_ftime_ex(privateOmrPortLibrary, (param1), (param2), (param3), (param4), (param5))
+#define omrstr_current_time_zone(param1,param2,param3) privateOmrPortLibrary->str_current_time_zone(privateOmrPortLibrary, (param1), (param2), (param3))
 #define omrmmap_startup() privateOmrPortLibrary->mmap_startup(privateOmrPortLibrary)
 #define omrmmap_shutdown() privateOmrPortLibrary->mmap_shutdown(privateOmrPortLibrary)
 #define omrmmap_capabilities() privateOmrPortLibrary->mmap_capabilities(privateOmrPortLibrary)
@@ -2943,9 +3042,10 @@ extern J9_CFUNC int32_t omrport_getVersion(struct OMRPortLibrary *portLibrary);
 #define omrintrospect_set_suspend_signal_offset(param1) privateOmrPortLibrary->introspect_set_suspend_signal_offset(privateOmrPortLibrary, param1)
 #define omrintrospect_threads_startDo(param1,param2) privateOmrPortLibrary->introspect_threads_startDo(privateOmrPortLibrary, (param1), (param2))
 #define omrintrospect_threads_startDo_with_signal(param1,param2,param3) privateOmrPortLibrary->introspect_threads_startDo_with_signal(privateOmrPortLibrary, (param1), (param2), (param3))
-#define omrintrospect_threads_nextDo() privateOmrPortLibrary->introspect_threads_nextDo(privateOmrPortLibrary)
+#define omrintrospect_threads_nextDo(param1) privateOmrPortLibrary->introspect_threads_nextDo(param1)
 #define omrintrospect_backtrace_thread(param1,param2,param3) privateOmrPortLibrary->introspect_backtrace_thread(privateOmrPortLibrary, (param1), (param2), (param3))
-#define omrintrospect_backtrace_symbols(param1,param2) privateOmrPortLibrary->introspect_backtrace_symbols(privateOmrPortLibrary, (param1), (param2))
+#define omrintrospect_backtrace_symbols(param1,param2) privateOmrPortLibrary->introspect_backtrace_symbols_ex(privateOmrPortLibrary, (param1), (param2), 0)
+#define omrintrospect_backtrace_symbols_ex(param1,param2,param3) privateOmrPortLibrary->introspect_backtrace_symbols_ex(privateOmrPortLibrary, (param1), (param2), (param3))
 #define omrsyslog_query() privateOmrPortLibrary->syslog_query(privateOmrPortLibrary)
 #define omrsyslog_set(param1) privateOmrPortLibrary->syslog_set(privateOmrPortLibrary, (param1))
 #define omrmem_walk_categories(param1) privateOmrPortLibrary->mem_walk_categories(privateOmrPortLibrary, (param1))

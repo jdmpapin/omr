@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -67,7 +67,6 @@ OMR::ARM::Instruction::Instruction(TR::CodeGenerator *cg, TR::Instruction *prece
                   _conditions(0),
                   _asyncBranch(false)
    {
-   self()->setBlockIndex(cg->getCurrentBlockIndex());
    }
 
 OMR::ARM::Instruction::Instruction(TR::CodeGenerator *cg, TR::InstOpCode::Mnemonic op, TR::Node *node)
@@ -75,20 +74,19 @@ OMR::ARM::Instruction::Instruction(TR::CodeGenerator *cg, TR::InstOpCode::Mnemon
      _conditions(0),
      _asyncBranch(false)
    {
-   self()->setBlockIndex(cg->getCurrentBlockIndex());
    }
 
 // TODO: need to fix the InstOpCode initialization
 OMR::ARM::Instruction::Instruction(TR::Node *node, TR::CodeGenerator *cg)
-   : OMR::InstructionConnector(cg, TR::InstOpCode::BAD, node)
+   : OMR::InstructionConnector(cg, TR::InstOpCode::bad, node)
    {
-   self()->setOpCodeValue(ARMOp_bad);
+   self()->setOpCodeValue(TR::InstOpCode::bad);
    self()->setConditionCode(ARMConditionCodeAL);
    self()->setDependencyConditions(NULL);
    }
 
-OMR::ARM::Instruction::Instruction(TR_ARMOpCodes op, TR::Node *node, TR::CodeGenerator *cg)
-   : OMR::InstructionConnector(cg, TR::InstOpCode::BAD, node)
+OMR::ARM::Instruction::Instruction(TR::InstOpCode::Mnemonic op, TR::Node *node, TR::CodeGenerator *cg)
+   : OMR::InstructionConnector(cg, TR::InstOpCode::bad, node)
    {
    self()->setOpCodeValue(op);
    self()->setConditionCode(ARMConditionCodeAL);
@@ -96,21 +94,21 @@ OMR::ARM::Instruction::Instruction(TR_ARMOpCodes op, TR::Node *node, TR::CodeGen
    }
 
 OMR::ARM::Instruction::Instruction(TR::Instruction   *precedingInstruction,
-            TR_ARMOpCodes     op,
+            TR::InstOpCode::Mnemonic     op,
             TR::Node          *node,
             TR::CodeGenerator *cg)
-   : OMR::InstructionConnector(cg, precedingInstruction, TR::InstOpCode::BAD, node)
+   : OMR::InstructionConnector(cg, precedingInstruction, TR::InstOpCode::bad, node)
    {
    self()->setOpCodeValue(op);
    self()->setConditionCode(ARMConditionCodeAL);
    self()->setDependencyConditions(NULL);
    }
 
-OMR::ARM::Instruction::Instruction(TR_ARMOpCodes                       op,
+OMR::ARM::Instruction::Instruction(TR::InstOpCode::Mnemonic                       op,
             TR::Node                            *node,
             TR::RegisterDependencyConditions    *cond,
             TR::CodeGenerator                   *cg)
-   : OMR::InstructionConnector(cg, TR::InstOpCode::BAD, node)
+   : OMR::InstructionConnector(cg, TR::InstOpCode::bad, node)
    {
    self()->setOpCodeValue(op);
    self()->setConditionCode(ARMConditionCodeAL);
@@ -120,11 +118,11 @@ OMR::ARM::Instruction::Instruction(TR_ARMOpCodes                       op,
    }
 
 OMR::ARM::Instruction::Instruction(TR::Instruction                     *precedingInstruction,
-            TR_ARMOpCodes                       op,
+            TR::InstOpCode::Mnemonic                       op,
             TR::Node                            *node,
             TR::RegisterDependencyConditions    *cond,
             TR::CodeGenerator                   *cg)
-   : OMR::InstructionConnector(cg, precedingInstruction, TR::InstOpCode::BAD, node)
+   : OMR::InstructionConnector(cg, precedingInstruction, TR::InstOpCode::bad, node)
    {
    self()->setOpCodeValue(op);
    self()->setConditionCode(ARMConditionCodeAL);
@@ -207,6 +205,49 @@ TR::ARMConditionalBranchInstruction *TR::ARMConditionalBranchInstruction::getARM
    return this;
    }
 
+static void removeGhostRegistersFromGCMaps(TR::CodeGenerator *cg, TR::Instruction *branchOOL)
+   {
+   // If a virtual is live at the end of the hot path and dead at the beginning it will not be killed immediatey after it's first use in the hot path
+   // if it's also used on the cold path, since RA still needs to be done on the cold path (which is where it's future use count will drop to 0), which
+   // means it will be incorrectly seen as live between it's first use and the top of the hot path.
+   // If there are any GC points between the top of the hot path and the first use the real reg holding the virtual will be included,
+   // so we need to fix this.
+   TR::Instruction *instr = branchOOL->getNext();
+   while (!instr->isLabel() || !((TR::ARMLabelInstruction*)instr)->getLabelSymbol()->isEndOfColdInstructionStream())
+      {
+      if (instr->needsGCMap())
+         {
+         TR_GCStackMap *map = instr->getGCMap();
+         TR_ASSERT( map, "Instruction should have a GC map");
+
+         // This instruction has a GC map, for every register in the register map check if that register is unassigned at the beginning of the hot path.
+         for (uint32_t regNum = TR::RealRegister::FirstGPR; regNum < TR::RealRegister::LastGPR; ++regNum)
+            {
+            uint32_t regMask = cg->registerBitMask(regNum);
+            if (map->getRegisterMap() & regMask)
+               {
+               TR::RealRegister *regInRegMap = cg->machine()->getRealRegister((TR::RealRegister::RegNum)regNum);
+               if (regInRegMap->getState() == TR::RealRegister::Free)
+                  {
+                  // This register is unassigned, check if it was defined before the GC point.
+                  TR::Instruction *prevInstr = instr->getPrev();
+                  while (prevInstr != branchOOL && !prevInstr->defsRealRegister(regInRegMap))
+                     prevInstr = prevInstr->getPrev();
+                  // If it wasn't defined before the GC point it died on the cold path and it's first use on the hot path was after the GC point
+                  // i.e. it shouldn't be in the register map.
+                  if (prevInstr == branchOOL)
+                     {
+                     map->resetRegistersBits(regMask);
+                     }
+                  }
+               }
+            }
+         }
+
+      instr = instr->getNext();
+      }
+   }
+
 void TR::ARMConditionalBranchInstruction::assignRegisters(TR_RegisterKinds kindToBeAssigned)
    {
    if (getDependencyConditions())
@@ -233,6 +274,8 @@ void TR::ARMConditionalBranchInstruction::assignRegisters(TR_RegisterKinds kindT
       // storage returned to the free spill list.
       //
       cg()->unlockFreeSpillList();
+
+      removeGhostRegistersFromGCMaps(cg(), self());
       }
    }
 
@@ -270,7 +313,7 @@ TR::ARMImmInstruction *TR::ARMImmInstruction::getARMImmInstruction()
 
 // TR::ARMImmSymInstruction:: member functions
 
-TR::ARMImmSymInstruction::ARMImmSymInstruction(TR_ARMOpCodes                       op,
+TR::ARMImmSymInstruction::ARMImmSymInstruction(TR::InstOpCode::Mnemonic                       op,
                                                TR::Node                            *node,
                                                uint32_t                            imm,
                                                TR::RegisterDependencyConditions *cond,
@@ -286,7 +329,7 @@ TR::ARMImmSymInstruction::ARMImmSymInstruction(TR_ARMOpCodes                    
    }
 
 TR::ARMImmSymInstruction::ARMImmSymInstruction(TR::Instruction                           *precedingInstruction,
-                                               TR_ARMOpCodes                       op,
+                                               TR::InstOpCode::Mnemonic                       op,
                                                TR::Node                            *node,
                                                uint32_t                            imm,
                                                TR::RegisterDependencyConditions *cond,
@@ -886,10 +929,10 @@ static TR::Instruction *expandBlongLessThan(TR::Node          *node,
    // resulting high word. The only interesting test on the high word is if
    // it is negative. (A zero high word does not indicate that both words
    // are zero!).
-   cursor = generateTrg1ImmInstruction(cg, ARMOp_mov, node, result, !trueValue, 0, cursor);
-   cursor = generateTrg1Src2Instruction(cg, ARMOp_sub_r, node, temp, aLo, bLo, cursor);
-   cursor = generateTrg1Src2Instruction(cg, ARMOp_sbc_r, node, temp, aHi, bHi, cursor);
-   cursor = generateTrg1ImmInstruction(cg, ARMOp_mov, node, result, trueValue, 0, cursor);
+   cursor = generateTrg1ImmInstruction(cg, TR::InstOpCode::mov, node, result, !trueValue, 0, cursor);
+   cursor = generateTrg1Src2Instruction(cg, TR::InstOpCode::sub_r, node, temp, aLo, bLo, cursor);
+   cursor = generateTrg1Src2Instruction(cg, TR::InstOpCode::sbc_r, node, temp, aHi, bHi, cursor);
+   cursor = generateTrg1ImmInstruction(cg, TR::InstOpCode::mov, node, result, trueValue, 0, cursor);
    cursor->setConditionCode(ARMConditionCodeLT);
    return cursor;
 }
@@ -997,18 +1040,18 @@ void TR::ARMControlFlowInstruction::assignRegisters(TR_RegisterKinds kindToBeAss
 //   TR::LabelSymbol *label1;
    switch(getOpCode().getOpCodeValue())
       {
-      case ARMOp_iflong:
+      case TR::InstOpCode::iflong:
          {
          int isGT = (getConditionCode() == ARMConditionCodeGT);
-         cursor = generateSrc2Instruction(cg(), ARMOp_cmp, currentNode, getSourceRegister(0), getSourceRegister(2), cursor);
+         cursor = generateSrc2Instruction(cg(), TR::InstOpCode::cmp, currentNode, getSourceRegister(0), getSourceRegister(2), cursor);
          cursor = generateConditionalBranchInstruction(cg(), currentNode, isGT ? ARMConditionCodeGT : ARMConditionCodeLT, getLabelSymbol(), cursor);
          cursor = generateConditionalBranchInstruction(cg(), currentNode, isGT ? ARMConditionCodeLT : ARMConditionCodeGT, label2, cursor);
-         cursor = generateSrc2Instruction(cg(), ARMOp_cmp, currentNode, getSourceRegister(1), getSourceRegister(3), cursor);
+         cursor = generateSrc2Instruction(cg(), TR::InstOpCode::cmp, currentNode, getSourceRegister(1), getSourceRegister(3), cursor);
          cursor = generateConditionalBranchInstruction(cg(), currentNode, isGT ? ARMConditionCodeHI : ARMConditionCodeLS, getLabelSymbol(), cursor);
-         cursor = generateLabelInstruction(cg(), ARMOp_label, currentNode, label2, cursor);
+         cursor = generateLabelInstruction(cg(), TR::InstOpCode::label, currentNode, label2, cursor);
          }
          break;
-      case ARMOp_setblong:
+      case TR::InstOpCode::setblong:
          switch (getConditionCode())
             {
             case ARMConditionCodeLT:
@@ -1044,28 +1087,28 @@ void TR::ARMControlFlowInstruction::assignRegisters(TR_RegisterKinds kindToBeAss
                break;
             case ARMConditionCodeEQ:
             case ARMConditionCodeNE:
-               cursor = generateTrg1ImmInstruction(cg(), ARMOp_mov, currentNode, getTargetRegister(0), 0, 0, cursor);
-               cursor = generateSrc2Instruction(cg(), ARMOp_cmp, currentNode, getSourceRegister(0), getSourceRegister(2), cursor);
-               cursor = generateSrc2Instruction(cg(), ARMOp_cmp, currentNode, getSourceRegister(1), getSourceRegister(3), cursor);
+               cursor = generateTrg1ImmInstruction(cg(), TR::InstOpCode::mov, currentNode, getTargetRegister(0), 0, 0, cursor);
+               cursor = generateSrc2Instruction(cg(), TR::InstOpCode::cmp, currentNode, getSourceRegister(0), getSourceRegister(2), cursor);
+               cursor = generateSrc2Instruction(cg(), TR::InstOpCode::cmp, currentNode, getSourceRegister(1), getSourceRegister(3), cursor);
                cursor->setConditionCode(ARMConditionCodeEQ);
-               cursor = generateTrg1ImmInstruction(cg(), ARMOp_mov, currentNode, getTargetRegister(0), 1, 0, cursor);
+               cursor = generateTrg1ImmInstruction(cg(), TR::InstOpCode::mov, currentNode, getTargetRegister(0), 1, 0, cursor);
                cursor->setConditionCode(getConditionCode());
                break;
             default:
                TR_ASSERT(0, "Unknown condition");
             }
          break;
-      case ARMOp_setbool:
+      case TR::InstOpCode::setbool:
          TR_ASSERT(0, "implement setbool");
          /*
          cursor = new (cg()->trHeapMemory()) TR::ARMTrg1Src2Instruction(cursor, getCmpOpValue(), currentNode, getTargetRegister(0), getSourceRegister(0), getSourceRegister(1), cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMTrg1ImmInstruction(cursor, ARMOp_li, currentNode, getTargetRegister(1), 1, cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMConditionalBranchInstruction(cursor, getOpCode2Value(), currentNode, label2, getTargetRegister(0), cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMTrg1ImmInstruction(cursor, ARMOp_li, currentNode, getTargetRegister(1), 0, cg());
-         cursor = new (cg()->trHeapMemory()) TR::ARMLabelInstruction(cursor, ARMOp_label, currentNode, label2, cg());
+         cursor = new (cg()->trHeapMemory()) TR::ARMLabelInstruction(cursor, TR::InstOpCode::label, currentNode, label2, cg());
          break;
          */
-      case ARMOp_setbflt:
+      case TR::InstOpCode::setbflt:
          TR_ASSERT(0, "implement setbflt");
          /*
          cursor = new (cg()->trHeapMemory()) TR::ARMTrg1Src2Instruction(cursor, getCmpOpValue(), currentNode, getTargetRegister(0), getSourceRegister(0), getSourceRegister(1), cg());
@@ -1073,10 +1116,10 @@ void TR::ARMControlFlowInstruction::assignRegisters(TR_RegisterKinds kindToBeAss
          cursor = new (cg()->trHeapMemory()) TR::ARMConditionalBranchInstruction(cursor, getOpCode2Value(), currentNode, label2, getTargetRegister(0), cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMConditionalBranchInstruction(cursor, getOpCode3Value(), currentNode, label2, getTargetRegister(0), cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMTrg1ImmInstruction(cursor, ARMOp_li, currentNode, getTargetRegister(1), 0, cg());
-         cursor = new (cg()->trHeapMemory()) TR::ARMLabelInstruction(cursor, ARMOp_label, currentNode, label2, cg());
+         cursor = new (cg()->trHeapMemory()) TR::ARMLabelInstruction(cursor, TR::InstOpCode::label, currentNode, label2, cg());
          break;
          */
-      case ARMOp_lcmp:
+      case TR::InstOpCode::lcmp:
          /*
           * correct:
           * cmp   hi1, hi2
@@ -1095,56 +1138,56 @@ void TR::ARMControlFlowInstruction::assignRegisters(TR_RegisterKinds kindToBeAss
           * mvnlt res, #0
           * moveq res, #0
           */
-         cursor = generateSrc2Instruction(cg(), ARMOp_cmp, currentNode, getSourceRegister(1), getSourceRegister(3), cursor);
-         cursor = generateTrg1ImmInstruction(cg(), ARMOp_mov, currentNode, getTargetRegister(0), 1, 0, cursor);
+         cursor = generateSrc2Instruction(cg(), TR::InstOpCode::cmp, currentNode, getSourceRegister(1), getSourceRegister(3), cursor);
+         cursor = generateTrg1ImmInstruction(cg(), TR::InstOpCode::mov, currentNode, getTargetRegister(0), 1, 0, cursor);
          cursor->setConditionCode(ARMConditionCodeGT);
-         cursor = generateTrg1ImmInstruction(cg(), ARMOp_mvn, currentNode, getTargetRegister(0), 0, 0, cursor);
+         cursor = generateTrg1ImmInstruction(cg(), TR::InstOpCode::mvn, currentNode, getTargetRegister(0), 0, 0, cursor);
          cursor->setConditionCode(ARMConditionCodeLT);
          cursor = generateConditionalBranchInstruction(cg(), currentNode, ARMConditionCodeNE, label2, cursor);
-         cursor = generateSrc2Instruction(cg(), ARMOp_cmp, currentNode, getSourceRegister(0), getSourceRegister(2), cursor);
-         cursor = generateTrg1ImmInstruction(cg(), ARMOp_mov, currentNode, getTargetRegister(0), 1, 0, cursor);
+         cursor = generateSrc2Instruction(cg(), TR::InstOpCode::cmp, currentNode, getSourceRegister(0), getSourceRegister(2), cursor);
+         cursor = generateTrg1ImmInstruction(cg(), TR::InstOpCode::mov, currentNode, getTargetRegister(0), 1, 0, cursor);
          cursor->setConditionCode(ARMConditionCodeHI);
-         cursor = generateTrg1ImmInstruction(cg(), ARMOp_mov, currentNode, getTargetRegister(0), 0, 0, cursor);
+         cursor = generateTrg1ImmInstruction(cg(), TR::InstOpCode::mov, currentNode, getTargetRegister(0), 0, 0, cursor);
          cursor->setConditionCode(ARMConditionCodeEQ);
-         cursor = generateTrg1ImmInstruction(cg(), ARMOp_mvn, currentNode, getTargetRegister(0), 0, 0, cursor);
+         cursor = generateTrg1ImmInstruction(cg(), TR::InstOpCode::mvn, currentNode, getTargetRegister(0), 0, 0, cursor);
          cursor->setConditionCode(ARMConditionCodeCC);
-         cursor = generateLabelInstruction(cg(), ARMOp_label, currentNode, label2, cursor);
+         cursor = generateLabelInstruction(cg(), TR::InstOpCode::label, currentNode, label2, cursor);
          break;
 /*
-      case ARMOp_flcmpl:
+      case TR::InstOpCode::flcmpl:
          cursor = new (cg()->trHeapMemory()) TR::ARMTrg1Src2Instruction(cursor, ARMOp_fcmpu, currentNode, getTargetRegister(0), getSourceRegister(0), getSourceRegister(2), cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMTrg1ImmInstruction(cursor, ARMOp_li, currentNode, getTargetRegister(1), 1, cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMConditionalBranchInstruction(cursor, ARMOp_bgt, currentNode, label2, getTargetRegister(0), cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMTrg1ImmInstruction(cursor, ARMOp_li, currentNode, getTargetRegister(1), 0, cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMConditionalBranchInstruction(cursor, ARMOp_beq, currentNode, label2, getTargetRegister(0), cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMTrg1ImmInstruction(cursor, ARMOp_li, currentNode, getTargetRegister(1), -1, cg());
-         cursor = new (cg()->trHeapMemory()) TR::ARMLabelInstruction(cursor, ARMOp_label, currentNode, label2, cg());
+         cursor = new (cg()->trHeapMemory()) TR::ARMLabelInstruction(cursor, TR::InstOpCode::label, currentNode, label2, cg());
          break;
-      case ARMOp_flcmpg:
+      case TR::InstOpCode::flcmpg:
          cursor = new (cg()->trHeapMemory()) TR::ARMTrg1Src2Instruction(cursor, ARMOp_fcmpu, currentNode, getTargetRegister(0), getSourceRegister(0), getSourceRegister(2), cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMTrg1ImmInstruction(cursor, ARMOp_li, currentNode, getTargetRegister(1), -1, cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMConditionalBranchInstruction(cursor, ARMOp_blt, currentNode, label2, getTargetRegister(0), cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMTrg1ImmInstruction(cursor, ARMOp_li, currentNode, getTargetRegister(1), 0, cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMConditionalBranchInstruction(cursor, ARMOp_beq, currentNode, label2, getTargetRegister(0), cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMTrg1ImmInstruction(cursor, ARMOp_li, currentNode, getTargetRegister(1), 1, cg());
-         cursor = new (cg()->trHeapMemory()) TR::ARMLabelInstruction(cursor, ARMOp_label, currentNode, label2, cg());
+         cursor = new (cg()->trHeapMemory()) TR::ARMLabelInstruction(cursor, TR::InstOpCode::label, currentNode, label2, cg());
          break;
-      case ARMOp_idiv:
+      case TR::InstOpCode::idiv:
          cursor = new (cg()->trHeapMemory()) TR::ARMTrg1Src2Instruction(cursor, ARMOp_eqv, currentNode, getTargetRegister(2), getTargetRegister(1), getSourceRegister(1), cg());
-         cursor = new (cg()->trHeapMemory()) TR::ARMTrg1Src2Instruction(cursor, ARMOp_and, currentNode, getTargetRegister(2), getSourceRegister(2), getTargetRegister(2), cg());
+         cursor = new (cg()->trHeapMemory()) TR::ARMTrg1Src2Instruction(cursor, TR::InstOpCode::and_, currentNode, getTargetRegister(2), getSourceRegister(2), getTargetRegister(2), cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMTrg1Src1ImmInstruction(cursor, ARMOp_cmpi4, currentNode, getTargetRegister(0), getTargetRegister(2), -1, cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMConditionalBranchInstruction(cursor, ARMOp_beq, currentNode, label2, getTargetRegister(0), cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMTrg1Src2Instruction(cursor, ARMOp_divw, currentNode, getTargetRegister(1), getSourceRegister(1), getSourceRegister(2), cg());
-         cursor = new (cg()->trHeapMemory()) TR::ARMLabelInstruction(cursor, ARMOp_label, currentNode, label2, cg());
+         cursor = new (cg()->trHeapMemory()) TR::ARMLabelInstruction(cursor, TR::InstOpCode::label, currentNode, label2, cg());
          break;
-      case ARMOp_irem:
+      case TR::InstOpCode::irem:
          cursor = new (cg()->trHeapMemory()) TR::ARMTrg1Src1ImmInstruction(cursor, ARMOp_cmpi4, currentNode, getTargetRegister(0), getSourceRegister(2), -1, cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMTrg1ImmInstruction(cursor, ARMOp_li, currentNode, getTargetRegister(1), 0, cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMConditionalBranchInstruction(cursor, ARMOp_beq, currentNode, label2, getTargetRegister(0), cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMTrg1Src2Instruction(cursor, ARMOp_divw, currentNode, getTargetRegister(2), getSourceRegister(1), getSourceRegister(2), cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMTrg1Src2Instruction(cursor, ARMOp_mullw, currentNode, getTargetRegister(2), getSourceRegister(2), getTargetRegister(2), cg());
          cursor = new (cg()->trHeapMemory()) TR::ARMTrg1Src2Instruction(cursor, ARMOp_subf, currentNode, getTargetRegister(1), getTargetRegister(2), getSourceRegister(1), cg());
-         cursor = new (cg()->trHeapMemory()) TR::ARMLabelInstruction(cursor, ARMOp_label, currentNode, label2, cg());
+         cursor = new (cg()->trHeapMemory()) TR::ARMLabelInstruction(cursor, TR::InstOpCode::label, currentNode, label2, cg());
          break;
 */
       default:

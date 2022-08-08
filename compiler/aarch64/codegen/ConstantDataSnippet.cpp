@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -64,7 +64,6 @@ TR::ARM64ConstantDataSnippet::addMetaDataForCodeAddress(uint8_t *cursor)
             symbolKind = TR::SymbolType::typeMethod;
             // intentional fall through
          case TR_ClassPointer:
-            AOTcgDiag2(comp, "add relocation (%d) cursor=%x\n", reloType, cursor);
             if (cg()->comp()->getOption(TR_UseSymbolValidationManager))
                {
                TR_ASSERT_FATAL(getData<uint8_t *>(), "Static Sym can not be NULL");
@@ -92,23 +91,33 @@ TR::ARM64ConstantDataSnippet::addMetaDataForCodeAddress(uint8_t *cursor)
                }
             break;
 
+         case TR_ConstantPool:
+            {
+            uint8_t *targetAddress = reinterpret_cast<uint8_t *>(*(reinterpret_cast<uint64_t*>(cursor)));
+            uint8_t *targetAddress2 = getNode() ? reinterpret_cast<uint8_t *>(getNode()->getInlinedSiteIndex()) : reinterpret_cast<uint8_t *>(-1);
+            TR::Relocation *relo = new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor, targetAddress,
+                                                                        targetAddress2, reloType, cg());
+            cg()->addExternalRelocation(relo, __FILE__, __LINE__, node);
+            }
+            break;
+
          default:
             break;
          }
       }
    else
       {
-      if (std::find(comp->getSnippetsToBePatchedOnClassRedefinition()->begin(), comp->getSnippetsToBePatchedOnClassRedefinition()->end(), this) != comp->getSnippetsToBePatchedOnClassRedefinition()->end())
+      if (std::find(cg()->getSnippetsToBePatchedOnClassRedefinition()->begin(), cg()->getSnippetsToBePatchedOnClassRedefinition()->end(), this) != cg()->getSnippetsToBePatchedOnClassRedefinition()->end())
          {
          cg()->jitAddPicToPatchOnClassRedefinition(getData<void *>(), static_cast<void *>(cursor));
          }
 
-      if (std::find(comp->getSnippetsToBePatchedOnClassUnload()->begin(), comp->getSnippetsToBePatchedOnClassUnload()->end(), this) != comp->getSnippetsToBePatchedOnClassUnload()->end())
+      if (std::find(cg()->getSnippetsToBePatchedOnClassUnload()->begin(), cg()->getSnippetsToBePatchedOnClassUnload()->end(), this) != cg()->getSnippetsToBePatchedOnClassUnload()->end())
          {
          cg()->jitAddPicToPatchOnClassUnload(getData<void *>(), static_cast<void *>(cursor));
          }
 
-      if (std::find(comp->getMethodSnippetsToBePatchedOnClassUnload()->begin(), comp->getMethodSnippetsToBePatchedOnClassUnload()->end(), this) != comp->getMethodSnippetsToBePatchedOnClassUnload()->end())
+      if (std::find(cg()->getMethodSnippetsToBePatchedOnClassUnload()->begin(), cg()->getMethodSnippetsToBePatchedOnClassUnload()->end(), this) != cg()->getMethodSnippetsToBePatchedOnClassUnload()->end())
          {
          auto classPointer = cg()->fe()->createResolvedMethod(cg()->trMemory(), getData<TR_OpaqueMethodBlock *>(), comp->getCurrentMethod())->classOfMethod();
          cg()->jitAddPicToPatchOnClassUnload(static_cast<void *>(classPointer), static_cast<void *>(cursor));

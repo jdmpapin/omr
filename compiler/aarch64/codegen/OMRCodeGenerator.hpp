@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -43,6 +43,26 @@ namespace OMR { typedef OMR::ARM64::CodeGenerator CodeGeneratorConnector; }
 class TR_ARM64OutOfLineCodeSection;
 namespace TR { class ARM64LinkageProperties; }
 namespace TR { class ARM64ConstantDataSnippet; }
+namespace TR { class RegisterDependencyConditions; }
+namespace TR { class DebugCounterBase; }
+
+/**
+ * @brief Answers if loading negated value is more concise
+ *
+ * @param[in] value : 32bit constant value
+ *
+ * @return true if loading negated value is more concise.
+ */
+extern bool shouldLoadNegatedConstant32(int32_t value);
+
+/**
+ * @brief Answers if loading negated value is more concise
+ *
+ * @param[in] value : 64bit constant value
+ *
+ * @return true if loading negated value is more concise.
+ */
+extern bool shouldLoadNegatedConstant64(int64_t value);
 
 /**
  * @brief Generates instructions for loading 32-bit integer value to a register
@@ -71,10 +91,11 @@ extern TR::Instruction *loadAddressConstant(TR::CodeGenerator *cg, TR::Node *nod
  * @param[in] address : address
  * @param[in] trgReg : target register
  * @param[in] reloKind : relocation kind
+ * @param[in] isClassUnloadingConst : true if the node is class unloading const
  * @param[in] cursor : instruction cursor
  * @return generated instruction
  */
-extern TR::Instruction *loadAddressConstantInSnippet(TR::CodeGenerator *cg, TR::Node *node, intptr_t address, TR::Register *trgReg, TR_ExternalRelocationTargetKind reloKind, TR::Instruction *cursor=NULL);
+extern TR::Instruction *loadAddressConstantInSnippet(TR::CodeGenerator *cg, TR::Node *node, intptr_t address, TR::Register *trgReg, TR_ExternalRelocationTargetKind reloKind, bool isClassUnloadingConst=false, TR::Instruction *cursor=NULL);
 
 /**
  * @brief Generates instructions for adding 64-bit integer value to a register
@@ -167,12 +188,6 @@ public:
     * @brief AArch64 hook to end instruction selection
     */
    void endInstructionSelection();
-
-   /**
-    * @brief AArch64 local register assignment pass
-    * @param[in] kindsToAssign : mask of register kinds to assign in this pass
-    */
-   void doRegisterAssignment(TR_RegisterKinds kindsToAssign);
 
    /**
     * @brief AArch64 binary encoding pass
@@ -321,20 +336,6 @@ public:
    void setIsOutOfLineHotPath(bool v) { _flags.set(IsOutOfLineHotPath, v);}
 
    /**
-    * @brief Returns the list of registers which is assigned first time in OOL cold path
-    *
-    * @return the list of registers which is assigned first time in OOL cold path
-    */
-   TR::list<TR::Register*> *getFirstTimeLiveOOLRegisterList() {return _firstTimeLiveOOLRegisterList;}
-   /**
-    * @brief Sets the list of registers which is assigned first time in OOL cold path
-    *
-    * @param r : the list of registers which is assigned first time in OOL cold path
-    * @return the list of registers
-    */
-   TR::list<TR::Register*> *setFirstTimeLiveOOLRegisterList(TR::list<TR::Register*> *r) {return _firstTimeLiveOOLRegisterList = r;}
-
-   /**
     * @brief Picks register
     * @param[in] regCan : register candidate
     * @param[in] barr : array of blocks
@@ -421,6 +422,9 @@ public:
    TR_GlobalRegisterNumber _gprLinkageGlobalRegisterNumbers[TR::RealRegister::NumRegisters]; // could be smaller
    TR_GlobalRegisterNumber _fprLinkageGlobalRegisterNumbers[TR::RealRegister::NumRegisters]; // could be smaller
 
+   static bool getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::ILOpCode opcode);
+   bool getSupportsOpCodeForAutoSIMD(TR::ILOpCode opcode);
+
    /**
     * @brief Answers whether a trampoline is required for a direct call instruction to
     *           reach a target address.
@@ -502,6 +506,24 @@ public:
    static uint32_t registerBitMask(int32_t reg);
 
    /**
+    * @brief Generates an inlined instruction sequence instead of a direct call
+    *
+    * @param[in]          node: node
+    * @param[inout]  resultReg: resultReg
+    *
+    * @return true if an inlined instruction sequence is generated
+    */
+   bool inlineDirectCall(TR::Node *node, TR::Register *&resultReg);
+
+   /**
+    * @brief Answers if intrinsics for the symbol is supported
+    *
+    * @param[in] symbol: symbol
+    * @return true if intrinsics for the symbol is supported
+    */
+   bool supportsNonHelper(TR::SymbolReferenceTable::CommonNonhelperSymbol symbol);
+
+   /**
     * @brief Answers whether bit operations are supported or not
     * @return true if supported, false otherwise
     */
@@ -512,6 +534,58 @@ public:
     * @return true if supported, false otherwise
     */
    bool supportsSinglePrecisionSQRT() { return true; }
+
+   /**
+    * @brief Answers whether Unsafe.copyMemory transformation is supported or not
+    * @return true if supported, false otherwise
+    */
+   bool canTransformUnsafeCopyToArrayCopy() { return true; }
+
+   /**
+    * @brief Generates instructions for incrementing debug counter
+    * @param[in] cursor:   instruction cursor
+    * @param[in] counter:  debug counter
+    * @param[in] delta:    delta for debug counter
+    * @param[in] cond:     register dependency conditions
+    *
+    * @return instruction
+    */
+   TR::Instruction *generateDebugCounterBump(TR::Instruction *cursor, TR::DebugCounterBase *counter, int32_t delta, TR::RegisterDependencyConditions *cond);
+
+   /**
+    * @brief Generates instructions for incrementing debug counter
+    * @param[in] cursor:   instruction cursor
+    * @param[in] counter:  debug counter
+    * @param[in] deltaReg: register holding delta for debug counter
+    * @param[in] cond:     register dependency conditions
+    *
+    * @return instruction
+    */
+   TR::Instruction *generateDebugCounterBump(TR::Instruction *cursor, TR::DebugCounterBase *counter, TR::Register *deltaReg, TR::RegisterDependencyConditions *cond);
+
+   /**
+    * @brief Generates instructions for incrementing debug counter
+    * @param[in] cursor:   instruction cursor
+    * @param[in] counter:  debug counter
+    * @param[in] delta:    delta for debug counter
+    * @param[in] srm:      scratch register manager
+    *
+    * @return instruction
+    */
+   TR::Instruction *generateDebugCounterBump(TR::Instruction *cursor, TR::DebugCounterBase *counter, int32_t delta, TR_ScratchRegisterManager &srm);
+
+   /**
+    * @brief Generates instructions for incrementing debug counter
+    * @param[in] cursor:   instruction cursor
+    * @param[in] counter:  debug counter
+    * @param[in] deltaReg: register holding delta for debug counter
+    * @param[in] srm:      scratch register manager
+    *
+    * @return instruction
+    */
+   TR::Instruction *generateDebugCounterBump(TR::Instruction *cursor, TR::DebugCounterBase *counter, TR::Register *deltaReg, TR_ScratchRegisterManager &srm);
+
+   bool internalPointerSupportImplemented() {return true;}
 
    private:
 

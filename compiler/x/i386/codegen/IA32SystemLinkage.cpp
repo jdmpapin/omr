@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -44,7 +44,7 @@
 #include "infra/Assert.hpp"
 #include "ras/Debug.hpp"
 #include "codegen/X86Instruction.hpp"
-#include "x/codegen/X86Ops.hpp"
+#include "codegen/InstOpCode.hpp"
 
 namespace TR { class SymbolReference; }
 namespace TR { class MemoryReference; }
@@ -260,10 +260,18 @@ TR::IA32SystemLinkage::buildVolatileAndReturnDependencies(
          returnReg = integerReturnReg = cg()->allocateCollectedReferenceRegister();
          break;
       case TR::Float:
-         returnReg = fpReturnReg = cg()->allocateSinglePrecisionRegister(TR_X87);
-         break;
       case TR::Double:
-         returnReg = fpReturnReg = cg()->allocateRegister(TR_X87);
+         /**
+          * x87 registers can no longer be added to register dependencies because
+          * the x87 register assigner has been removed.  Instead, the dispatch code
+          * must insert code to shuffle from ST0 to XMM0 manually.  The floating
+          * point result register will therefore be XMM0.
+          */
+         returnReg = fpReturnReg = cg()->allocateRegister(TR_FPR);
+         if (callNode->getDataType() == TR::Float)
+            {
+            fpReturnReg->setIsSinglePrecision();
+            }
          break;
       case TR::Int64:
          returnReg = longReturnReg = (TR::Register*)cg()->allocateRegisterPair(cg()->allocateRegister(), cg()->allocateRegister());
@@ -281,7 +289,6 @@ TR::IA32SystemLinkage::buildVolatileAndReturnDependencies(
    TR_ASSERT(_properties.getIntegerReturnRegister()  == TR::RealRegister::eax, "assertion failure");
    TR_ASSERT(_properties.getLongLowReturnRegister()  == TR::RealRegister::eax, "assertion failure");
    TR_ASSERT(_properties.getLongHighReturnRegister() == TR::RealRegister::edx, "assertion failure");
-   TR_ASSERT(_properties.getFloatReturnRegister()    == TR::RealRegister::st0, "assertion failure");
 
    if (longReturnReg)
       {
@@ -301,14 +308,10 @@ TR::IA32SystemLinkage::buildVolatileAndReturnDependencies(
 
    deps->addPostCondition(cg()->allocateRegister(), TR::RealRegister::ecx, cg());
 
-   // st0
+   // st0 -> xmm0
    if (fpReturnReg)
       {
-      deps->addPostCondition(returnReg, _properties.getFloatReturnRegister(), cg());
-      }
-   else
-      {
-      // No need for a dummy dep here because FPREGSPILL instruction takes care of it
+      deps->addPostCondition(returnReg, TR::RealRegister::xmm0, cg());
       }
 
  // The reg dependency is left open intentionally, and need to be closed by
@@ -385,7 +388,7 @@ TR::Register *TR::IA32SystemLinkage::buildDirectDispatch(TR::Node *callNode, boo
    // Call-out
    int32_t stackAdjustment = cg()->getProperties().getCallerCleanup() ? 0 : -argSize;
    cg()->resetIsLeafMethod();
-   TR::X86ImmInstruction* instr = generateImmSymInstruction(CALLImm4, callNode, (uintptr_t)methodSymbol->getMethodAddress(), methodSymRef, cg());
+   TR::X86ImmInstruction* instr = generateImmSymInstruction(TR::InstOpCode::CALLImm4, callNode, (uintptr_t)methodSymbol->getMethodAddress(), methodSymRef, cg());
    instr->setAdjustsFramePointerBy(stackAdjustment);
 
    if (cg()->getProperties().getCallerCleanup() && argSize > 0)
@@ -393,7 +396,7 @@ TR::Register *TR::IA32SystemLinkage::buildDirectDispatch(TR::Node *callNode, boo
       // Clean up arguments
       //
       generateRegImmInstruction(
-         (argSize <= 127) ? ADD4RegImms : ADD4RegImm4,
+         (argSize <= 127) ? TR::InstOpCode::ADD4RegImms : TR::InstOpCode::ADD4RegImm4,
          callNode,
          stackPointerReg,
          argSize,
@@ -401,26 +404,25 @@ TR::Register *TR::IA32SystemLinkage::buildDirectDispatch(TR::Node *callNode, boo
          );
       }
 
+   /**
+    * For floating point return values, move the value passed in ST0 to an XMM register.
+    * The x87 stack will be popped.
+    */
+   if (callNode->getDataType() == TR::Float || callNode->getDataType() == TR::Double)
+      {
+      TR::TreeEvaluator::coerceST0ToFPR(callNode, callNode->getDataType(), cg(), returnReg);
+      }
+
    // Label denoting end of dispatch code sequence; dependencies are on
    // this label rather than on the call
    //
    TR::LabelSymbol *endSystemCallSequence = generateLabelSymbol(cg());
-   generateLabelInstruction(LABEL, callNode, endSystemCallSequence, deps, cg());
+   generateLabelInstruction(TR::InstOpCode::label, callNode, endSystemCallSequence, deps, cg());
 
    // Stop using the killed registers that are not going to persist
    //
    if (deps)
       stopUsingKilledRegisters(deps, returnReg);
-
-   // If the method returns a floating point value that is not used, insert a dummy store to
-   // eventually pop the value from the floating point stack.
-   //
-   if ((callNode->getDataType() == TR::Float ||
-        callNode->getDataType() == TR::Double) &&
-       callNode->getReferenceCount() == 1)
-      {
-      generateFPSTiST0RegRegInstruction(FSTRegReg, callNode, returnReg, returnReg, cg());
-      }
 
    if (cg()->enableRegisterAssociations())
       associatePreservedRegisters(deps, returnReg);

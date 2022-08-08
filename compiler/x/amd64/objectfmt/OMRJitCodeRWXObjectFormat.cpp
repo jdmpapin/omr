@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2021, 2021 IBM Corp. and others
+ * Copyright (c) 2021, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -73,15 +73,15 @@ OMR::X86::AMD64::JitCodeRWXObjectFormat::emitFunctionCall(TR::FunctionCallData &
       // Helper call
       //
       TR::X86ImmSymInstruction *callImmSym = NULL;
-      const TR_X86OpCodes op = data.useCall ? CALLImm4 : JMP4;
+      const TR::InstOpCode::Mnemonic op = data.useCall ? TR::InstOpCode::CALLImm4 : TR::InstOpCode::JMP4;
 
       if (data.prevInstr)
          {
-         callImmSym = generateImmSymInstruction(data.prevInstr, op, targetAddress, methodSymRef, data.regDeps, data.cg);
+         callImmSym = generateImmSymInstruction(data.prevInstr, op, static_cast<int32_t>(targetAddress), methodSymRef, data.regDeps, data.cg);
          }
       else
          {
-         callImmSym = generateImmSymInstruction(op, data.callNode, targetAddress, methodSymRef, data.regDeps, data.cg);
+         callImmSym = generateImmSymInstruction(op, data.callNode, static_cast<int32_t>(targetAddress), methodSymRef, data.regDeps, data.cg);
          }
 
       if (data.adjustsFramePointerBy != 0)
@@ -98,7 +98,7 @@ OMR::X86::AMD64::JitCodeRWXObjectFormat::emitFunctionCall(TR::FunctionCallData &
       TR_ASSERT_FATAL_WITH_NODE(data.callNode, data.scratchReg, "scratch register is not available");
 
       TR_ASSERT_FATAL_WITH_NODE(data.callNode, (data.adjustsFramePointerBy == 0),
-         "frame pointer adjustment not supported for CALLReg instructions");
+         "frame pointer adjustment not supported for TR::InstOpCode::CALLReg instructions");
 
       if (targetAddress == 0)
          {
@@ -110,11 +110,11 @@ OMR::X86::AMD64::JitCodeRWXObjectFormat::emitFunctionCall(TR::FunctionCallData &
           */
          if (data.prevInstr)
             {
-            callInstr = generateImmSymInstruction(data.prevInstr, CALLImm4, 0, data.methodSymRef, data.regDeps, data.cg);
+            callInstr = generateImmSymInstruction(data.prevInstr, TR::InstOpCode::CALLImm4, 0, data.methodSymRef, data.regDeps, data.cg);
             }
          else
             {
-            callInstr = generateImmSymInstruction(CALLImm4, data.callNode, 0, data.methodSymRef, data.regDeps, data.cg);
+            callInstr = generateImmSymInstruction(TR::InstOpCode::CALLImm4, data.callNode, 0, data.methodSymRef, data.regDeps, data.cg);
             }
          }
       else
@@ -132,7 +132,7 @@ OMR::X86::AMD64::JitCodeRWXObjectFormat::emitFunctionCall(TR::FunctionCallData &
                {
                loadInstr = generateRegImm64SymInstruction(
                   data.prevInstr,
-                  MOV8RegImm64,
+                  TR::InstOpCode::MOV8RegImm64,
                   data.scratchReg,
                   targetAddress,
                   data.methodSymRef,
@@ -141,7 +141,7 @@ OMR::X86::AMD64::JitCodeRWXObjectFormat::emitFunctionCall(TR::FunctionCallData &
             else
                {
                loadInstr = generateRegImm64SymInstruction(
-                  MOV8RegImm64,
+                  TR::InstOpCode::MOV8RegImm64,
                   data.callNode,
                   data.scratchReg,
                   targetAddress,
@@ -164,7 +164,7 @@ OMR::X86::AMD64::JitCodeRWXObjectFormat::emitFunctionCall(TR::FunctionCallData &
                {
                loadInstr = generateRegImm64Instruction(
                   data.prevInstr,
-                  MOV8RegImm64,
+                  TR::InstOpCode::MOV8RegImm64,
                   data.scratchReg,
                   targetAddress,
                   data.cg,
@@ -173,7 +173,7 @@ OMR::X86::AMD64::JitCodeRWXObjectFormat::emitFunctionCall(TR::FunctionCallData &
             else
                {
                loadInstr = generateRegImm64Instruction(
-                  MOV8RegImm64,
+                  TR::InstOpCode::MOV8RegImm64,
                   data.callNode,
                   data.scratchReg,
                   targetAddress,
@@ -184,7 +184,7 @@ OMR::X86::AMD64::JitCodeRWXObjectFormat::emitFunctionCall(TR::FunctionCallData &
             data.out_materializeTargetAddressInstr = loadInstr;
             }
 
-         const TR_X86OpCodes op = data.useCall ? CALLReg : JMPReg;
+         const TR::InstOpCode::Mnemonic op = data.useCall ? TR::InstOpCode::CALLReg : TR::InstOpCode::JMPReg;
          if (data.prevInstr)
             {
             /**
@@ -211,18 +211,18 @@ uint8_t *
 OMR::X86::AMD64::JitCodeRWXObjectFormat::encodeFunctionCall(TR::FunctionCallData &data)
    {
    const uint8_t op = data.useCall ? 0xe8 : 0xe9;   // CALL rel32 | JMP rel32
-   *data.bufferAddress++ = op;
+   *data.bufferAddress = op;
 
    int32_t disp32 = 0;
 
    if (data.methodSymRef && data.methodSymRef->getSymbol()->castToMethodSymbol()->isHelper())
       {
-      disp32 = data.cg->branchDisplacementToHelperOrTrampoline(data.bufferAddress+4, data.methodSymRef);
+      disp32 = data.cg->branchDisplacementToHelperOrTrampoline(data.bufferAddress, data.methodSymRef);
       }
    else
       {
       intptr_t targetAddress = reinterpret_cast<intptr_t>(data.methodSymRef->getMethodAddress());
-      intptr_t nextInstructionAddress = reinterpret_cast<intptr_t>(data.bufferAddress + 4);
+      intptr_t nextInstructionAddress = reinterpret_cast<intptr_t>(data.bufferAddress + 5);
 
       TR_ASSERT_FATAL(data.cg->comp()->target().cpu.isTargetWithinRIPRange(targetAddress, nextInstructionAddress),
                       "Target function address %" OMR_PRIxPTR " not reachable from %" OMR_PRIxPTR, targetAddress, data.bufferAddress);
@@ -230,7 +230,7 @@ OMR::X86::AMD64::JitCodeRWXObjectFormat::encodeFunctionCall(TR::FunctionCallData
       disp32 = static_cast<int32_t>(targetAddress - nextInstructionAddress);
       }
 
-   *(reinterpret_cast<int32_t *>(data.bufferAddress)) = disp32;
+   *(reinterpret_cast<int32_t *>(++data.bufferAddress)) = disp32;
 
    data.out_encodedMethodAddressLocation = data.bufferAddress;
 

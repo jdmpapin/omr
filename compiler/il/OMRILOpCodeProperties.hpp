@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -71,5 +71,58 @@
 
 #include "il/Opcodes.enum"
 #undef OPCODE_MACRO
+
+
+#define VECTOR_OPERATION_MACRO(\
+   vectorOperation, \
+   name, \
+   prop1, \
+   prop2, \
+   prop3, \
+   prop4, \
+   dataType, \
+   typeProps, \
+   childProps, \
+   swapChildrenVectorOperation, \
+   reverseBranchVectorOperation, \
+   boolCompareOpcode, \
+   ifCompareOpcode, ...) \
+   \
+   { \
+   (TR::ILOpCodes)TR::vectorOperation,          \
+   name, \
+   prop1, \
+   prop2, \
+   prop3, \
+   prop4, \
+   dataType, \
+   typeProps, \
+   childProps, \
+   (TR::ILOpCodes)swapChildrenVectorOperation,    \
+   (TR::ILOpCodes)reverseBranchVectorOperation, \
+   boolCompareOpcode, \
+   ifCompareOpcode, \
+   },
+
+
+   {
+     /* .operation               = */ (TR::ILOpCodes)TR::vBadOperation,
+     /* .name                    = */ "vBadOperation",
+     /* .properties1             = */ 0,
+     /* .properties2             = */ 0,
+     /* .properties3             = */ 0,
+     /* .properties4             = */ 0,
+     /* .dataType                = */ TR::NoType,
+     /* .typeProperties          = */ 0,
+     /* .childProperties         = */ ILChildProp::NoChildren,
+     /* .swapChildrenOperation   = */ (TR::ILOpCodes)TR::vBadOperation,
+     /* .reverseBranchOperation  = */ (TR::ILOpCodes)TR::vBadOperation,
+     /* .booleanCompareOpCode    = */ TR::BadILOp,
+     /* .ifCompareOpCode         = */ TR::BadILOp,
+   },
+
+
+#include "il/VectorOperations.enum"
+#undef VECTOR_OPERATION_MACRO
 
 #endif

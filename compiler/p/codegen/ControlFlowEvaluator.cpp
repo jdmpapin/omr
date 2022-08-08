@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -1594,7 +1594,7 @@ TR::Register *OMR::Power::TreeEvaluator::ireturnEvaluator(TR::Node *node, TR::Co
                 linkageProperties.getIntegerReturnRegister();
    TR::RegisterDependencyConditions *dependencies = new (cg->trHeapMemory()) TR::RegisterDependencyConditions(1, 0, cg->trMemory());
    dependencies->addPreCondition(returnRegister, machineReturnRegister);
-   generateAdminInstruction(cg, TR::InstOpCode::ret, node);
+   generateAdminInstruction(cg, TR::InstOpCode::retn, node);
    generateDepInstruction(cg, TR::InstOpCode::blr, node, dependencies);
    cg->decReferenceCount(node->getFirstChild());
    return NULL;
@@ -1626,7 +1626,7 @@ TR::Register *OMR::Power::TreeEvaluator::lreturnEvaluator(TR::Node *node, TR::Co
       dependencies->addPreCondition(lowReg, machineLowReturnRegister);
       dependencies->addPreCondition(highReg, machineHighReturnRegister);
       }
-   generateAdminInstruction(cg, TR::InstOpCode::ret, node);
+   generateAdminInstruction(cg, TR::InstOpCode::retn, node);
    generateDepInstruction(cg, TR::InstOpCode::blr, node, dependencies);
    cg->decReferenceCount(node->getFirstChild());
    return NULL;
@@ -1636,7 +1636,7 @@ TR::Register *OMR::Power::TreeEvaluator::lreturnEvaluator(TR::Node *node, TR::Co
 
 TR::Register *OMR::Power::TreeEvaluator::returnEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   generateAdminInstruction(cg, TR::InstOpCode::ret, node);
+   generateAdminInstruction(cg, TR::InstOpCode::retn, node);
    generateInstruction(cg, TR::InstOpCode::blr, node);
    return NULL;
    }
@@ -1932,8 +1932,7 @@ if (cg->profiledPointersRequireRelocation() && secondChild->getOpCodeValue() == 
    int64_t      value = secondChild->getOpCode().isLoadConst() ? secondChild->get64bitIntegralValue() : 0;
    bool         cannotInline = false;
     if ((firstChild->getOpCodeValue() == TR::instanceof) &&
-        !(comp->getOption(TR_OptimizeForSpace) ||
-          comp->getOption(TR_DisableInlineIfInstanceOf)) &&
+        !comp->getOption(TR_DisableInlineIfInstanceOf) &&
         (firstChild->getRegister() == NULL) &&
         (node->getReferenceCount() <=1) &&
         secondChild->getOpCode().isLoadConst() &&
@@ -2507,7 +2506,7 @@ TR::Register *intEqualityEvaluator(TR::Node *node, bool flipResult, TR::DataType
 
          if (src2Value != 0)
             {
-            if (type == TR::Int64)
+            if (type == TR::Int64 || (type == TR::Address && cg->comp()->target().is64Bit()))
                addConstantToLong(node, src1Reg, -src2Value, trgReg, cg);
             else
                addConstantToInteger(node, trgReg, src1Reg, -src2Value, cg);

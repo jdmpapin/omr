@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2016 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -52,6 +52,7 @@ typedef struct OMRSTFLEFacilities {
 	uint64_t dw1;
 	uint64_t dw2;
 	uint64_t dw3;
+	uint64_t dw4;
 } OMRSTFLEFacilities;
 
 typedef struct OMRSTFLECache {
@@ -64,7 +65,7 @@ typedef struct OMRPortPlatformGlobals {
 	char *si_osVersion;
 	uintptr_t vmem_pageSize[OMRPORT_VMEM_PAGESIZE_COUNT]; /** <0 terminated array of supported page sizes */
 	uintptr_t vmem_pageFlags[OMRPORT_VMEM_PAGESIZE_COUNT]; /** <0 terminated array of flags describing type of the supported page sizes */
-	BOOLEAN isRunningInContainer;
+	uint32_t sysinfoControlFlags;
 #if defined(OMR_ENV_DATA64)
 	J9SubAllocateHeapMem32 subAllocHeapMem32;
 #endif
@@ -89,7 +90,7 @@ typedef struct OMRPortPlatformGlobals {
 #define PPG_si_osVersion (portLibrary->portGlobals->platformGlobals.si_osVersion)
 #define PPG_vmem_pageSize (portLibrary->portGlobals->platformGlobals.vmem_pageSize)
 #define PPG_vmem_pageFlags (portLibrary->portGlobals->platformGlobals.vmem_pageFlags)
-#define PPG_isRunningInContainer (portLibrary->portGlobals->platformGlobals.isRunningInContainer)
+#define PPG_sysinfoControlFlags (portLibrary->portGlobals->platformGlobals.sysinfoControlFlags)
 #if defined(OMR_ENV_DATA64)
 #define PPG_mem_mem32_subAllocHeapMem32 (portLibrary->portGlobals->platformGlobals.subAllocHeapMem32)
 #endif

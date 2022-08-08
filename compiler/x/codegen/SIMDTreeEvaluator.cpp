@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2019 IBM Corp. and others
+ * Copyright (c) 2017, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -29,7 +29,7 @@
 #include "il/Node_inlines.hpp"
 #include "infra/Assert.hpp"
 #include "x/codegen/X86Instruction.hpp"
-#include "x/codegen/X86Ops.hpp"
+#include "codegen/InstOpCode.hpp"
 
 namespace TR { class Instruction; }
 
@@ -42,7 +42,7 @@ static TR::MemoryReference* ConvertToPatchableMemoryReference(TR::MemoryReferenc
       // Hence, the unresolved memory reference must be evaluated into a register first.
       //
       TR::Register* tempReg = cg->allocateRegister();
-      generateRegMemInstruction(LEARegMem(cg), node, tempReg, mr, cg);
+      generateRegMemInstruction(TR::InstOpCode::LEARegMem(), node, tempReg, mr, cg);
       mr = generateX86MemoryReference(tempReg, 0, cg);
       cg->stopUsingRegister(tempReg);
       }
@@ -75,20 +75,31 @@ TR::Register* OMR::X86::TreeEvaluator::SIMDloadEvaluator(TR::Node* node, TR::Cod
    tempMR = ConvertToPatchableMemoryReference(tempMR, node, cg);
    TR::Register* resultReg = cg->allocateRegister(TR_VRF);
 
-   TR_X86OpCodes opCode = BADIA32Op;
+   TR::InstOpCode::Mnemonic opCode = TR::InstOpCode::MOVDQURegMem;
+   OMR::X86::Encoding encoding = Legacy;
+
    switch (node->getSize())
       {
       case 16:
-         opCode = MOVDQURegMem;
+         if (cg->comp()->target().cpu.supportsAVX())
+            encoding = VEX_L128;
+         break;
+      case 32:
+         TR_ASSERT_FATAL(cg->comp()->target().cpu.supportsAVX(), "256-bit vload requires AVX");
+         encoding = VEX_L256;
+         break;
+      case 64:
+         TR_ASSERT_FATAL(cg->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_AVX512F), "512-bit vload requires AVX-512");
+         encoding = EVEX_L512;
          break;
       default:
          if (cg->comp()->getOption(TR_TraceCG))
             traceMsg(cg->comp(), "Unsupported fill size: Node = %p\n", node);
-         TR_ASSERT(false, "Unsupported fill size");
+         TR_ASSERT_FATAL(false, "Unsupported fill size");
          break;
       }
 
-   TR::Instruction* instr = generateRegMemInstruction(opCode, node, resultReg, tempMR, cg);
+   TR::Instruction* instr = generateRegMemInstruction(opCode, node, resultReg, tempMR, cg, encoding);
    if (node->getOpCode().isIndirect())
       cg->setImplicitExceptionPoint(instr);
    node->setRegister(resultReg);
@@ -103,20 +114,31 @@ TR::Register* OMR::X86::TreeEvaluator::SIMDstoreEvaluator(TR::Node* node, TR::Co
    tempMR = ConvertToPatchableMemoryReference(tempMR, node, cg);
    TR::Register* valueReg = cg->evaluate(valueNode);
 
-   TR_X86OpCodes opCode = BADIA32Op;
+   TR::InstOpCode::Mnemonic opCode = TR::InstOpCode::MOVDQUMemReg;
+   OMR::X86::Encoding encoding = Legacy;
+
    switch (node->getSize())
       {
       case 16:
-         opCode = MOVDQUMemReg;
+         if (cg->comp()->target().cpu.supportsAVX())
+            encoding = VEX_L128;
+         break;
+      case 32:
+         TR_ASSERT_FATAL(cg->comp()->target().cpu.supportsAVX(), "256-bit vstore requires AVX");
+         encoding = VEX_L256;
+         break;
+      case 64:
+          TR_ASSERT_FATAL(cg->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_AVX512F), "512-bit vstore requires AVX-512");
+         encoding = EVEX_L512;
          break;
       default:
          if (cg->comp()->getOption(TR_TraceCG))
             traceMsg(cg->comp(), "Unsupported fill size: Node = %p\n", node);
-         TR_ASSERT(false, "Unsupported fill size");
+         TR_ASSERT_FATAL(false, "Unsupported fill size");
          break;
       }
 
-   TR::Instruction* instr = generateMemRegInstruction(opCode, node, tempMR, valueReg, cg);
+   TR::Instruction* instr = generateMemRegInstruction(opCode, node, tempMR, valueReg, cg, encoding);
 
    cg->decReferenceCount(valueNode);
    tempMR->decNodeReferenceCounts(cg);
@@ -127,37 +149,40 @@ TR::Register* OMR::X86::TreeEvaluator::SIMDstoreEvaluator(TR::Node* node, TR::Co
 
 TR::Register* OMR::X86::TreeEvaluator::SIMDsplatsEvaluator(TR::Node* node, TR::CodeGenerator* cg)
    {
+   TR_ASSERT_FATAL_WITH_NODE(node, node->getDataType().getVectorLength() == TR::VectorLength128,
+                   "Only 128-bit vectors are supported %s", node->getDataType().toString());
+
    TR::Node* childNode = node->getChild(0);
    TR::Register* childReg = cg->evaluate(childNode);
 
    TR::Register* resultReg = cg->allocateRegister(TR_VRF);
-   switch (node->getDataType())
+   switch (node->getDataType().getVectorElementType())
       {
-      case TR::VectorInt32:
-         generateRegRegInstruction(MOVDRegReg4, node, resultReg, childReg, cg);
-         generateRegRegImmInstruction(PSHUFDRegRegImm1, node, resultReg, resultReg, 0x00, cg); // 00 00 00 00 shuffle xxxA to AAAA
+      case TR::Int32:
+         generateRegRegInstruction(TR::InstOpCode::MOVDRegReg4, node, resultReg, childReg, cg);
+         generateRegRegImmInstruction(TR::InstOpCode::PSHUFDRegRegImm1, node, resultReg, resultReg, 0x00, cg); // 00 00 00 00 shuffle xxxA to AAAA
          break;
-      case TR::VectorInt64:
+      case TR::Int64:
          if (cg->comp()->target().is32Bit())
             {
             TR::Register* tempVectorReg = cg->allocateRegister(TR_VRF);
-            generateRegRegInstruction(MOVDRegReg4, node, tempVectorReg, childReg->getHighOrder(), cg);
-            generateRegImmInstruction(PSLLQRegImm1, node, tempVectorReg, 0x20, cg);
-            generateRegRegInstruction(MOVDRegReg4, node, resultReg, childReg->getLowOrder(), cg);
-            generateRegRegInstruction(PORRegReg, node, resultReg, tempVectorReg, cg);
+            generateRegRegInstruction(TR::InstOpCode::MOVDRegReg4, node, tempVectorReg, childReg->getHighOrder(), cg);
+            generateRegImmInstruction(TR::InstOpCode::PSLLQRegImm1, node, tempVectorReg, 0x20, cg);
+            generateRegRegInstruction(TR::InstOpCode::MOVDRegReg4, node, resultReg, childReg->getLowOrder(), cg);
+            generateRegRegInstruction(TR::InstOpCode::PORRegReg, node, resultReg, tempVectorReg, cg);
             cg->stopUsingRegister(tempVectorReg);
             }
          else
             {
-            generateRegRegInstruction(MOVQRegReg8, node, resultReg, childReg, cg);
+            generateRegRegInstruction(TR::InstOpCode::MOVQRegReg8, node, resultReg, childReg, cg);
             }
-         generateRegRegImmInstruction(PSHUFDRegRegImm1, node, resultReg, resultReg, 0x44, cg); // 01 00 01 00 shuffle xxBA to BABA
+         generateRegRegImmInstruction(TR::InstOpCode::PSHUFDRegRegImm1, node, resultReg, resultReg, 0x44, cg); // 01 00 01 00 shuffle xxBA to BABA
          break;
-      case TR::VectorFloat:
-         generateRegRegImmInstruction(PSHUFDRegRegImm1, node, resultReg, childReg, 0x00, cg); // 00 00 00 00 shuffle xxxA to AAAA
+      case TR::Float:
+         generateRegRegImmInstruction(TR::InstOpCode::PSHUFDRegRegImm1, node, resultReg, childReg, 0x00, cg); // 00 00 00 00 shuffle xxxA to AAAA
          break;
-      case TR::VectorDouble:
-         generateRegRegImmInstruction(PSHUFDRegRegImm1, node, resultReg, childReg, 0x44, cg); // 01 00 01 00 shuffle xxBA to BABA
+      case TR::Double:
+         generateRegRegImmInstruction(TR::InstOpCode::PSHUFDRegRegImm1, node, resultReg, childReg, 0x44, cg); // 01 00 01 00 shuffle xxBA to BABA
          break;
       default:
          if (cg->comp()->getOption(TR_TraceCG))
@@ -171,7 +196,7 @@ TR::Register* OMR::X86::TreeEvaluator::SIMDsplatsEvaluator(TR::Node* node, TR::C
    return resultReg;
    }
 
-TR::Register* OMR::X86::TreeEvaluator::SIMDgetvelemEvaluator(TR::Node* node, TR::CodeGenerator* cg)
+TR::Register* OMR::X86::TreeEvaluator::SIMDvgetelemEvaluator(TR::Node* node, TR::CodeGenerator* cg)
    {
    TR::Node* firstChild = node->getChild(0);
    TR::Node* secondChild = node->getChild(1);
@@ -182,17 +207,21 @@ TR::Register* OMR::X86::TreeEvaluator::SIMDgetvelemEvaluator(TR::Node* node, TR:
    TR::Register* highResReg = 0;
 
    int32_t elementCount = -1;
-   switch (firstChild->getDataType())
+
+   TR_ASSERT_FATAL_WITH_NODE(node, firstChild->getDataType().getVectorLength() == TR::VectorLength128,
+                   "Only 128-bit vectors are supported %s", node->getDataType().toString());
+
+   switch (firstChild->getDataType().getVectorElementType())
       {
-      case TR::VectorInt8:
-      case TR::VectorInt16:
-         TR_ASSERT(false, "unsupported vector type %s in SIMDgetvelemEvaluator.\n", firstChild->getDataType().toString());
+      case TR::Int8:
+      case TR::Int16:
+         TR_ASSERT(false, "unsupported vector type %s in SIMDvgetelemEvaluator.\n", firstChild->getDataType().toString());
          break;
-      case TR::VectorInt32:
+      case TR::Int32:
          elementCount = 4;
          resReg = cg->allocateRegister();
          break;
-      case TR::VectorInt64:
+      case TR::Int64:
          elementCount = 2;
          if (cg->comp()->target().is32Bit())
             {
@@ -205,16 +234,16 @@ TR::Register* OMR::X86::TreeEvaluator::SIMDgetvelemEvaluator(TR::Node* node, TR:
             resReg = cg->allocateRegister();
             }
          break;
-      case TR::VectorFloat:
+      case TR::Float:
          elementCount = 4;
          resReg = cg->allocateSinglePrecisionRegister(TR_FPR);
          break;
-      case TR::VectorDouble:
+      case TR::Double:
          elementCount = 2;
          resReg = cg->allocateRegister(TR_FPR);
          break;
       default:
-         TR_ASSERT(false, "unrecognized vector type %s in SIMDgetvelemEvaluator.\n", firstChild->getDataType().toString());
+         TR_ASSERT(false, "unrecognized vector type %s in SIMDvgetelemEvaluator.\n", firstChild->getDataType().toString());
       }
 
    if (secondChild->getOpCode().isLoadConst())
@@ -241,7 +270,7 @@ TR::Register* OMR::X86::TreeEvaluator::SIMDgetvelemEvaluator(TR::Node* node, TR:
           * for float, dstReg and resReg are the same because PSHUFD can work directly with TR_FPR registers
           * for Int32, the result needs to be moved from the dstReg to a TR_GPR resReg.
           */
-         if (TR::VectorInt32 == firstChild->getDataType())
+         if (TR::Int32 == firstChild->getDataType().getVectorElementType())
             {
             dstReg = cg->allocateRegister(TR_VRF);
             }
@@ -256,16 +285,16 @@ TR::Register* OMR::X86::TreeEvaluator::SIMDgetvelemEvaluator(TR::Node* node, TR:
           */
          if (3 == elem)
             {
-            generateRegRegInstruction(MOVDQURegReg, node, dstReg, srcVectorReg, cg);
+            generateRegRegInstruction(TR::InstOpCode::MOVDQURegReg, node, dstReg, srcVectorReg, cg);
             }
          else
             {
-            generateRegRegImmInstruction(PSHUFDRegRegImm1, node, dstReg, srcVectorReg, shufconst, cg);
+            generateRegRegImmInstruction(TR::InstOpCode::PSHUFDRegRegImm1, node, dstReg, srcVectorReg, shufconst, cg);
             }
 
-         if (TR::VectorInt32 == firstChild->getDataType())
+         if (TR::Int32 == firstChild->getDataType().getVectorElementType())
             {
-            generateRegRegInstruction(MOVDReg4Reg, node, resReg, dstReg, cg);
+            generateRegRegInstruction(TR::InstOpCode::MOVDReg4Reg, node, resReg, dstReg, cg);
             cg->stopUsingRegister(dstReg);
             }
          }
@@ -275,11 +304,11 @@ TR::Register* OMR::X86::TreeEvaluator::SIMDgetvelemEvaluator(TR::Node* node, TR:
           * for double, dstReg and resReg are the same because PSHUFD can work directly with TR_FPR registers
           * for Int64, the result needs to be moved from the dstReg to a TR_GPR resReg.
           */
-         if (TR::VectorInt64 == firstChild->getDataType())
+         if (TR::Int64 == firstChild->getDataType().getVectorElementType())
             {
             dstReg = cg->allocateRegister(TR_VRF);
             }
-         else //TR::VectorDouble == firstChild->getDataType()
+         else //TR::Double == firstChild->getDataType().getVectorElementType()
             {
             dstReg = resReg;
             }
@@ -293,24 +322,24 @@ TR::Register* OMR::X86::TreeEvaluator::SIMDgetvelemEvaluator(TR::Node* node, TR:
           */
          if (1 == elem)
             {
-            generateRegRegInstruction(MOVDQURegReg, node, dstReg, srcVectorReg, cg);
+            generateRegRegInstruction(TR::InstOpCode::MOVDQURegReg, node, dstReg, srcVectorReg, cg);
             }
          else //0 == elem
             {
-            generateRegRegImmInstruction(PSHUFDRegRegImm1, node, dstReg, srcVectorReg, 0x0e, cg);
+            generateRegRegImmInstruction(TR::InstOpCode::PSHUFDRegRegImm1, node, dstReg, srcVectorReg, 0x0e, cg);
             }
 
-         if (TR::VectorInt64 == firstChild->getDataType())
+         if (TR::Int64 == firstChild->getDataType().getVectorElementType())
             {
             if (cg->comp()->target().is32Bit())
                {
-               generateRegRegInstruction(MOVDReg4Reg, node, lowResReg, dstReg, cg);
-               generateRegRegImmInstruction(PSHUFDRegRegImm1, node, dstReg, srcVectorReg, (0 == elem) ? 0x03 : 0x01, cg);
-               generateRegRegInstruction(MOVDReg4Reg, node, highResReg, dstReg, cg);
+               generateRegRegInstruction(TR::InstOpCode::MOVDReg4Reg, node, lowResReg, dstReg, cg);
+               generateRegRegImmInstruction(TR::InstOpCode::PSHUFDRegRegImm1, node, dstReg, srcVectorReg, (0 == elem) ? 0x03 : 0x01, cg);
+               generateRegRegInstruction(TR::InstOpCode::MOVDReg4Reg, node, highResReg, dstReg, cg);
                }
             else
                {
-               generateRegRegInstruction(MOVQReg8Reg, node, resReg, dstReg, cg);
+               generateRegRegInstruction(TR::InstOpCode::MOVQReg8Reg, node, resReg, dstReg, cg);
                }
             cg->stopUsingRegister(dstReg);
             }
@@ -319,7 +348,7 @@ TR::Register* OMR::X86::TreeEvaluator::SIMDgetvelemEvaluator(TR::Node* node, TR:
    else
       {
       //TODO: handle non-constant second child case
-      TR_ASSERT(false, "non-const second child not currently supported in SIMDgetvelemEvaluator.\n");
+      TR_ASSERT(false, "non-const second child not currently supported in SIMDvgetelemEvaluator.\n");
       }
 
    node->setRegister(resReg);

@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -52,28 +52,9 @@ target_link_libraries(omrgctest
 	${OMR_PORT_LIB}
 )
 
-# TODO check linker flags from makefile are ported properly.
-# Relevant section from makefile below
-#ifeq (linux,$(OMR_HOST_OS))
-	#MODULE_SHARED_LIBS += rt pthread
-#endif
-#ifeq (osx,$(OMR_HOST_OS))
-	#MODULE_SHARED_LIBS += iconv pthread
-#endif
-#ifeq (aix,$(OMR_HOST_OS))
-	#MODULE_SHARED_LIBS += iconv perfstat
-#endif
-#ifeq (win,$(OMR_HOST_OS))
-	#MODULE_SHARED_LIBS += ws2_32 shell32 Iphlpapi psapi pdh
-#endif
-
-if(OMR_HOST_OS STREQUAL "zos")
-	target_link_libraries(omrgctest j9a2e)
-endif()
-
 set_property(TARGET omrgctest PROPERTY FOLDER fvtest)
 
-add_test(NAME gctest
-	COMMAND omrgctest "--gtest_filter=gcFunctionalTest*" "--gtest_output=xml:${CMAKE_CURRENT_BINARY_DIR}/omrgctest-results.xml"
+omr_add_test(NAME gctest
+	COMMAND $<TARGET_FILE:omrgctest> "--gtest_filter=gcFunctionalTest*" "--gtest_output=xml:${CMAKE_CURRENT_BINARY_DIR}/omrgctest-results.xml"
 	WORKING_DIRECTORY "${omr_SOURCE_DIR}"
 )

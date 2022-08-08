@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -146,15 +146,6 @@ static TR::InstOpCode::Mnemonic getFloatToIntLogicalConversion(TR::CodeGenerator
       }
 
    return convertOpCode;
-   }
-
-static bool
-strictFPForMultiplyAndAdd(TR::CodeGenerator * cg)
-   {
-   //return 'true' - multiply-and-add is not a valid operation to perform with current JLS
-   //return (isStrictFP(cg->comp()->getCurrentMethod()) ||
-   //        cg->comp()->assumeDefaultStrictFP());
-   return true;
    }
 
 inline TR::Register *
@@ -436,7 +427,7 @@ convertToFixed(TR::Node * node, TR::CodeGenerator * cg)
 
       generateRRInstruction(cg, compareOp, node, srcRegister, srcRegister);
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
       cFlowRegionStart->setStartInternalControlFlow();
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BO, node, cFlowRegionEnd);   //NaN results in CC3
 
@@ -452,7 +443,7 @@ convertToFixed(TR::Node * node, TR::CodeGenerator * cg)
       deps->addPostCondition(srcRegister, TR::RealRegister::AssignAny);
 
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionEnd, deps);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionEnd, deps);
       cFlowRegionEnd->setEndInternalControlFlow();
       }
 
@@ -540,7 +531,7 @@ convertFromFixed(TR::Node * node, TR::CodeGenerator * cg)
       generateRRInstruction(cg, TR::InstOpCode::LTR, node, srcRegister, srcRegister);
       // If positive or zero, done BNL
       // otherwise, add double constant 0x41f0000000000000 to converted value
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
       cFlowRegionStart->setStartInternalControlFlow();
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BNL, node, skipAddLabel);
       switch(node->getDataType())
@@ -559,7 +550,7 @@ convertFromFixed(TR::Node * node, TR::CodeGenerator * cg)
          }
       if(isFloatTgt)
          generateRRInstruction(cg, TR::InstOpCode::LEDBR, node, targetRegister, targetRegister);
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, skipAddLabel, deps);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, skipAddLabel, deps);
       skipAddLabel->setEndInternalControlFlow();
       }
 
@@ -865,7 +856,7 @@ OMR::Z::TreeEvaluator::floatRemHelper(TR::Node * node, TR::CodeGenerator * cg)
       {
       generateRRInstruction(cg, TR::InstOpCode::LER, node, targetRegister, firstRegister);
       generateRRFInstruction(cg, TR::InstOpCode::DIEBR, node, targetRegister, secondRegister, tempRegister, 0x5);
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
       cFlowRegionStart->setStartInternalControlFlow();
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_MASK3, node, labelNotExact);    // remainder not exact
       generateRXEInstruction(cg, TR::InstOpCode::TCEB, node, targetRegister, generateS390MemoryReference(0x800, cg), 0);  // c is +0 ?
@@ -881,7 +872,7 @@ OMR::Z::TreeEvaluator::floatRemHelper(TR::Node * node, TR::CodeGenerator * cg)
       {
       generateRRInstruction(cg, TR::InstOpCode::LDR, node, targetRegister, firstRegister);
       generateRRFInstruction(cg, TR::InstOpCode::DIDBR, node, targetRegister, secondRegister, tempRegister, 0x5);
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
       cFlowRegionStart->setStartInternalControlFlow();
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_MASK3, node, labelNotExact);    // remainder not exact
       generateRXEInstruction(cg, TR::InstOpCode::TCDB, node, targetRegister, generateS390MemoryReference(0x800, cg), 0);  // c is +0 ?
@@ -899,7 +890,7 @@ OMR::Z::TreeEvaluator::floatRemHelper(TR::Node * node, TR::CodeGenerator * cg)
    cg->getS390OutOfLineCodeSectionList().push_front(outlinedSlowPath);
    outlinedSlowPath->swapInstructionListsWithCompilation();
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelNotExact);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelNotExact);
    callNode->setChild(0, node->getFirstChild());
    callNode->setChild(1, node->getSecondChild());
    TR::Linkage *linkage = cg->createLinkage(TR_System);
@@ -918,7 +909,7 @@ OMR::Z::TreeEvaluator::floatRemHelper(TR::Node * node, TR::CodeGenerator * cg)
    postDeps->addPostCondition(firstRegister, TR::RealRegister::AssignAny);
    postDeps->addPostCondition(secondRegister, TR::RealRegister::AssignAny);
    postDeps->addPostCondition(tempRegister, TR::RealRegister::AssignAny);
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelOK, postDeps);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelOK, postDeps);
    labelOK->setEndInternalControlFlow();
    node->setRegister(targetRegister);
    cg->stopUsingRegister(firstRegister);
@@ -959,10 +950,13 @@ FPtoIntBitsTypeCoercionHelper(TR::Node * node, TR::CodeGenerator * cg)
    TR::Register * sourceReg = NULL;
    TR::DataType nodeType = node->getDataType();
 
-   if (node->getFirstChild()->isSingleRefUnevaluated() &&
-          node->getFirstChild()->getOpCode().isLoadVar())
+   TR::Node* firstChild = node->getFirstChild();
+
+   if (firstChild->getOpCode().isLoadVar() &&
+       firstChild->getReferenceCount() == 1 &&
+       firstChild->getRegister() == NULL)
       {
-      TR::MemoryReference * tempmemref = TR::MemoryReference::create(cg, node->getFirstChild());
+      TR::MemoryReference * tempmemref = TR::MemoryReference::create(cg, firstChild);
       if (nodeType == TR::Int64)
          targetReg = genericLoadHelper<64, 64, MemReg>(node, cg, tempmemref, NULL, false, true);
       else
@@ -971,7 +965,7 @@ FPtoIntBitsTypeCoercionHelper(TR::Node * node, TR::CodeGenerator * cg)
    else
       {
       // Evaluate child, where sourceReg should be an FPR.
-      sourceReg = cg->evaluate(node->getFirstChild());
+      sourceReg = cg->evaluate(firstChild);
       TR::SymbolReference * f2iSR = cg->allocateLocalTemp(nodeType);
 
       // It seems the FP instruction performance is sub-optimal (i.e. LGDR), and we're better
@@ -1027,7 +1021,7 @@ FPtoIntBitsTypeCoercionHelper(TR::Node * node, TR::CodeGenerator * cg)
 
        generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BZ, node, cleansedNumber);
 
-       generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
+       generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
        cFlowRegionStart->setStartInternalControlFlow();
 
        if (nodeType == TR::Int64)
@@ -1035,7 +1029,7 @@ FPtoIntBitsTypeCoercionHelper(TR::Node * node, TR::CodeGenerator * cg)
        else
           targetReg = genericLoadHelper<32, 32, MemReg>(node, cg, nanMemRef, NULL, false, true);
 
-       generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cleansedNumber, deps);
+       generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cleansedNumber, deps);
        cleansedNumber->setEndInternalControlFlow();
 
        cg->stopUsingRegister(targetFPR);
@@ -1046,7 +1040,7 @@ FPtoIntBitsTypeCoercionHelper(TR::Node * node, TR::CodeGenerator * cg)
           }
        }
     node->setRegister(targetReg);
-    cg->decReferenceCount(node->getFirstChild());
+    cg->decReferenceCount(firstChild);
 
     if (node->getNumChildren() == 2)
        cg->decReferenceCount(node->getSecondChild());
@@ -1192,12 +1186,12 @@ l2dHelper64(TR::Node * node, TR::CodeGenerator * cg)
       // If positive or zero, done BNL
       //otherwise, add double constant representing 2^64 to converted value
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
       cFlowRegionStart->setStartInternalControlFlow();
       cursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BNL, node, skipAddLabel);
       deps->addPostCondition(targetFloatRegister, TR::RealRegister::AssignAny);
       generateS390ImmOp(cg, TR::InstOpCode::ADB, node, targetFloatRegister, targetFloatRegister, (int64_t) CONSTANT64(0x43f0000000000000), deps);
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, skipAddLabel, deps);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, skipAddLabel, deps);
       skipAddLabel->setEndInternalControlFlow();
       }
 
@@ -1242,7 +1236,7 @@ l2fHelper64(TR::Node * node, TR::CodeGenerator * cg)
       generateRRInstruction(cg, TR::InstOpCode::LTGR, node, longRegister, longRegister);
       // If positive or zero, done BNL
       //otherwise, add double constant 0x43f0000000000000 to converted value
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
       cFlowRegionStart->setStartInternalControlFlow();
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BNL, node, skipAddLabel);
       deps->addPostCondition(targetFloatRegister, TR::RealRegister::AssignAny);
@@ -1251,7 +1245,7 @@ l2fHelper64(TR::Node * node, TR::CodeGenerator * cg)
       generateRRInstruction(cg, TR::InstOpCode::LDEBR, node, targetFloatRegister, targetFloatRegister);
       generateS390ImmOp(cg, TR::InstOpCode::ADB, node, targetFloatRegister, targetFloatRegister, (int64_t) CONSTANT64(0x43f0000000000000), deps);
       generateRRInstruction(cg, TR::InstOpCode::LEDBR, node, targetFloatRegister, targetFloatRegister);
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, skipAddLabel, deps);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, skipAddLabel, deps);
       skipAddLabel->setEndInternalControlFlow();
       }
 
@@ -1310,7 +1304,7 @@ f2lHelper64(TR::Node * node, TR::CodeGenerator * cg)
    generateRRInstruction(cg, TR::InstOpCode::CEBR, node, floatRegister, floatRegister);
    // if NaN, then done
    // this path requires internal control flow
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
    cFlowRegionStart->setStartInternalControlFlow();
    generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BO, node, cFlowRegionEnd);
    dependencies = new (cg->trHeapMemory()) TR::RegisterDependencyConditions(0, 2, cg);
@@ -1319,7 +1313,7 @@ f2lHelper64(TR::Node * node, TR::CodeGenerator * cg)
 
    // not NaN, do the conversion
    generateRRFInstruction(cg, TR::InstOpCode::CGEBR, node, targetRegister, floatRegister, (int8_t) 0x5, true);
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionEnd, dependencies);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionEnd, dependencies);
    cFlowRegionEnd->setEndInternalControlFlow();
 
    node->setRegister(targetRegister);
@@ -1383,7 +1377,7 @@ d2lHelper64(TR::Node * node, TR::CodeGenerator * cg)
       // if NaN
       generateRXEInstruction(cg, TR::InstOpCode::TCDB, node, floatRegister, generateS390MemoryReference(0x00F, cg), 0);
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
       cFlowRegionStart->setStartInternalControlFlow();
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BNZ, node, label1);
       dependencies = new (cg->trHeapMemory()) TR::RegisterDependencyConditions(0, 2, cg);
@@ -1397,7 +1391,7 @@ d2lHelper64(TR::Node * node, TR::CodeGenerator * cg)
 
    if (checkNaN)
       {// done label
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, label1, dependencies);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, label1, dependencies);
       label1->setEndInternalControlFlow();
       }
    node->setRegister(targetRegister);

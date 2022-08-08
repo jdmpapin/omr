@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -59,6 +59,8 @@ public:
 
    static TR::CPU detect(OMRPortLibrary * const omrPortLib);
 
+   static void initializeTargetProcessorInfo();
+
    TR_X86CPUIDBuffer *queryX86TargetCPUID();
    const char *getX86ProcessorVendorId();
    uint32_t getX86ProcessorSignature();
@@ -91,16 +93,23 @@ public:
       }
    bool isGenuineIntel();
    bool isAuthenticAMD();
-   
+
    bool requiresLFence();
-   bool supportsFCOMIInstructions();
    bool supportsMFence();
    bool supportsLFence();
    bool supportsSFence();
    bool prefersMultiByteNOP();
    bool supportsAVX();
-   bool testOSForSSESupport() { return false; }
-   
+
+   /**
+    * It is generally safe to assume that all modern operating systems
+    * support preserving the SSE state.  However, to be strictly
+    * correct, this support should be verified.
+    *
+    * See issue #5964.
+    */
+   bool testOSForSSESupport() { return true; }
+
    /**
     * @brief Determines whether 32bit integer rotate is available
     *
@@ -130,6 +139,12 @@ public:
    bool supportsFeature(uint32_t feature);
    bool supports_feature_old_api(uint32_t feature);
    bool supports_feature_test(uint32_t feature);
+
+   /**
+    * @brief Returns name of the current processor
+    * @returns const char* string representing the name of the current processor
+    */
+   const char* getProcessorName();
    };
 }
 

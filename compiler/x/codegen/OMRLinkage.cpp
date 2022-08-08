@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -23,7 +23,6 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include "env/StackMemoryRegion.hpp"
 #include "codegen/CodeGenerator.hpp"
 #include "env/FrontEnd.hpp"
 #include "codegen/GCStackAtlas.hpp"
@@ -60,7 +59,7 @@
 #include "infra/List.hpp"
 #include "ras/Debug.hpp"
 #include "codegen/X86Instruction.hpp"
-#include "x/codegen/X86Ops.hpp"
+#include "codegen/InstOpCode.hpp"
 #include "x/codegen/X86SystemLinkage.hpp"
 
 #ifdef DEBUG
@@ -75,7 +74,7 @@ OMR::X86::Linkage::Linkage(TR::CodeGenerator *cg) :
    {
    // Initialize the movOp table based on preferred load instructions for this target.
    //
-   TR_X86OpCodes op = cg->getXMMDoubleLoadOpCode() ? cg->getXMMDoubleLoadOpCode() : MOVSDRegMem;
+   TR::InstOpCode::Mnemonic op = cg->getXMMDoubleLoadOpCode() ? cg->getXMMDoubleLoadOpCode() : TR::InstOpCode::MOVSDRegMem;
    _movOpcodes[RegMem][Float8] = op;
    }
 
@@ -88,7 +87,6 @@ void OMR::X86::Linkage::mapCompactedStack(TR::ResolvedMethodSymbol *method)
    int32_t                           offsetToFirstParm = self()->getOffsetToFirstParm();
    uint32_t                          stackIndex        = linkage.getOffsetToFirstLocal();
    TR::GCStackAtlas                  *atlas             = self()->cg()->getStackAtlas();
-   int32_t                           i;
 
    uint8_t pointerSize  = linkage.getPointerSize();
    uint8_t pointerShift = linkage.getPointerShift();
@@ -101,16 +99,13 @@ void OMR::X86::Linkage::mapCompactedStack(TR::ResolvedMethodSymbol *method)
    bool     isFirst  = false;
 #endif
 
-   {
-   TR::StackMemoryRegion stackMemoryRegion(*self()->trMemory());
-
    int32_t *colourToOffsetMap =
       (int32_t *) self()->trMemory()->allocateStackMemory(self()->cg()->getLocalsIG()->getNumberOfColoursUsedToColour() * sizeof(int32_t));
 
    uint32_t *colourToSizeMap =
       (uint32_t *) self()->trMemory()->allocateStackMemory(self()->cg()->getLocalsIG()->getNumberOfColoursUsedToColour() * sizeof(uint32_t));
 
-   for (i=0; i<self()->cg()->getLocalsIG()->getNumberOfColoursUsedToColour(); i++)
+   for (IGNodeColour i = 0; i < self()->cg()->getLocalsIG()->getNumberOfColoursUsedToColour(); i++)
       {
       colourToOffsetMap[i] = -1;
       colourToSizeMap[i] = 0;
@@ -121,7 +116,7 @@ void OMR::X86::Linkage::mapCompactedStack(TR::ResolvedMethodSymbol *method)
    TR_IGNode    *igNode;
    uint32_t      size;
    IGNodeColour  colour;
-   for (i=0; i<self()->cg()->getLocalsIG()->getNumNodes(); i++)
+   for (IGNodeIndex i = 0; i < self()->cg()->getLocalsIG()->getNumNodes(); i++)
       {
       igNode = self()->cg()->getLocalsIG()->getNodeTable(i);
       colour = igNode->getColour();
@@ -302,8 +297,6 @@ void OMR::X86::Linkage::mapCompactedStack(TR::ResolvedMethodSymbol *method)
 
    atlas->setLocalBaseOffset(lowGCOffset);
    atlas->setParmBaseOffset(atlas->getParmBaseOffset() + offsetToFirstParm);
-
-   } // scope of the stack memory region
 
    if (debug("reportCL"))
       {
@@ -637,7 +630,7 @@ TR::Register *OMR::X86::Linkage::findReturnRegisterFromDependencies(TR::Node    
                                                                bool                                 isDirect)
    {
    TR::Register *returnRegister = NULL;
-   TR_X86RegisterDependencyGroup *postConditions = dependencies->getPostConditions();
+   TR::RegisterDependencyGroup *postConditions = dependencies->getPostConditions();
    switch (callNode->getDataType())
       {
       case TR::Int32:
@@ -676,40 +669,12 @@ TR::Register *OMR::X86::Linkage::findReturnRegisterFromDependencies(TR::Node    
 
 // FIXME: This should be replaced by thunk code in the PicBuilder.
 //
-void OMR::X86::Linkage::coerceFPReturnValueToXMMR(TR::Node                             *callNode,
-                                              TR::RegisterDependencyConditions  *dependencies,
-                                              TR::MethodSymbol                     *methodSymbol,
-                                              TR::Register                         *returnReg)
+void OMR::X86::Linkage::coerceFPReturnValueToXMMR(TR::Node *callNode,
+                                              TR::RegisterDependencyConditions *dependencies,
+                                              TR::MethodSymbol *methodSymbol,
+                                              TR::Register *returnReg)
    {
-   TR_ASSERT(returnReg->getKind() == TR_FPR,
-          "cannot coerce FP return values into non-XMM registers\n");
-
-   // A call to an FP-returning INL method that preserves all registers
-   // expects the return register in dependency 0.
-   //
-   //   int depNum = ((methodSymbol->isVMInternalNative() || methodSymbol->isJITInternalNative()) && methodSymbol->preservesAllRegisters()) ? 0 : 3;
-   //   TR::Register *fpReg = dependencies->getPostConditions()->getRegisterDependency(depNum)->getRegister();
-
-   TR::Register *fpReg = callNode->getOpCode().isFloat() ? self()->cg()->allocateSinglePrecisionRegister(TR_X87)
-                                                        : self()->cg()->allocateRegister(TR_X87);
-   fpReg->incTotalUseCount();
-
-   if (callNode->getOpCode().isFloat())
-      {
-   TR::MemoryReference  *tempMR = self()->machine()->getDummyLocalMR(TR::Float);
-      generateFPMemRegInstruction(FSTPMemReg, callNode, tempMR, fpReg, self()->cg());
-      generateRegMemInstruction(MOVSSRegMem, callNode, returnReg, generateX86MemoryReference(*tempMR, 0, self()->cg()), self()->cg());
-      }
-   else
-      {
-      TR_ASSERT(callNode->getOpCode().isDouble(),
-             "cannot return non-floating-point values in XMM registers\n");
-      TR::MemoryReference  *tempMR = self()->machine()->getDummyLocalMR(TR::Double);
-      generateFPMemRegInstruction(DSTPMemReg, callNode, tempMR, fpReg, self()->cg());
-      generateRegMemInstruction(self()->cg()->getXMMDoubleLoadOpCode(), callNode, returnReg, generateX86MemoryReference(*tempMR, 0, self()->cg()), self()->cg());
-      }
-
-   self()->cg()->stopUsingRegister(fpReg);
+   TR::TreeEvaluator::coerceST0ToFPR(callNode, callNode->getDataType(), self()->cg(), returnReg);
    }
 
 
@@ -783,10 +748,10 @@ OMR::X86::Linkage::getTargetFromComp()
    }
 
 
-TR_X86OpCodes OMR::X86::Linkage::_movOpcodes[NumMovOperandTypes][NumMovDataTypes] =
+TR::InstOpCode::Mnemonic OMR::X86::Linkage::_movOpcodes[NumMovOperandTypes][NumMovDataTypes] =
    {
    //    Int4         Int8        Float4         Float8
-   {    S4MemReg,    S8MemReg,  MOVSSMemReg,  MOVSDMemReg}, // MemReg
-   {    L4RegMem,    L8RegMem,  MOVSSRegMem,  MOVSDRegMem}, // RegMem
-   {  MOV4RegReg,  MOV8RegReg,  MOVSSRegReg,  MOVSDRegReg}, // RegReg
+   {    TR::InstOpCode::S4MemReg,    TR::InstOpCode::S8MemReg,  TR::InstOpCode::MOVSSMemReg,  TR::InstOpCode::MOVSDMemReg}, // MemReg
+   {    TR::InstOpCode::L4RegMem,    TR::InstOpCode::L8RegMem,  TR::InstOpCode::MOVSSRegMem,  TR::InstOpCode::MOVSDRegMem}, // RegMem
+   {  TR::InstOpCode::MOV4RegReg,  TR::InstOpCode::MOV8RegReg,  TR::InstOpCode::MOVSSRegReg,  TR::InstOpCode::MOVSDRegReg}, // RegReg
    };

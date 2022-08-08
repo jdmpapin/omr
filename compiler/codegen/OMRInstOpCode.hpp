@@ -45,7 +45,7 @@ class InstOpCode
 
    enum Mnemonic
       {
-      #include "codegen/InstOpCodeEnum.hpp"
+      #include "codegen/InstOpCode.enum"
       NumOpCodes
       };
 
@@ -61,18 +61,6 @@ class InstOpCode
 
    static int32_t getNumOpCodes() { return NumOpCodes; }
 
-   /*
-    * Length of the encoded binary representation of an opcode.
-    */
-   static uint8_t length(Mnemonic m);
-
-   /*
-    * Copies the encoded binary representation of a given mnemonic to the
-    * provided buffer.  This will copy at most length() bytes.
-    *
-    * Returns the cursor position after the bytes have been copied.
-    */
-   static uint8_t *copyBinaryToBuffer(Mnemonic m, uint8_t *cursor);
    static const char *getOpCodeName(Mnemonic m);
    static const char *getMnemonicName(Mnemonic m);
 

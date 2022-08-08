@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -73,7 +73,7 @@ TR::FILE *TR_Debug::findLogFile(TR::Options *cmdLineOptions, TR::OptionSet *optS
       {
       for (TR::OptionSet *prev = cmdLineOptions->getFirstOptionSet(); prev && prev != optSet; prev = prev->getNext())
          {
-         fileName = prev->getOptions()->getLogFileName();
+         fileName = prev->getOptions() ? prev->getOptions()->getLogFileName() : NULL;
          if (fileName && !STRICMP(logFileName, fileName))
             {
             logFile = prev->getOptions()->getLogFile();
@@ -129,7 +129,7 @@ void TR_Debug::findLogFile(const char *logFileName, TR::Options *cmdOptions, TR:
       }
    for (TR::OptionSet *optSet = cmdOptions->getFirstOptionSet(); optSet; optSet = optSet->getNext())
       {
-      if (optSet->getOptions()->getLogFileName() && !STRICMP(logFileName, optSet->getOptions()->getLogFileName()))
+      if (optSet->getOptions() && optSet->getOptions()->getLogFileName() && !STRICMP(logFileName, optSet->getOptions()->getLogFileName()))
          {
          if (index < arraySize)
             optionsArray[index] = optSet->getOptions();
@@ -148,9 +148,6 @@ static bool regexExcludes(TR::SimpleRegex *regex, const char *string)
 
 void TR_Debug::dumpOptionHelp(TR::OptionTable * firstOjit, TR::OptionTable * firstOfe, TR::SimpleRegex *nameFilter)
    {
-   TR_VerboseLog::vlogAcquire();
-   char *p;
-   int32_t i, lastPos;
    static int optionLineWidth=0;
 
    if (!optionLineWidth)
@@ -164,6 +161,7 @@ void TR_Debug::dumpOptionHelp(TR::OptionTable * firstOjit, TR::OptionTable * fir
 
    TR::OptionTable * entry;
 
+   TR_VerboseLog::CriticalSection vlogLock;
    TR_VerboseLog::writeLine(TR_Vlog_INFO,"Usage: -Xjit:option([,option]*)\n");
 
    for (int32_t cat = 0; optionCategories[cat]; cat++)
@@ -220,9 +218,9 @@ void TR_Debug::dumpOptionHelp(TR::OptionTable * firstOjit, TR::OptionTable * fir
          // Set up the option name
          //
          if (!entry->length)
-            entry->length = strlen(entry->name);
+            entry->length = static_cast<int32_t>(strlen(entry->name));
          TR_VerboseLog::write("%*s%s", OPTION_NAME_INDENT, " ", entry->name);
-         int32_t currentColumn = entry->length+OPTION_NAME_INDENT;
+         int32_t currentColumn = static_cast<int32_t>(entry->length+OPTION_NAME_INDENT);
 
          // Set up the argument text
          //
@@ -278,7 +276,6 @@ void TR_Debug::dumpOptionHelp(TR::OptionTable * firstOjit, TR::OptionTable * fir
       }
    TR_VerboseLog::writeLine("");
    TR_VerboseLog::writeLine(TR_Vlog_INFO, "");
-   TR_VerboseLog::vlogRelease();
    }
 
 void
@@ -292,7 +289,6 @@ TR_Debug::dumpOptions(
       void * feBase,
       TR_FrontEnd *fe)
    {
-   TR_VerboseLog::vlogAcquire();
    TR::OptionTable *entry;
    char *base;
    TR::Compilation* comp = TR::comp();
@@ -302,6 +298,8 @@ TR_Debug::dumpOptions(
 #ifdef J9_PROJECT_SPECIFIC
    TR_J9VMBase *fej9 = (TR_J9VMBase *)fe;
 #endif
+
+   TR_VerboseLog::CriticalSection vlogLock;
 
    if(!vmCounter)
       TR_VerboseLog::writeLine(TR_Vlog_INFO,"_______________________________________");
@@ -455,7 +453,12 @@ TR_Debug::dumpOptions(
          if (entry->msg[0] == 'P')
             printIt = (value != 0);
          }
-#endif
+      else if (entry->fcn == TR::Options::setJitConfigNumericValue)
+         {
+         value = (intptr_t)(*((char**)(base+entry->parm1)));
+         printIt = true;
+         }
+#endif /* J9_PROJECT_SPECIFIC */
       else if (entry->fcn == TR::Options::disableOptimization)
          {
          value = ((TR::Options *)base)->isDisabled((OMR::Optimizations)entry->parm1);
@@ -512,8 +515,6 @@ TR_Debug::dumpOptions(
       {
       TR_VerboseLog::writeLine("");
       TR_VerboseLog::writeLine(TR_Vlog_INFO, "     compressedRefs shiftAmount=%d", TR::Compiler->om.compressedReferenceShift());
-      TR_VerboseLog::writeLine(TR_Vlog_INFO, "     compressedRefs isLowMemHeap=%d", (TR::Compiler->vm.heapBaseAddress() == 0));
       }
 #endif
-      TR_VerboseLog::vlogRelease();
    }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -254,41 +254,6 @@ bool TR_GlobalRegisterAllocator::isTypeAvailable(TR::SymbolReference *symref)
    return allocateForType(symref->getSymbol()->getDataType());
    }
 
-static void changeHeapBaseConstToLoad(TR::Compilation *comp, TR::SymbolReference * &autoSymRef, TR::Node *node, vcount_t visitCount)
-   {
-   if (node->getVisitCount() == visitCount)
-      return;
-
-   node->setVisitCount(visitCount);
-
-   if ((node->getOpCodeValue() == TR::lconst) &&
-       (node->getLongInt() == TR::Compiler->vm.heapBaseAddress()))
-      {
-      if (!autoSymRef)
-         {
-         autoSymRef = comp->getSymRefTab()->createTemporary(comp->getMethodSymbol(), node->getDataType());
-         TR::TreeTop *startTree = comp->getStartTree();
-         TR::TreeTop *nextTree = startTree->getNextTreeTop();
-
-         TR::Node *lconstNode = TR::Node::create(node, TR::lconst, 0, 0);
-         lconstNode->setLongInt(node->getLongInt());
-         TR::Node *storeNode = TR::Node::createWithSymRef(TR::lstore, 1, 1, lconstNode, autoSymRef);
-         TR::TreeTop *tt = TR::TreeTop::create(comp, storeNode);
-         startTree->join(tt);
-         tt->join(nextTree);
-         }
-
-      TR::Node::recreate(node, TR::lload);
-      node->setSymbolReference(autoSymRef);
-      }
-
-   for (int32_t i = 0; i < node->getNumChildren(); ++i)
-      {
-      TR::Node *child = node->getChild(i);
-      changeHeapBaseConstToLoad(comp, autoSymRef, child, visitCount);
-      }
-   }
-
 void
 TR_GlobalRegisterAllocator::visitNodeForDataType(TR::Node *node)
    {
@@ -349,20 +314,6 @@ TR_GlobalRegisterAllocator::perform()
    comp()->getOptimizer()->setResetExitsGRA(0);
    comp()->getOptimizer()->setSeenBlocksGRA(0);
    comp()->getOptimizer()->setSuccessorBitsGRA(0);
-
-   if (comp()->useCompressedPointers() &&
-       comp()->cg()->materializesHeapBase() &&
-       TR::Compiler->vm.heapBaseAddress() != 0)
-      {
-      TR::SymbolReference *autoSymRef = NULL;
-      vcount_t visitCount = comp()->incVisitCount();
-      for (TR::TreeTop * tt = comp()->getStartTree(); tt; tt = tt->getNextTreeTop())
-         {
-         changeHeapBaseConstToLoad(comp(), autoSymRef, tt->getNode(), visitCount);
-         }
-      if (autoSymRef)
-         comp()->getSymRefTab()->aliasBuilder.createAliasInfo();
-      }
 
    bool globalFPAssignmentDone = false;
    _appendBlock = 0;
@@ -1095,47 +1046,6 @@ TR_GlobalRegisterAllocator::transformNode(
          if (!value)
             {
             value = gr->getValue();
-            if (comp()->cg()->needToAvoidCommoningInGRA() && value &&
-                (!value->getOpCode().isLoadReg() && !value->getOpCode().isLoadVar()) &&
-                 (symbol->getDataType() == TR::Float
-                  || symbol->getDataType() == TR::Double
-#ifdef J9_PROJECT_SPECIFIC
-                  || symbol->getDataType() == TR::DecimalFloat
-                  || symbol->getDataType() == TR::DecimalDouble
-                  || symbol->getDataType() == TR::DecimalLongDouble
-#endif
-                  ) &&
-                (!parent->getOpCode().isStore() &&
-                 (parent->getOpCodeValue() != TR::fRegStore) &&
-                 (parent->getOpCodeValue() != TR::dRegStore) &&
-                 (parent->getOpCodeValue() != TR::GlRegDeps) &&
-                 (parent->getOpCodeValue() != TR::PassThrough)))
-
-               {
-
-               StoresInBlockInfo *storeInfo = findRegInStoreInfo(gr);
-               TR_ASSERT(storeInfo, "Must have a store before a load in this block\n");
-
-               if (!storeInfo->_origStoreExists)
-                  {
-                  TR::TreeTop *regStoreTT = storeInfo->_lastStore;
-                  TR::Node *regStoreNode =  regStoreTT->getNode();
-                  TR_RegisterCandidate * rc = gr->getCurrentRegisterCandidate();
-                  TR_ASSERT(rc, "must have a candidate\n");
-                  TR::Node * store = TR::Node::createWithSymRef(comp()->il.opCodeForDirectStore(rc->getDataType()), 1, 1, regStoreNode->getFirstChild(),rc->getSymbolReference());
-
-                  if (regStoreNode->needsSignExtension())
-                     store->setNeedsSignExtension(true);
-
-                  TR::TreeTop *prevTree = regStoreTT->getPrevTreeTop();
-                  TR::TreeTop *storeTreeTop = TR::TreeTop::create(comp(), prevTree, store);
-                  storeInfo->_origStoreExists = true;
-                  }
-               dumpOptDetails(comp(), "%s did not change load var [%p] of symRef#%d to load reg because float/double issues\n",
-                              OPT_DETAILS, node, node->getSymbolReference()->getReferenceNumber());
-               return;
-
-               }
 
             dumpOptDetails(comp(), "%s change load var [%p] of %s symRef#%d to load reg\n",
                            OPT_DETAILS,
@@ -1338,11 +1248,6 @@ TR_GlobalRegisterAllocator::transformNode(
          bool fpStore = false;
          if (symRef->getSymbol()->getDataType() == TR::Float
              || symRef->getSymbol()->getDataType() == TR::Double
-#ifdef J9_PROJECT_SPECIFIC
-             || symRef->getSymbol()->getDataType() == TR::DecimalFloat
-             || symRef->getSymbol()->getDataType() == TR::DecimalDouble
-             || symRef->getSymbol()->getDataType() == TR::DecimalLongDouble
-#endif
              )
             fpStore = true;
 
@@ -1422,19 +1327,6 @@ TR_GlobalRegisterAllocator::transformNode(
             if (avoidDuplicateFPStackValues)
                return;
             StoresInBlockInfo *storeInfo = NULL;
-            if (comp()->cg()->needToAvoidCommoningInGRA() && fpStore)
-               {
-
-               storeInfo = findRegInStoreInfo(gr);
-               if (!storeInfo)
-                  {
-                  storeInfo = new (trStackMemory()) StoresInBlockInfo;
-                  _storesInBlockInfo.add(storeInfo);
-                  }
-               storeInfo->_gr = gr;
-               storeInfo->_lastStore = tt;
-               storeInfo->_origStoreExists = false;
-               }
 
             bool storeIntact = false;
             TR::Node *newValueNode = NULL;
@@ -1475,8 +1367,6 @@ TR_GlobalRegisterAllocator::transformNode(
                TR::TreeTop *prevTree = tt->getPrevTreeTop();
                TR::TreeTop *newStore = TR::TreeTop::create(comp(), prevTree, newNode);
                node = newNode;
-               if (comp()->cg()->needToAvoidCommoningInGRA() && fpStore)
-                  storeInfo->_origStoreExists = true;
                }
             else
                {
@@ -1966,7 +1856,6 @@ TR_GlobalRegisterAllocator::prepareForBlockExit(
              !registerIsLiveAcrossEdge(exitTreeTop, exitNode, block, extgr, successorBlock, i))
             {
             TR_RegisterCandidate * rc = extgr->getCurrentRegisterCandidate();
-            TR::CFGEdge *succ;
             bool liveOnSomeSucc = true;
             if (liveOnSomeSucc &&
                 !extgr->getAutoContainsRegisterValue() &&
@@ -3526,11 +3415,6 @@ void TR_GlobalRegisterAllocator::offerAllFPAutosAndParmsAsCandidates(TR::Block *
 
             if ((sym->getDataType() == TR::Float
                  || sym->getDataType() == TR::Double
-#ifdef J9_PROJECT_SPECIFIC
-                 || sym->getDataType() == TR::DecimalFloat
-                 || sym->getDataType() == TR::DecimalDouble
-                 || sym->getDataType() == TR::DecimalLongDouble
-#endif
                  ) &&
                  isTypeAvailable(symRef) &&
                 ((sym->isAuto() && methodSymbol->getAutomaticList().find(sym->castToAutoSymbol())) ||
@@ -4551,17 +4435,9 @@ TR_LiveRangeSplitter::splitLiveRanges(TR_StructureSubGraphNode *structureNode)
                   TR::DataType dt = symRef->getSymbol()->getDataType();
                   bool isFloat = (dt == TR::Float
                                   || dt == TR::Double
-#ifdef J9_PROJECT_SPECIFIC
-                                  || dt == TR::DecimalFloat
-                                  || dt == TR::DecimalDouble
-                                  || dt == TR::DecimalLongDouble
-#endif
                                   );
                   int32_t numRegsForCandidate = 1;
                   if ((symRef->getSymbol()->getType().isInt64() && comp()->target().is32Bit())
-#ifdef J9_PROJECT_SPECIFIC
-                      || symRef->getSymbol()->getType().isLongDouble()
-#endif
                       )
                      numRegsForCandidate = 2;
 
@@ -4661,11 +4537,6 @@ TR_LiveRangeSplitter::replaceAutosUsedIn(
             TR::DataType dt = symRef->getSymbol()->getDataType();
             bool isFloat = (dt == TR::Float
                             || dt == TR::Double
-#ifdef J9_PROJECT_SPECIFIC
-                            || dt == TR::DecimalFloat
-                            || dt == TR::DecimalDouble
-                            || dt == TR::DecimalLongDouble
-#endif
                             );
             int32_t numRegsForCandidate = 1;
             if (node->requiresRegisterPair(comp()))

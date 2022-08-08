@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -289,12 +289,13 @@ TR::ARM64SystemLinkage::mapStack(TR::ResolvedMethodSymbol *method)
 
    stackIndex = 8; // [sp+0] is for link register
 
-   // map non-long/double automatics
+   // map non-long/double, and non-vector automatics
    while (localCursor != NULL)
       {
       if (localCursor->getGCMapIndex() < 0
           && localCursor->getDataType() != TR::Int64
-          && localCursor->getDataType() != TR::Double)
+          && localCursor->getDataType() != TR::Double
+          && !localCursor->getDataType().isVector())
          {
          localCursor->setOffset(stackIndex);
          stackIndex += (localCursor->getSize() + 3) & (~3);
@@ -317,6 +318,21 @@ TR::ARM64SystemLinkage::mapStack(TR::ResolvedMethodSymbol *method)
          }
       localCursor = automaticIterator.getNext();
       }
+
+   stackIndex += (stackIndex & 0x8) ? 8 : 0; // align to 16 bytes
+   automaticIterator.reset();
+   localCursor = automaticIterator.getFirst();
+
+   // map vector automatics
+   while (localCursor != NULL)
+      {
+      if (localCursor->getDataType().isVector())
+         {
+         localCursor->setOffset(stackIndex);
+         stackIndex += (localCursor->getSize() + 15) & (~15);
+         }
+      localCursor = automaticIterator.getNext();
+      }
    method->setLocalMappingCursor(stackIndex);
 
    // allocate space for preserved registers (x19-x28, v8-v15)
@@ -333,7 +349,7 @@ TR::ARM64SystemLinkage::mapStack(TR::ResolvedMethodSymbol *method)
       TR::RealRegister *rr = machine->getRealRegister((TR::RealRegister::RegNum)r);
       if (rr->getHasBeenAssignedInMethod())
          {
-         stackIndex += 8;
+         stackIndex += 16;
          }
       }
 
@@ -522,7 +538,7 @@ TR::ARM64SystemLinkage::createPrologue(TR::Instruction *cursor, List<TR::Paramet
    // save link register (x30)
    if (machine->getLinkRegisterKilled())
       {
-      TR::MemoryReference *stackSlot = new (trHeapMemory()) TR::MemoryReference(sp, 0, codeGen);
+      TR::MemoryReference *stackSlot = TR::MemoryReference::createWithDisplacement(codeGen, sp, 0);
       cursor = generateMemSrc1Instruction(cg(), TR::InstOpCode::strimmx, firstNode, stackSlot, machine->getRealRegister(TR::RealRegister::x30), cursor);
       }
 
@@ -533,7 +549,7 @@ TR::ARM64SystemLinkage::createPrologue(TR::Instruction *cursor, List<TR::Paramet
       TR::RealRegister *rr = machine->getRealRegister((TR::RealRegister::RegNum)r);
       if (rr->getHasBeenAssignedInMethod())
          {
-         TR::MemoryReference *stackSlot = new (trHeapMemory()) TR::MemoryReference(sp, offset, codeGen);
+         TR::MemoryReference *stackSlot = TR::MemoryReference::createWithDisplacement(codeGen, sp, offset);
          cursor = generateMemSrc1Instruction(cg(), TR::InstOpCode::strimmx, firstNode, stackSlot, rr, cursor);
          offset += 8;
          }
@@ -543,9 +559,9 @@ TR::ARM64SystemLinkage::createPrologue(TR::Instruction *cursor, List<TR::Paramet
       TR::RealRegister *rr = machine->getRealRegister((TR::RealRegister::RegNum)r);
       if (rr->getHasBeenAssignedInMethod())
          {
-         TR::MemoryReference *stackSlot = new (trHeapMemory()) TR::MemoryReference(sp, offset, codeGen);
-         cursor = generateMemSrc1Instruction(cg(), TR::InstOpCode::vstrimmd, firstNode, stackSlot, rr, cursor);
-         offset += 8;
+         TR::MemoryReference *stackSlot = TR::MemoryReference::createWithDisplacement(codeGen, sp, offset);
+         cursor = generateMemSrc1Instruction(cg(), TR::InstOpCode::vstrimmq, firstNode, stackSlot, rr, cursor);
+         offset += 16;
          }
       }
    cursor = copyParametersToHomeLocation(cursor);
@@ -569,7 +585,7 @@ TR::ARM64SystemLinkage::createEpilogue(TR::Instruction *cursor)
       TR::RealRegister *rr = machine->getRealRegister((TR::RealRegister::RegNum)r);
       if (rr->getHasBeenAssignedInMethod())
          {
-         TR::MemoryReference *stackSlot = new (trHeapMemory()) TR::MemoryReference(sp, offset, codeGen);
+         TR::MemoryReference *stackSlot = TR::MemoryReference::createWithDisplacement(codeGen, sp, offset);
          cursor = generateTrg1MemInstruction(cg(), TR::InstOpCode::ldrimmx, lastNode, rr, stackSlot, cursor);
          offset += 8;
          }
@@ -579,9 +595,9 @@ TR::ARM64SystemLinkage::createEpilogue(TR::Instruction *cursor)
       TR::RealRegister *rr = machine->getRealRegister((TR::RealRegister::RegNum)r);
       if (rr->getHasBeenAssignedInMethod())
          {
-         TR::MemoryReference *stackSlot = new (trHeapMemory()) TR::MemoryReference(sp, offset, codeGen);
-         cursor = generateTrg1MemInstruction(cg(), TR::InstOpCode::vldrimmd, lastNode, rr, stackSlot, cursor);
-         offset += 8;
+         TR::MemoryReference *stackSlot = TR::MemoryReference::createWithDisplacement(codeGen, sp, offset);
+         cursor = generateTrg1MemInstruction(cg(), TR::InstOpCode::vldrimmq, lastNode, rr, stackSlot, cursor);
+         offset += 16;
          }
       }
 
@@ -589,7 +605,7 @@ TR::ARM64SystemLinkage::createEpilogue(TR::Instruction *cursor)
    TR::RealRegister *lr = machine->getRealRegister(TR::RealRegister::lr);
    if (machine->getLinkRegisterKilled())
       {
-      TR::MemoryReference *stackSlot = new (trHeapMemory()) TR::MemoryReference(sp, 0, codeGen);
+      TR::MemoryReference *stackSlot = TR::MemoryReference::createWithDisplacement(codeGen, sp, 0);
       cursor = generateTrg1MemInstruction(cg(), TR::InstOpCode::ldrimmx, lastNode, lr, stackSlot, cursor);
       }
 
@@ -619,10 +635,10 @@ int32_t TR::ARM64SystemLinkage::buildArgs(TR::Node *callNode,
    TR::Register *tempReg;
    int32_t argIndex = 0;
    int32_t numMemArgs = 0;
-   int32_t argSize = 0;
+   int32_t argOffset = 0;
    int32_t numIntegerArgs = 0;
    int32_t numFloatArgs = 0;
-   int32_t totalSize;
+   int32_t totalSize = 0;
    int32_t i;
 
    TR::Node *child;
@@ -645,14 +661,48 @@ int32_t TR::ARM64SystemLinkage::buildArgs(TR::Node *callNode,
          case TR::Int64:
          case TR::Address:
             if (numIntegerArgs >= properties.getNumIntArgRegs())
+               {
                numMemArgs++;
+#if defined(LINUX)
+               totalSize += 8;
+#elif defined(OSX)
+               if (childType == TR::Address || childType == TR::Int64)
+                  {
+                  totalSize = (totalSize + 7) & ~7; // adjust to 8-byte boundary
+                  totalSize += 8;
+                  }
+               else
+                  {
+                  totalSize += 4;
+                  }
+#else
+#error Unsupported platform
+#endif
+               }
             numIntegerArgs++;
             break;
 
          case TR::Float:
          case TR::Double:
             if (numFloatArgs >= properties.getNumFloatArgRegs())
-                  numMemArgs++;
+               {
+               numMemArgs++;
+#if defined(LINUX)
+               totalSize += 8;
+#elif defined(OSX)
+               if (childType == TR::Double)
+                  {
+                  totalSize = (totalSize + 7) & ~7; // adjust to 8-byte boundary
+                  totalSize += 8;
+                  }
+               else
+                  {
+                  totalSize += 4;
+                  }
+#else
+#error Unsupported platform
+#endif
+               }
             numFloatArgs++;
             break;
 
@@ -671,7 +721,6 @@ int32_t TR::ARM64SystemLinkage::buildArgs(TR::Node *callNode,
       argMemReg = cg()->allocateRegister();
       }
 
-   totalSize = numMemArgs * 8;
    // align to 16-byte boundary
    totalSize = (totalSize + 15) & (~15);
 
@@ -680,7 +729,6 @@ int32_t TR::ARM64SystemLinkage::buildArgs(TR::Node *callNode,
 
    for (i = firstArgumentChild; i < callNode->getNumChildren(); i++)
       {
-      TR::MemoryReference *mref = NULL;
       TR::Register *argRegister;
       TR::InstOpCode::Mnemonic op;
 
@@ -732,16 +780,28 @@ int32_t TR::ARM64SystemLinkage::buildArgs(TR::Node *callNode,
             else
                {
                // numIntegerArgs >= properties.getNumIntArgRegs()
+               int offsetInc;
                if (childType == TR::Address || childType == TR::Int64)
                   {
-                  op = TR::InstOpCode::strpostx;
+                  op = TR::InstOpCode::strimmx;
+                  offsetInc = 8;
+#if defined(OSX)
+                  argOffset = (argOffset + 7) & ~7; // adjust to 8-byte boundary
+#endif
                   }
                else
                   {
-                  op = TR::InstOpCode::strpostw;
+                  op = TR::InstOpCode::strimmw;
+#if defined(LINUX)
+                  offsetInc = 8;
+#elif defined(OSX)
+                  offsetInc = 4;
+#else
+#error Unsupported platform
+#endif
                   }
-               mref = getOutgoingArgumentMemRef(argMemReg, argRegister, op, pushToMemory[argIndex++]);
-               argSize += 8; // always 8-byte aligned
+               getOutgoingArgumentMemRef(argMemReg, argOffset, argRegister, op, pushToMemory[argIndex++]);
+               argOffset += offsetInc;
                }
             numIntegerArgs++;
             break;
@@ -781,16 +841,28 @@ int32_t TR::ARM64SystemLinkage::buildArgs(TR::Node *callNode,
             else
                {
                // numFloatArgs >= properties.getNumFloatArgRegs()
+               int offsetInc;
                if (childType == TR::Double)
                   {
-                  op = TR::InstOpCode::vstrpostd;
+                  op = TR::InstOpCode::vstrimmd;
+                  offsetInc = 8;
+#if defined(OSX)
+                  argOffset = (argOffset + 7) & ~7; // adjust to 8-byte boundary
+#endif
                   }
                else
                   {
-                  op = TR::InstOpCode::vstrposts;
+                  op = TR::InstOpCode::vstrimms;
+#if defined(LINUX)
+                  offsetInc = 8;
+#elif defined(OSX)
+                  offsetInc = 4;
+#else
+#error Unsupported platform
+#endif
                   }
-               mref = getOutgoingArgumentMemRef(argMemReg, argRegister, op, pushToMemory[argIndex++]);
-               argSize += 8; // always 8-byte aligned
+               getOutgoingArgumentMemRef(argMemReg, argOffset, argRegister, op, pushToMemory[argIndex++]);
+               argOffset += offsetInc;
                }
             numFloatArgs++;
             break;
@@ -831,6 +903,14 @@ int32_t TR::ARM64SystemLinkage::buildArgs(TR::Node *callNode,
          }
       }
 
+   /* Spills all vector registers */
+   if (killsVectorRegisters())
+      {
+      TR::Register *tmpReg = cg()->allocateRegister();
+      dependencies->addPostCondition(tmpReg, TR::RealRegister::KillVectorRegs);
+      cg()->stopUsingRegister(tmpReg);
+      }
+
    if (numMemArgs > 0)
       {
       TR::RealRegister *sp = cg()->machine()->getRealRegister(properties.getStackPointerRegister());
@@ -857,10 +937,12 @@ TR::Register *TR::ARM64SystemLinkage::buildDirectDispatch(TR::Node *callNode)
    const TR::ARM64LinkageProperties &pp = getProperties();
    TR::RealRegister *sp = cg()->machine()->getRealRegister(pp.getStackPointerRegister());
 
+   // Extra post dependency for killing vector registers (see KillVectorRegs)
+   const int extraPostReg = killsVectorRegisters() ? 1 : 0;
    TR::RegisterDependencyConditions *dependencies =
       new (trHeapMemory()) TR::RegisterDependencyConditions(
          pp.getNumberOfDependencyGPRegisters(),
-         pp.getNumberOfDependencyGPRegisters(), trMemory());
+         pp.getNumberOfDependencyGPRegisters() + extraPostReg, trMemory());
 
    int32_t totalSize = buildArgs(callNode, dependencies);
    if (totalSize > 0)

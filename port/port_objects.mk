@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2015, 2019 IBM Corp. and others
+# Copyright (c) 2015, 2021 IBM Corp. and others
 # 
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -55,6 +55,7 @@ ifeq (zos,$(OMR_HOST_OS))
 
   ifeq (1,$(OMR_ENV_DATA64))
     # 64-bit only
+    OBJECTS += omrcel4ro31
     OBJECTS += omrget_large_pages_supported
     OBJECTS += omrget_large_2gb_pages_supported
     OBJECTS += omrvmem_support_above_bar
@@ -68,9 +69,10 @@ else
   OBJECTS += protect_helpers
 endif
 
-OBJECTS += omrgetjobname
-OBJECTS += omrgetjobid
 OBJECTS += omrgetasid
+OBJECTS += omrgetjobid
+OBJECTS += omrgetjobname
+OBJECTS += omrgetsysname
 
 ifeq ($(OMR_HOST_ARCH),$(filter $(OMR_HOST_ARCH),s390 s390x))
   # z/OS and zLinux
@@ -196,6 +198,11 @@ ifeq (ppc,$(OMR_HOST_ARCH))
   endif
 endif
 ifeq (s390,$(OMR_HOST_ARCH))
+  ifeq (linux,$(OMR_HOST_OS))
+    OBJECTS += auxv
+  endif
+endif
+ifeq (aarch64,$(OMR_HOST_ARCH))
   ifeq (linux,$(OMR_HOST_OS))
     OBJECTS += auxv
   endif

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -134,7 +134,7 @@ OMR::ValuePropagation::ValuePropagation(TR::OptimizationManager *manager)
      _arrayCloneCalls(trMemory()),
      _objectCloneTypes(trMemory()),
      _arrayCloneTypes(trMemory()),
-     _parmInfo(NULL),
+     _parmMayBeVariant(NULL),
      _parmTypeValid(NULL),
      _constNodeInfo(comp()->allocator())
    {
@@ -176,32 +176,47 @@ void OMR::ValuePropagation::initialize()
    // determine if there are any invariant parms
    //
    int32_t numParms = comp()->getMethodSymbol()->getParameterList().getSize();
-   _parmInfo = (int32_t *) trMemory()->allocateStackMemory(numParms * sizeof(int32_t));
+   _parmMayBeVariant = (int32_t *) trMemory()->allocateStackMemory(numParms * sizeof(int32_t));
    _parmTypeValid = (bool *) trMemory()->allocateStackMemory(numParms * sizeof(bool));
-   // mark all parms as invariant (0) to begin with
-   //
-   memset(_parmInfo, 0, numParms * sizeof(int32_t));
+
    // mark info to be true
    for (int32_t i = 0; i < numParms; i++)
       _parmTypeValid[i] = true;
 
-   for (TR::TreeTop *tt = comp()->getStartTree();
-         tt;
-         tt = tt->getNextTreeTop())
+   // We cannot assume the parm will be invariant for DLT compiles because
+   // the parm slot may be reused and shared prior to the DLT body executing.
+   //
+   if (comp()->isDLT())
       {
-      TR::Node *node = tt->getNode();
-      if (node && node->getOpCodeValue() == TR::treetop)
-         node = node->getFirstChild();
-
-      if (node && node->getOpCode().isStoreDirect())
+      for (int32_t i = 0; i < numParms; i++)
          {
-         TR::Symbol *sym = node->getSymbolReference()->getSymbol();
-         if (sym->isParm())
+         _parmMayBeVariant[i] = 1;
+         }
+      }
+   else
+      {
+      // mark all parms as invariant (0) to begin with
+      //
+      memset(_parmMayBeVariant, 0, numParms * sizeof(int32_t));
+
+      for (TR::TreeTop *tt = comp()->getStartTree();
+           tt;
+           tt = tt->getNextTreeTop())
+         {
+         TR::Node *node = tt->getNode();
+         if (node && node->getOpCodeValue() == TR::treetop)
+            node = node->getFirstChild();
+
+         if (node && node->getOpCode().isStoreDirect())
             {
-            // parm is no longer invariant
-            //
-            int32_t index = sym->getParmSymbol()->getOrdinal();
-            _parmInfo[index] = 1;
+            TR::Symbol *sym = node->getSymbolReference()->getSymbol();
+            if (sym->isParm())
+               {
+               // parm is no longer invariant
+               //
+               int32_t index = sym->getParmSymbol()->getOrdinal();
+               _parmMayBeVariant[index] = 1;
+               }
             }
          }
       }
@@ -252,9 +267,15 @@ void OMR::ValuePropagation::initialize()
    _blocksToBeRemoved = new (trStackMemory()) TR_Array<TR::CFGNode*>(trMemory(), 8, false, stackAlloc);
    _curDefinedOnAllPaths = NULL;
    if (_isGlobalPropagation)
+      {
       _definedOnAllPaths = new (trStackMemory()) DefinedOnAllPathsMap(std::less<TR::CFGEdge *>(), trMemory()->currentStackRegion());
+      _callNodeToGuardNodes = new (trStackMemory()) CallNodeToGuardNodesMap(std::less<TR::Node *>(), trMemory()->currentStackRegion());
+      }
    else
+      {
       _definedOnAllPaths = NULL;
+      _callNodeToGuardNodes = NULL;
+      }
    _defMergedNodes = new (trStackMemory()) TR_BitVector(0, trMemory(), stackAlloc, growable);
    _vcHandler.setRoot(_curConstraints, NULL);
 
@@ -706,66 +727,6 @@ int32_t OMR::ValuePropagation::getPrimitiveArrayType(char primitiveArrayChar)
       }
    }
 
-bool OMR::ValuePropagation::canTransformArrayCopyCallForSmall(TR::Node *node, int32_t &srcLength, int32_t &dstLength, int32_t &elementSize, TR::DataType &type )
-   {
-   TR::Node *srcArrayNode = node->getFirstChild();
-   TR::Node *srcOffsetNode = node->getSecondChild();
-   TR::Node *dstArrayNode = node->getChild(2);
-   TR::Node *dstOffsetNode = node->getChild(3);
-   TR::Node *lengthNode= node->getChild(4);
-
-   int32_t srcSigLength, srcType;
-   int32_t dstSigLength, dstType;
-   static uint8_t primitiveArrayTypeToElementSize[] = {1, 2, 4, 8, 1, 2, 4, 8};
-   static TR::DataType primitiveArrayToTRDataType[] = {TR::Int8, TR::Int16, TR::Float, TR::Double, TR::Int8, TR::Int16, TR::Int32, TR::Int64};
-
-   const char *srcSig = srcArrayNode->getTypeSignature(srcSigLength);
-   const char *dstSig = dstArrayNode->getTypeSignature(dstSigLength);
-
-   // search for primitive arrays by looking at signature's
-   // if signature is null then see if array was created in this method (newarray).
-
-   if (srcSig && srcSigLength >= 2 && *srcSig == '[')
-      {
-      srcType = getPrimitiveArrayType(srcSig[1]);
-      }
-   else if (srcArrayNode->getOpCodeValue() == TR::newarray)
-      {
-      srcType = srcArrayNode->getSecondChild()->getInt();
-      srcLength = srcArrayNode->getFirstChild()->getOpCode().isLoadConst() ? srcArrayNode->getFirstChild()->getInt() : -1;
-      }
-   else
-      {
-      srcType = -1;
-      }
-
-   if (dstSig && dstSigLength >= 2 && *dstSig == '[')
-      {
-      dstType = getPrimitiveArrayType(dstSig[1]);
-      }
-   else if (dstArrayNode->getOpCodeValue() == TR::newarray)
-      {
-      dstType = dstArrayNode->getSecondChild()->getInt();
-      dstLength = dstArrayNode->getFirstChild()->getOpCode().isLoadConst() ? dstArrayNode->getFirstChild()->getInt() : -1;
-      }
-   else
-      {
-      dstType = -1;
-      }
-
-   // check if both arrays are primitive types and of the same type, if so then can transform the call for small (ie a primitive array copy)
-   if (srcType >= 4 && dstType >=4 && dstType == srcType)
-      {
-      elementSize = primitiveArrayTypeToElementSize[srcType-4];
-      type = primitiveArrayToTRDataType[srcType-4];
-      return true;
-      }
-   else
-      {
-      return false;
-      }
-   }
-
 
 #ifdef J9_PROJECT_SPECIFIC
 static
@@ -1047,12 +1008,12 @@ void OMR::ValuePropagation::transformArrayCopyCall(TR::Node *node)
    TR::VPArrayInfo *srcArrayInfo;
    TR::VPArrayInfo *dstArrayInfo;
 
-   srcOffLow = srcOffset ? srcOffset->getLowInt() : TR::getMinSigned<TR::Int32>();
-   srcOffHigh = srcOffset ? srcOffset->getHighInt() : TR::getMaxSigned<TR::Int32>();
-   dstOffLow = dstOffset ? dstOffset->getLowInt() : TR::getMinSigned<TR::Int32>();
-   dstOffHigh = dstOffset ? dstOffset->getHighInt() : TR::getMaxSigned<TR::Int32>();
-   copyLenLow = copyLen ? copyLen->getLowInt() : TR::getMinSigned<TR::Int32>();
-   copyLenHigh = copyLen ? copyLen->getHighInt() : TR::getMaxSigned<TR::Int32>();
+   srcOffLow = srcOffset ? srcOffset->getLowInt() : static_cast<int32_t>(TR::getMinSigned<TR::Int32>());
+   srcOffHigh = srcOffset ? srcOffset->getHighInt() : static_cast<int32_t>(TR::getMaxSigned<TR::Int32>());
+   dstOffLow = dstOffset ? dstOffset->getLowInt() : static_cast<int32_t>(TR::getMinSigned<TR::Int32>());
+   dstOffHigh = dstOffset ? dstOffset->getHighInt() : static_cast<int32_t>(TR::getMaxSigned<TR::Int32>());
+   copyLenLow = copyLen ? copyLen->getLowInt() : static_cast<int32_t>(TR::getMinSigned<TR::Int32>());
+   copyLenHigh = copyLen ? copyLen->getHighInt() : static_cast<int32_t>(TR::getMaxSigned<TR::Int32>());
 
    // If the call must fail, don't transform it.  The rest of the block can be
    // removed.
@@ -1092,7 +1053,6 @@ void OMR::ValuePropagation::transformArrayCopyCall(TR::Node *node)
    if ((primitiveTransform || referenceTransform) &&
        !comp()->getOption(TR_DisableArrayCopyOpts) &&
        !node->isDontTransformArrayCopyCall() &&
-        comp()->fej9()->callTheJitsArrayCopyHelper() &&
         !comp()->getOption(TR_DisableInliningOfNatives) &&
         !(srcObject && srcObject->isNullObject()) &&
         !(dstObject && dstObject->isNullObject()) &&
@@ -1865,11 +1825,11 @@ void OMR::ValuePropagation::transformArrayCopyCall(TR::Node *node)
    //
    addBlockConstraint(srcObjNode, TR::VPNonNullObject::create(this));
    addBlockConstraint(dstObjNode, TR::VPNonNullObject::create(this));
-   srcOffHigh = srcArrayInfo ? srcArrayInfo->highBound() : TR::getMaxSigned<TR::Int32>();
+   srcOffHigh = srcArrayInfo ? srcArrayInfo->highBound() : static_cast<int32_t>(TR::getMaxSigned<TR::Int32>());
    addBlockConstraint(srcOffNode, TR::VPIntRange::create(this, 0, srcOffHigh));
-   dstOffHigh = dstArrayInfo ? dstArrayInfo->highBound() : TR::getMaxSigned<TR::Int32>();
+   dstOffHigh = dstArrayInfo ? dstArrayInfo->highBound() : static_cast<int32_t>(TR::getMaxSigned<TR::Int32>());
    addBlockConstraint(dstOffNode, TR::VPIntRange::create(this, 0, dstOffHigh));
-   addBlockConstraint(copyLenNode, TR::VPIntRange::create(this, 0, TR::getMaxSigned<TR::Int32>()));
+   addBlockConstraint(copyLenNode, TR::VPIntRange::create(this, 0, static_cast<int32_t>(TR::getMaxSigned<TR::Int32>())));
 
    }
 
@@ -3357,22 +3317,28 @@ void OMR::ValuePropagation::transformRTMultiLeafArrayCopy(TR_RealTimeArrayCopy *
 static
 const char* transformedTargetName (TR::RecognizedMethod rm)
    {
+#ifdef J9_PROJECT_SPECIFIC
    switch ( rm )
       {
-#ifdef J9_PROJECT_SPECIFIC
       case TR::sun_nio_cs_UTF_16_Encoder_encodeUTF16Big:
          return "icall  com/ibm/jit/JITHelpers.transformedEncodeUTF16Big(JJI)I";
 
       case TR::sun_nio_cs_UTF_16_Encoder_encodeUTF16Little:
          return "icall  com/ibm/jit/JITHelpers.transformedEncodeUTF16Little(JJI)I"  ;
-#endif
 
       default:
          return "arraytranslate";
       }
+#else
+   return "arraytranslate";
+#endif
    }
 
 #ifdef J9_PROJECT_SPECIFIC
+/**
+ * Can be called from doDelayedTransformations when nodes may have been removed from the tree. Issue 6623
+ * https://github.com/eclipse/omr/issues/6623
+ */
 void OMR::ValuePropagation::transformObjectCloneCall(TR::TreeTop *callTree, OMR::ValuePropagation::ObjCloneInfo *cloneInfo)
    {
    TR_OpaqueClassBlock *j9class = cloneInfo->_clazz;
@@ -3382,6 +3348,12 @@ void OMR::ValuePropagation::transformObjectCloneCall(TR::TreeTop *callTree, OMR:
 
    TR::Node *callNode = callTree->getNode()->getFirstChild();
    TR::Node *objNode = callNode->getFirstChild();
+
+   // Check that the node hasn't been removed (issue 6623)
+   if (callNode->getReferenceCount() < 1)
+      {
+      return;
+      }
 
    TR::SymbolReference * symRef = callNode->getSymbolReference();
    TR::ResolvedMethodSymbol *method = symRef->getSymbol()->getResolvedMethodSymbol();
@@ -3471,6 +3443,10 @@ void OMR::ValuePropagation::transformObjectCloneCall(TR::TreeTop *callTree, OMR:
    return;
    }
 
+/**
+ * Can be called from doDelayedTransformations when nodes may have been removed from the tree. Issue 6623
+ * https://github.com/eclipse/omr/issues/6623
+ */
 void OMR::ValuePropagation::transformArrayCloneCall(TR::TreeTop *callTree, OMR::ValuePropagation::ArrayCloneInfo *cloneInfo)
    {
    static char *disableArrayCloneOpt = feGetEnv("TR_disableFastArrayClone");
@@ -3478,6 +3454,13 @@ void OMR::ValuePropagation::transformArrayCloneCall(TR::TreeTop *callTree, OMR::
       return;
 
    TR::Node *callNode = callTree->getNode()->getFirstChild();
+
+   // Check that the node hasn't been removed (issue 6623)
+   if (callNode->getReferenceCount() < 1)
+      {
+      return;
+      }
+
    TR::Node *objNode = callNode->getFirstChild();
 
    TR::SymbolReference * symRef = callNode->getSymbolReference();
@@ -3862,7 +3845,7 @@ TR::LocalValuePropagation::LocalValuePropagation(TR::OptimizationManager *manage
 
 int32_t TR::LocalValuePropagation::perform()
    {
-   if ((_firstUnresolvedSymbolValueNumber - 1) <= comp()->getNodeCount())
+   if (unsigned(_firstUnresolvedSymbolValueNumber - 1) <= comp()->getNodeCount())
       {
       dumpOptDetails(comp(),
          "Can't do Local Value Propagation - too many nodes\n");
@@ -3891,7 +3874,7 @@ int32_t TR::LocalValuePropagation::performOnBlock(TR::Block *block)
    {
    // Walk the trees and process
    //
-   if ((_firstUnresolvedSymbolValueNumber - 1) <= comp()->getNodeCount())
+   if (unsigned(_firstUnresolvedSymbolValueNumber - 1) <= comp()->getNodeCount())
       {
       dumpOptDetails(comp(),
          "Can't do Local Value Propagation on block %d - too many nodes\n",

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -127,6 +127,7 @@ TR::Instruction* generateLoad32BitConstant(TR::CodeGenerator* cg, TR::Node* node
 TR::Instruction * genLoadLongConstant(TR::CodeGenerator *cg, TR::Node *node, int64_t value, TR::Register *targetRegister, TR::Instruction *cursor=NULL,TR::RegisterDependencyConditions *cond = 0, TR::Register *base = 0);
 TR::Instruction * genLoadAddressConstant(TR::CodeGenerator *cg, TR::Node *node, uintptr_t value, TR::Register *targetRegister, TR::Instruction *cursor=NULL,TR::RegisterDependencyConditions *cond = 0, TR::Register *base = 0);
 TR::Instruction * genLoadAddressConstantInSnippet(TR::CodeGenerator *cg, TR::Node *node, uintptr_t value, TR::Register *targetRegister, TR::Instruction *cursor=NULL,TR::RegisterDependencyConditions *cond = 0, TR::Register *base = 0, bool isPICCandidate=false);
+TR::Instruction * genLoadProfiledClassAddressConstant(TR::CodeGenerator *cg, TR::Node *node, TR_OpaqueClassBlock *clazz, TR::Register *targetRegister, TR::Instruction *cursor = 0,TR::RegisterDependencyConditions *cond = 0, TR::Register *base = 0);
 
 TR::MemoryReference * sstoreHelper(TR::Node * node, TR::CodeGenerator * cg, bool isReversed=false);
 TR::MemoryReference * istoreHelper(TR::Node * node, TR::CodeGenerator * cg, bool isReversed=false);
@@ -233,129 +234,6 @@ TR::InstOpCode::S390BranchCondition getStandardIfBranchCondition(TR::ILOpCodes o
 TR::InstOpCode::S390BranchCondition getButestBranchCondition(TR::ILOpCodes opCode, int32_t compareVal);
 
 bool canUseNodeForFusedMultiply(TR::Node *node);
-bool generateFusedMultiplyAddIfPossible(TR::CodeGenerator *cg, TR::Node *addNode, TR::InstOpCode::Mnemonic op, TR::InstOpCode::Mnemonic negateOp = TR::InstOpCode::BAD);
-
-/**
- * arraycmpWithPadHelper handles MemcmpWithPad and  TR::arraycmpWithPad
- */
-class arraycmpWithPadHelper
-   {
-   public:
-   arraycmpWithPadHelper(TR::Node *n,
-                         TR::CodeGenerator *codegen,
-                         bool utf,
-                         bool isFoldedIf_p,
-                         TR::Node *ificmpNode,
-                         bool needResultReg = true,
-                         TR::InstOpCode::S390BranchCondition *returnCond = NULL);
-
-   void setupCLCLandCLCLE();
-   void setupConstCLCL();
-   TR::Register *generateConstCLCL();
-   TR::Register *generateCLCL();
-   TR::Register *generateCLCLE();
-   void teardownCLCLandCLCLE();
-   void generateConstCLCSetup();
-   void generateVarCLCSetup();
-   void generateConstCLCMainLoop();
-   void generateVarCLCMainLoop();
-   void generateConstCLCRemainder();
-   void generateVarCLCRemainder();
-   TR::Register* generateCLCUnequal();
-   void setupConstCLCPadding();
-   void setupVarCLCPadding();
-   void generateConstCLCSpacePaddingLoop();
-   void generateConstCLCPaddingLoop();
-   void generateVarCLCPaddingLoop();
-   void teardownCLC();
-   void generateCLCLitPoolPadding();
-   void generateCLCFoldedIfResult();
-   void chooseCLCBranchConditions();
-   TR::MemoryReference *  convertToShortDispMemRef(TR::Node * node,
-                                                      TR::MemoryReference * largeDispMemRef,
-                                                      TR::Register * &largeDispReg,
-                                                      TR::RegisterDependencyConditions *regDeps,
-                                                      TR::CodeGenerator * cg);
-   TR::MemoryReference * preemptivelyAdjustLongDisplacementMemoryReference(TR::MemoryReference * memRef);
-   TR::Register* generate();
-
-private:
-   TR::Node *source1Node;
-   TR::Node *source2Node;
-   TR::Node *source1LenNode;
-   TR::Node *source2LenNode;
-   TR::Node *paddingNode;
-   TR::Node *node;
-
-   TR::Register *source1Reg;
-   TR::Register *source2Reg;
-   TR::Register *source1LenReg;
-   TR::Register *source2LenReg;
-   TR::Register *paddingReg;
-   TR::RegisterPair *source1PairReg;
-   TR::RegisterPair *source2PairReg;
-   TR::Register *retValReg;
-   TR::Register *litPoolBaseReg;
-   TR::Register *paddingSrcReg;
-   TR::Register *loopCountReg;
-   TR::Register *countReg;
-   TR::Register *paddingPosReg;
-   TR::Register *paddingLenReg;
-   TR::Register *paddingUnequalRetValReg;
-
-   int32_t source1Len;
-   int32_t source2Len;
-   int32_t addr1Const;
-   int32_t addr2Const;
-   int32_t paddingSrcAddr;
-
-
-   int32_t count;
-   int32_t paddingLen;
-   int32_t paddingOffset;
-   int32_t paddingRetCode;
-   bool constSpacePadding;
-   size_t paddingLitPoolOffset;
-
-   char CLCLpaddingChar;
-
-   int32_t maxLen;
-   int32_t isEqual;
-   int32_t cmpVal;
-   bool isAddr1Const;
-   bool isAddr2Const;
-   bool isPaddingSrcAddrConst;
-   bool isLen1Const;
-   bool isLen2Const;
-   bool isUTF16;
-   bool isConst;
-   bool forceCLCL;
-   bool isFoldedIf;
-   bool isSingleTarget;
-   bool newLitPoolReg;
-   bool skipUnequal;
-   bool genResultReg; ///< It is in effect only if isFoldedIf is false.
-   bool isStartInternalControlFlowSet;
-   TR::InstOpCode::S390BranchCondition *returnCond;
-
-   TR::CodeGenerator *cg;
-   TR::Node *ificmpNode_;
-   TR::RegisterDependencyConditions *regDeps;
-   TR::RegisterDependencyConditions *branchDeps;
-   TR::LabelSymbol *unequalLabel;
-   TR::LabelSymbol *doneLabel;
-   TR::LabelSymbol *remainEndLabel;
-   TR::LabelSymbol *cmpTargetLabel;
-   TR::LabelSymbol *cmpDoneLabel;
-   TR::InstOpCode::S390BranchCondition brCond;
-   TR::InstOpCode::S390BranchCondition finalBrCond;
-
-   bool recDecSource1Node;
-   bool recDecSource2Node;
-
-   const int CLC_THRESHOLD;     ///< = 2048;
-   const int CLCL_THRESHOLD;    ///< = 16777216; 2^24 is technically the maximum length for a CLCL
-   const int PADDING_THRESHOLD; ///< = 496;
-   };
+bool generateFusedMultiplyAddIfPossible(TR::CodeGenerator *cg, TR::Node *addNode, TR::InstOpCode::Mnemonic op, TR::InstOpCode::Mnemonic negateOp = TR::InstOpCode::bad);
 
 #endif

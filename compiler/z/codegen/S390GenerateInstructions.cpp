@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -234,7 +234,7 @@ TR::InstOpCode::Mnemonic getReplacementCompareAndBranchOpCode(TR::CodeGenerator 
    static char * disableS390CompareAndBranch = feGetEnv("TR_DISABLES390CompareAndBranch");
 
    if (disableS390CompareAndBranch)
-      return TR::InstOpCode::BAD ;
+      return TR::InstOpCode::bad ;
 
    switch(compareOpCode)
       {
@@ -263,7 +263,7 @@ TR::InstOpCode::Mnemonic getReplacementCompareAndBranchOpCode(TR::CodeGenerator 
          return TR::InstOpCode::CLGIJ;
          break;
       default:
-         return TR::InstOpCode::BAD;
+         return TR::InstOpCode::bad;
          break;
       }
    }
@@ -275,7 +275,7 @@ getReplacementLongDisplacementOpCode(TR::CodeGenerator* cg, TR::InstOpCode::Mnem
       {
       auto longDisplacementMnemonic = TR::InstOpCode::getEquivalentLongDisplacementMnemonic(op);
 
-      if (longDisplacementMnemonic != TR::InstOpCode::BAD)
+      if (longDisplacementMnemonic != TR::InstOpCode::bad)
          {
          op = longDisplacementMnemonic;
 
@@ -314,7 +314,7 @@ generateS390CompareAndBranchInstruction(TR::CodeGenerator * cg,
    TR::Instruction * returnInstruction = NULL;
 
    // test to see if this node is suitable for compare and branch, and which
-   // compare and branch op code to use if so.  if we get TR::InstOpCode::BAD, it isn't
+   // compare and branch op code to use if so.  if we get TR::InstOpCode::bad, it isn't
    // suitable for compare and branch, and we'll generate the old fashioned way.
    TR::InstOpCode::Mnemonic replacementOpCode = getReplacementCompareAndBranchOpCode(cg, compareOpCode);
 
@@ -322,7 +322,7 @@ generateS390CompareAndBranchInstruction(TR::CodeGenerator * cg,
    // compare-and-branch instructions are zEC12 and above
    if( !cg->comp()->getOption(TR_DisableCompareAndBranchInstruction) &&
            !needsCC &&
-           replacementOpCode != TR::InstOpCode::BAD &&
+           replacementOpCode != TR::InstOpCode::bad &&
            cg->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_ZEC12))
       {
       // generate a compare and branch.
@@ -360,7 +360,7 @@ generateS390CompareAndBranchInstruction(TR::CodeGenerator * cg,
 
    return returnInstruction;
    }
-   
+
 /**
  * Generate a compare and a branch instruction.  if z10 is available, this will
  * attempt to generate a COMPARE AND BRANCH instruction, otherwise the a
@@ -393,10 +393,10 @@ generateS390CompareAndBranchInstruction(TR::CodeGenerator * cg,
    // declare a space for the instruction we'll return (the compare and branch
    // instruction, or the branch instruction if z6 support is off).
    TR::Instruction * cursor = NULL;
-   TR::InstOpCode::Mnemonic replacementOpCode = TR::InstOpCode::BAD;
+   TR::InstOpCode::Mnemonic replacementOpCode = TR::InstOpCode::bad;
 
    // test to see if this node is suitable for compare and branch, and which
-   // compare and branch op code to use if so.  if we get TR::InstOpCode::BAD, it isn't
+   // compare and branch op code to use if so.  if we get TR::InstOpCode::bad, it isn't
    // suitable for compare and branch, and we'll generate the old fashioned way.
    bool canUseReplacementOpCode = false;
    switch(compareOpCode)
@@ -418,7 +418,7 @@ generateS390CompareAndBranchInstruction(TR::CodeGenerator * cg,
    // compare-and-branch instructions are zEC12 and above
    if( !cg->comp()->getOption(TR_DisableCompareAndBranchInstruction) &&
            !needsCC &&
-           replacementOpCode != TR::InstOpCode::BAD &&
+           replacementOpCode != TR::InstOpCode::bad &&
            cg->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_ZEC12))
       {
       cursor = (TR::S390RIEInstruction *)generateRIEInstruction(cg, replacementOpCode, node, first, (int8_t) second, branchDestination, bc, preced);
@@ -595,9 +595,9 @@ generateRRRInstruction(TR::CodeGenerator * cg, TR::InstOpCode::Mnemonic op, TR::
  * Otherwise, this function returns false.
  * Optionally, the caller can limit the search for conflicts containing only one type of real register.
  */
-bool CheckForRegisterDependencyConditionsRealRegisterMergeConflict( TR_S390RegisterDependencyGroup * conds1,
+bool CheckForRegisterDependencyConditionsRealRegisterMergeConflict( TR::RegisterDependencyGroup * conds1,
                                                                     int conds1_addCursor,
-                                                                    TR_S390RegisterDependencyGroup * conds2,
+                                                                    TR::RegisterDependencyGroup * conds2,
                                                                     int conds2_addCursor,
                                                                     TR::RegisterDependency ** conflict1,
                                                                     TR::RegisterDependency ** conflict2,
@@ -1696,7 +1696,8 @@ generateVRIfInstruction(
            op == TR::InstOpCode::VMP ||
            op == TR::InstOpCode::VMSP ||
            op == TR::InstOpCode::VSDP ||
-           op == TR::InstOpCode::VRP)
+           op == TR::InstOpCode::VRP ||
+           op == TR::InstOpCode::VPKZR)
       {
       generateS390DAAExceptionRestoreSnippet(cg, n, instr, op, false);
       }
@@ -1873,6 +1874,26 @@ TR::Instruction * generateVRRiInstruction(
 
 #ifdef J9_PROJECT_SPECIFIC
    if (op == TR::InstOpCode::VCVB || op == TR::InstOpCode::VCVBG)
+      {
+      generateS390DAAExceptionRestoreSnippet(cg, n, instr, op, false);
+      }
+#endif
+
+   return instr;
+   }
+
+TR::Instruction * generateVRRkInstruction(
+                      TR::CodeGenerator       * cg         ,
+                      TR::InstOpCode::Mnemonic  op         ,
+                      TR::Node                * n          ,
+                      TR::Register            * targetReg  ,    /* VRF */
+                      TR::Register            * sourceReg  ,    /* VRF */
+                      uint8_t                   mask3)          /* 4 bits*/
+   {
+   TR::Instruction* instr = new (INSN_HEAP) TR::S390VRRkInstruction(cg, op, n, targetReg, sourceReg, mask3);
+
+#ifdef J9_PROJECT_SPECIFIC
+   if (op == TR::InstOpCode::VUPKZH || op == TR::InstOpCode::VUPKZL)
       {
       generateS390DAAExceptionRestoreSnippet(cg, n, instr, op, false);
       }
@@ -2146,8 +2167,6 @@ generateDirectCall(TR::CodeGenerator * cg, TR::Node * callNode, bool myself, TR:
       imm = (uintptr_t) callSymRef->getMethodAddress();
       }
 
-   AOTcgDiag2(comp, "\nimm=%x isHelper=%x\n", imm, isHelper);
-
    // Since N3 generate TR::InstOpCode::BRASL -- only need 1 instruction, and no worry
    // about the displacement
    // Calling myself
@@ -2174,7 +2193,7 @@ generateDirectCall(TR::CodeGenerator * cg, TR::Node * callNode, bool myself, TR:
             if (frequency > 6 && frequency >= minFR && (maxFR == 0 || frequency > maxFR))
                {
                TR::LabelSymbol * callLabel = generateLabelSymbol(cg);
-               TR::Instruction * instr = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, callNode, callLabel);
+               TR::Instruction * instr = generateS390LabelInstruction(cg, TR::InstOpCode::label, callNode, callLabel);
                cg->createBranchPreloadCallData(callLabel, callSymRef, instr);
                }
             }
@@ -2201,7 +2220,7 @@ generateDirectCall(TR::CodeGenerator * cg, TR::Node * callNode, bool myself, TR:
                tempInst->setSymbolReference(callSymRef);
             }
 #endif
-         AOTcgDiag1(comp, "\ntempInst=%x\n", tempInst);
+
          return tempInst;
          }
 #if !defined(TR_TARGET_64BIT) || (defined(TR_TARGET_64BIT) && defined(J9ZOS390))
@@ -2254,7 +2273,7 @@ generateSnippetCall(TR::CodeGenerator * cg, TR::Node * callNode, TR::Snippet * s
       // Need to put the preDeps on the label, and not on the BRASL
       // because we use virtual reg from preDeps after the BRASL
       // In particular, we use the this pointer reg, which  has a preDep to GPR1
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, callNode, generateLabelSymbol(cg), preDeps);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, callNode, generateLabelSymbol(cg), preDeps);
 
       callInstr = new (INSN_HEAP) TR::S390RILInstruction(TR::InstOpCode::BRASL, callNode, killRegRA, s,
          postDeps, callSymRef, cg);
@@ -2303,6 +2322,56 @@ generateLoadLiteralPoolAddress(TR::CodeGenerator * cg, TR::Node * node, TR::Regi
    return  cursor;
    }
 
+/**
+ * @brief Remember data snippets containing class pointers that need to be patched
+ *        on class unloading or redefinition events
+ *
+ * @param[in] cg : \c TR::CodeGenerator object
+ * @param[in] node : \c TR::Node which referenced class pointer
+ * @param[in] snippet : data snippet containing the class pointer
+ * @param[in] classPtr : class address which may require updating
+ *
+ */
+static void rememberSnippetsToBePatchedOnClassUnloadOrRedefinition(
+      TR::CodeGenerator *cg,
+      TR::Node *node,
+      TR::Snippet *snippet,
+      intptr_t classPtr)
+   {
+   cg->getSnippetsToBePatchedOnClassRedefinition()->push_front(snippet);
+
+   if (node->isClassUnloadingConst())
+      {
+      TR::Compilation *comp = cg->comp();
+      TR_OpaqueClassBlock* unloadableClass = NULL;
+
+      bool isMethod = node->getOpCodeValue() == TR::loadaddr ? false : node->isMethodPointerConstant();
+
+      if (isMethod)
+         {
+         unloadableClass = reinterpret_cast<TR_OpaqueClassBlock *>(cg->fe()->createResolvedMethod(
+            cg->trMemory(), reinterpret_cast<TR_OpaqueMethodBlock *>(classPtr),
+            comp->getCurrentMethod())->classOfMethod());
+         }
+      else
+         {
+         unloadableClass = reinterpret_cast<TR_OpaqueClassBlock *>(classPtr);
+         }
+
+      if (!TR::Compiler->cls.sameClassLoaders(comp, unloadableClass, comp->getCurrentMethod()->classOfMethod()))
+         {
+         if (isMethod)
+            {
+            cg->getMethodSnippetsToBePatchedOnClassUnload()->push_front(snippet);
+            }
+         else
+            {
+            cg->getSnippetsToBePatchedOnClassUnload()->push_front(snippet);
+            }
+         }
+      }
+   }
+
 TR::Instruction *
 generateRegLitRefInstruction(TR::CodeGenerator * cg, TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * treg, int32_t imm,
                              TR::RegisterDependencyConditions * cond, TR::Instruction * preced, TR::Register * base, bool isPICCandidate)
@@ -2342,28 +2411,11 @@ generateRegLitRefInstruction(TR::CodeGenerator * cg, TR::InstOpCode::Mnemonic op
       targetsnippet = dataref->getConstantDataSnippet();
       cursor = generateRXInstruction(cg, op, node, treg, dataref);
       }
+
    // HCR in generateRegLitRefInstruction 32-bit: register const data snippet for common case
    if (comp->getOption(TR_EnableHCR) && isPICCandidate )
       {
-      comp->getSnippetsToBePatchedOnClassRedefinition()->push_front(targetsnippet);
-      if (node->isClassUnloadingConst())
-         {
-         TR_OpaqueClassBlock* unloadableClass = NULL;
-         bool isMethod = node->getOpCodeValue() == TR::loadaddr ? false : node->isMethodPointerConstant();
-       if (isMethod)
-            {
-            unloadableClass = (TR_OpaqueClassBlock *) cg->fe()->createResolvedMethod(cg->trMemory(), (TR_OpaqueMethodBlock *)(intptr_t)imm,
-               comp->getCurrentMethod())->classOfMethod();
-            if (!TR::Compiler->cls.sameClassLoaders(comp, unloadableClass, comp->getCurrentMethod()->classOfMethod()))
-               comp->getMethodSnippetsToBePatchedOnClassUnload()->push_front(targetsnippet);
-            }
-         else
-            {
-            unloadableClass = (TR_OpaqueClassBlock *) (intptr_t)imm;
-            if (!TR::Compiler->cls.sameClassLoaders(comp, unloadableClass, comp->getCurrentMethod()->classOfMethod()))
-               comp->getSnippetsToBePatchedOnClassUnload()->push_front(targetsnippet);
-            }
-         }
+      rememberSnippetsToBePatchedOnClassUnloadOrRedefinition(cg, node, targetsnippet, static_cast<intptr_t>(imm));
       }
    if (alloc)
       {
@@ -2396,7 +2448,6 @@ generateRegLitRefInstruction(TR::CodeGenerator * cg, TR::InstOpCode::Mnemonic op
 
       targetSnippet->setSymbolReference(new (INSN_HEAP) TR::SymbolReference(comp->getSymRefTab()));
       targetSnippet->setReloType(reloType);
-      AOTcgDiag4(comp, "generateRegLitRefInstruction constantDataSnippet=%x symbolReference=%x symbol=%x reloType=%x\n", targetSnippet, targetSnippet->getSymbolReference(), targetSnippet->getSymbolReference()->getSymbol(), reloType);
 
       cursor = (TR::S390RILInstruction *) generateRILInstruction(cg, (op == TR::InstOpCode::LG)?TR::InstOpCode::LGRL:TR::InstOpCode::LRL, node, treg, targetSnippet, preced);
       return cursor;
@@ -2426,9 +2477,7 @@ generateRegLitRefInstruction(TR::CodeGenerator * cg, TR::InstOpCode::Mnemonic op
       {
       dataref = generateS390MemoryReference((int32_t)imm, TR::Int32, cg, base, node);
       }
-   AOTcgDiag5(comp, "generateRegLitRefInstruction dataref=%x constantDataSnippet=%x symbolReference=%x symbol=%x reloType=%x\n",
-      dataref, dataref->getConstantDataSnippet(), dataref->getSymbolReference(),
-      dataref->getSymbolReference()->getSymbol(), reloType);
+
    dataref->getConstantDataSnippet()->setSymbolReference(dataref->getSymbolReference());
    dataref->getConstantDataSnippet()->setReloType(reloType);
    cursor = generateRXInstruction(cg, op, node, treg, dataref);
@@ -2501,25 +2550,7 @@ generateRegLitRefInstruction(TR::CodeGenerator * cg, TR::InstOpCode::Mnemonic op
       // HCR in generateRegLitRefInstruction 64-bit: register const data snippet used by z10
       if (comp->getOption(TR_EnableHCR) && isPICCandidate)
          {
-         comp->getSnippetsToBePatchedOnClassRedefinition()->push_front(constDataSnip);
-         if (node->isClassUnloadingConst())
-            {
-            TR_OpaqueClassBlock* unloadableClass = NULL;
-            bool isMethod = node->getOpCodeValue() == TR::loadaddr ? false : node->isMethodPointerConstant();
-            if (isMethod)
-               {
-               unloadableClass = (TR_OpaqueClassBlock *) cg->fe()->createResolvedMethod(cg->trMemory(), (TR_OpaqueMethodBlock *) imm,
-                  comp->getCurrentMethod())->classOfMethod();
-               if (!TR::Compiler->cls.sameClassLoaders(comp, unloadableClass, comp->getCurrentMethod()->classOfMethod()))
-                  comp->getMethodSnippetsToBePatchedOnClassUnload()->push_front(constDataSnip);
-               }
-            else
-               {
-               unloadableClass = (TR_OpaqueClassBlock *) imm;
-               if (!TR::Compiler->cls.sameClassLoaders(comp, unloadableClass, comp->getCurrentMethod()->classOfMethod()))
-                  comp->getSnippetsToBePatchedOnClassUnload()->push_front(constDataSnip);
-               }
-            }
+         rememberSnippetsToBePatchedOnClassUnloadOrRedefinition(cg, node, constDataSnip, static_cast<intptr_t>(imm));
          }
 
       cursor = new (INSN_HEAP) TR::S390RILInstruction(op, node, treg, constDataSnip, cg);
@@ -2554,28 +2585,11 @@ generateRegLitRefInstruction(TR::CodeGenerator * cg, TR::InstOpCode::Mnemonic op
       dataref = generateS390MemoryReference(imm, TR::Int64, cg, base);
       targetsnippet = dataref->getConstantDataSnippet();
       }
+
    // HCR in generateRegLitRefInstruction 64-bit: register const data snippet for common case
    if (comp->getOption(TR_EnableHCR) && isPICCandidate )
       {
-      comp->getSnippetsToBePatchedOnClassRedefinition()->push_front(targetsnippet);
-      if (node->isClassUnloadingConst())
-         {
-         TR_OpaqueClassBlock* unloadableClass = NULL;
-         bool isMethod = node->getOpCodeValue() == TR::loadaddr ? false : node->isMethodPointerConstant();
-         if (isMethod)
-            {
-            unloadableClass = (TR_OpaqueClassBlock *) cg->fe()->createResolvedMethod(cg->trMemory(), (TR_OpaqueMethodBlock *) imm,
-               comp->getCurrentMethod())->classOfMethod();
-            if (!TR::Compiler->cls.sameClassLoaders(comp, unloadableClass, comp->getCurrentMethod()->classOfMethod()))
-               comp->getMethodSnippetsToBePatchedOnClassUnload()->push_front(targetsnippet);
-            }
-         else
-            {
-            unloadableClass = (TR_OpaqueClassBlock *) imm;
-            if (!TR::Compiler->cls.sameClassLoaders(comp, unloadableClass, comp->getCurrentMethod()->classOfMethod()))
-               comp->getSnippetsToBePatchedOnClassUnload()->push_front(targetsnippet);
-            }
-         }
+      rememberSnippetsToBePatchedOnClassUnloadOrRedefinition(cg, node, targetsnippet, static_cast<intptr_t>(imm));
       }
 
    if (!LGRLinst)
@@ -3041,13 +3055,13 @@ generateReplicateNodeInVectorReg(TR::Node * node, TR::CodeGenerator *cg, TR::Reg
  * \brief
  *    Shift the source register to the left and put its selected bits into the target register
  *    and clear the rest of target register's bits.
- * 
+ *
  * \note
  *    In this API, we try to follow the restrictions which can be applied to all paths. The restrictions include:
  *    1. If targetRegister and sourceRegister designate the same reg, it will first shift and then the selected bits of the shifted value are inserted
  *       into the corresponding bits of the unshifted register contents.
  *    2. The shift direction of sourceRegister cannot be negative(right) direction. So shiftAmount cannot be negative.
- *    3. toBit must be larger or equal to fromBit in the API. 
+ *    3. toBit must be larger or equal to fromBit in the API.
  *    4. Considering restrictions above, we can conclude the following value restrictions for the parameters:
  *       1) fromBit <= toBit    2) 0 <= fromBit <= 0b00111111 = 63     3) 0 <= toBit <= 0b00111111 = 63      4) shiftAmount >= 0
 */
@@ -3073,9 +3087,9 @@ void generateShiftThenKeepSelected64Bit(TR::Node * node, TR::CodeGenerator *cg,
  * \brief
  *    Shift the source register to the left and put its selected bits into the target register
  *    and clear the rest of target register's bits.
- * 
+ *
  * \note
- *    The usage of this API will be the same as the 64-bit version. 
+ *    The usage of this API will be the same as the 64-bit version.
  *    The API's corresponding value restrictions are:
  *       1) fromBit <= toBit    2) 0 <= fromBit <= 0b00011110 = 31     3) 0 <= toBit <= 0b00011111 = 31      4) shiftAmount >= 0
 */
@@ -3225,7 +3239,7 @@ template TR::Instruction * generateS390CompareAndBranchInstruction<int64_t>(
                     bool needsCC = true,
                     bool targetIsFarAndCold = false,
                     TR::Instruction        *preced = 0,
-                    TR::RegisterDependencyConditions *cond = 0); 
+                    TR::RegisterDependencyConditions *cond = 0);
 
 TR::Instruction*
 generateAlignmentNopInstruction(TR::CodeGenerator *cg, TR::Node *node, uint32_t alignment, TR::Instruction *preced)

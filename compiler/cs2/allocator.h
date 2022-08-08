@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1996, 2016 IBM Corp. and others
+ * Copyright (c) 1996, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -43,84 +43,16 @@ namespace CS2 {
   // objects will share the same memory pool
   class malloc_allocator {
   public:
-    void *allocate(size_t size, const char *name=NULL) {
+    void *allocate(size_t size) {
       return malloc(size);
     }
-    void deallocate(void *pointer, size_t size, const char *name=NULL) {
+    void deallocate(void *pointer, size_t size) {
       free(pointer);
     }
-    void *reallocate(size_t newsize, void *pointer, size_t size, const char *name=NULL) {
+    void *reallocate(size_t newsize, void *pointer, size_t size) {
       return realloc(pointer, newsize);
     }
 
-    template <class ostr, class allocator> ostr& stats(ostr &o, allocator &a) { return o;}
-  };
-
-  template <class base_allocator>
-  class stat_allocator: private base_allocator {
-  public:
-    void *allocate(size_t size, const char *name = NULL) {
-      void *ret = (void *) base_allocator::allocate(size,name);
-      if (collect_stats) {
-        alloc_cnt+=1; alloc_size += size;
-        watermark += size;
-        if (watermark > high_watermark) high_watermark = watermark;
-      }
-      return ret;
-    }
-    void deallocate(void *pointer, size_t size, const char *name = NULL) {
-      base_allocator::deallocate(pointer,size,name);
-      if (collect_stats){
-        dealloc_cnt+=1; dealloc_size += size;
-        watermark -= size;
-      }
-    }
-    void *reallocate(size_t newsize, void *pointer, size_t size, const char *name = NULL) {
-      if (collect_stats) {
-        realloc_cnt+=1; realloc_size += size;
-        watermark += (newsize-size);
-        if (watermark > high_watermark) high_watermark = watermark;
-      }
-      return base_allocator::reallocate(newsize,pointer,size,name);
-    }
-
-    template <class ostr, class allocator> ostr& stats(ostr &o, allocator &a) { return base_allocator::stats(o, a);}
-
-    stat_allocator(const base_allocator &a = base_allocator(), bool _stats=false ) :
-      base_allocator(a),
-      collect_stats(_stats),
-      alloc_cnt(0),
-      dealloc_cnt(0),
-      realloc_cnt(0),
-      alloc_size(0),
-      realloc_size(0),
-      dealloc_size(0),
-      watermark(0),
-      high_watermark(0)
-    {}
-
-    ~stat_allocator() {
-      if (collect_stats && alloc_cnt!=0) {
-        printf("  ALLOC= %llu SIZE=%llu AVG=%llu\n", (long long unsigned int)alloc_cnt, (long long unsigned int)alloc_size, (long long unsigned int)(alloc_cnt==0?0:alloc_size/alloc_cnt));
-        printf("DEALLOC= %llu SIZE=%llu AVG=%llu\n", (long long unsigned int)dealloc_cnt, (long long unsigned int)dealloc_size, (long long unsigned int)(dealloc_cnt==0?0:dealloc_size/alloc_cnt));
-        printf("REALLOC= %llu SIZE=%llu AVG=%llu\n", (long long unsigned int)realloc_cnt, (long long unsigned int)realloc_size, (long long unsigned int)(realloc_cnt==0?0:realloc_size/alloc_cnt));
-
-        printf("FINAL SIZE=%lld\n", (long long unsigned int)watermark);
-        printf("HIGH WATER MARK=%lld\n", (long long unsigned int)high_watermark);
-      }
-    }
-  private:
-  bool collect_stats;
-  uint64_t alloc_cnt;
-  uint64_t dealloc_cnt;
-  uint64_t realloc_cnt;
-
-  uint64_t alloc_size;
-  uint64_t realloc_size;
-  uint64_t dealloc_size;
-
-  uint64_t watermark;
-  uint64_t high_watermark;
   };
 
   template <size_t segmentsize = 65536, uint32_t segmentcount= 10, class base_allocator = ::CS2::malloc_allocator>
@@ -249,30 +181,6 @@ namespace CS2 {
         segments[i]=NULL;
     }
 
-    template <class ostr, class allocator> ostr& stats(ostr &o, allocator &a) {
-      o << "CS2 heap allocator\n"
-        << "Segment size= " << segmentsize << " bytes\n";
-
-      for (uint32_t i=1; i<segmentcount; i++) {
-        Segment *s = segments[i];
-        size_t numsegs=0, totalsize=0, allocsize=0, freesize=0;
-        while (s) {
-           numsegs++;
-           totalsize += segmentsize;
-           allocsize += s->get_alloc(i);
-           freesize += s->get_free(i);
-           s = s->next_segment();
-        }
-
-        if (totalsize)
-        o << " segment[" <<i << "](" << s->element_size(i) << ")"
-          << " count=" << numsegs
-          << " size(alloc,free)=(" << allocsize << "," << freesize  << ":" << (allocsize*100/totalsize) << "%) "
-          << " pad=(" << totalsize-allocsize-freesize << ":" << (totalsize-allocsize-freesize)*100/totalsize << "%)\n";
-      }
-      return base_allocator::stats(o, a);
-    }
-
     ~heap_allocator() {
       for (uint32_t i=0; i<segmentcount; i++) {
         Segment *s = segments[i];
@@ -285,15 +193,15 @@ namespace CS2 {
       }
     }
 
-    Segment *new_segment(Segment *next, const char *name) {
-      void *ret = base_allocator::allocate(segmentsize, name);
+    Segment *new_segment(Segment *next) {
+      void *ret = base_allocator::allocate(segmentsize);
       return new (ret) Segment(next);
     }
 
-    void *allocate(size_t size, const char *name=NULL) {
+    void *allocate(size_t size) {
       uint32_t ix = Segment::segment_index(size);
       if (ix==0) {
-        return base_allocator::allocate(size, name);
+        return base_allocator::allocate(size);
       }
 
       for (Segment *s = segments[ix]; s; s=s->next_segment()) {
@@ -304,13 +212,13 @@ namespace CS2 {
           return ret;
         }
       }
-      segments[ix] = new_segment(segments[ix], name);
+      segments[ix] = new_segment(segments[ix]);
       return segments[ix]->allocate(ix);
     }
-    void deallocate(void *pointer, size_t size, const char *name = NULL) {
+    void deallocate(void *pointer, size_t size) {
       uint32_t ix = Segment::segment_index(size);
       if (ix==0) {
-        return base_allocator::deallocate(pointer, size, name);
+        return base_allocator::deallocate(pointer, size);
       }
 
       for (Segment *s = segments[ix]; s; s=s->next_segment()) {
@@ -318,7 +226,7 @@ namespace CS2 {
           s->deallocate(pointer);
           if (s->is_empty()) {
             segments[ix] = s->unlink(segments[ix]);
-            base_allocator::deallocate(s, segmentsize, name);
+            base_allocator::deallocate(s, segmentsize);
           } else if (s!=segments[ix])
             segments[ix]= s->move_to_head(segments[ix]);
           return;
@@ -326,20 +234,20 @@ namespace CS2 {
       }
       CS2Assert(false, ("Could not find pointer to delete: %p", pointer));
     }
-    void *reallocate(size_t newsize, void *pointer, size_t size, const char *name = NULL) {
+    void *reallocate(size_t newsize, void *pointer, size_t size) {
       uint32_t ix = Segment::segment_index(size);
       uint32_t nix = Segment::segment_index(newsize);
 
       if (ix==nix)  {
         if (ix==0) {
-          return base_allocator::reallocate(newsize, pointer, size, name);
+          return base_allocator::reallocate(newsize, pointer, size);
         }
         return pointer;
       }
 
-      void * npointer = allocate(newsize, name);
+      void * npointer = allocate(newsize);
       memcpy(npointer, pointer, newsize<size?newsize:size);
-      deallocate(pointer, size, name);
+      deallocate(pointer, size);
 
       return npointer;
     }
@@ -351,19 +259,17 @@ namespace CS2 {
   public:
     shared_allocator(base_allocator &b = base_allocator::instance()) : base(b) {}
 
-    void *allocate(size_t size, const char *name = NULL) {
-        return base.allocate(size, name);
+    void *allocate(size_t size) {
+        return base.allocate(size);
     }
 
-    void deallocate(void *pointer, size_t size, const char *name = NULL) {
-      return base.deallocate(pointer, size, name);
+    void deallocate(void *pointer, size_t size) {
+      return base.deallocate(pointer, size);
     }
 
-    void *reallocate(size_t newsize, void *pointer, size_t size, const char *name=NULL) {
-      return base.reallocate(newsize, pointer, size, name);
+    void *reallocate(size_t newsize, void *pointer, size_t size) {
+      return base.reallocate(newsize, pointer, size);
     }
-
-    template <class ostr, class allocator> ostr& stats(ostr &o, allocator &a) { return base.stats(o, a);}
 
     shared_allocator & operator = (const shared_allocator & a2 ) {
       // no need to copy the allocator being shared
@@ -401,12 +307,12 @@ namespace CS2 {
 
     static size_t arena_size() { return segmentsize - sizeof(Segment);}
 
-    void *allocate(size_t size, const char *name=NULL) {
+    void *allocate(size_t size) {
       if (size % sizeof(size_t)) size = (size/sizeof(size_t)+1)*sizeof(size_t);
 
       void *ret;
       if (segment && size>=arena_size()) {
-        Segment *new_segment = (Segment *)base_allocator::allocate(sizeof(Segment)+size, name);
+        Segment *new_segment = (Segment *)base_allocator::allocate(sizeof(Segment)+size);
         new_segment->size = sizeof(Segment)+size;
         new_segment->next = segment->next;
         segment->next=new_segment;
@@ -414,7 +320,7 @@ namespace CS2 {
         ret = (void *)((char *)new_segment + sizeof(Segment));
       } else if (segment==NULL || allocated+size>arena_size()) {
 
-        Segment *new_segment = (Segment *)base_allocator::allocate(segmentsize, name);
+        Segment *new_segment = (Segment *)base_allocator::allocate(segmentsize);
         new_segment->size = segmentsize;
         new_segment->next = segment;
 
@@ -428,13 +334,13 @@ namespace CS2 {
       return ret;
     }
 
-    void deallocate(void *pointer, size_t size, const char *name=NULL) {
+    void deallocate(void *pointer, size_t size) {
       // no deallocation
     }
 
-    void *reallocate(size_t newsize, void *pointer, size_t size, const char *name=NULL) {
+    void *reallocate(size_t newsize, void *pointer, size_t size) {
       if (newsize<=size) return pointer;
-      void *ret = allocate(newsize, name);
+      void *ret = allocate(newsize);
       memcpy(ret, pointer, size);
       return ret;
     }
@@ -442,16 +348,6 @@ namespace CS2 {
     arena_allocator & operator = (const arena_allocator & a2 ) {
       // no need to copy the allocator being shared
       return *this;
-    }
-
-    template <class ostr, class allocator> ostr& stats(ostr &o, allocator &a) {
-      uint32_t c = 0;
-      for (Segment *s = segment; s; s=s->next) c+=1;
-
-      o << "Arena: Segments allocated=" << c << "\n"
-        << "Arena: Top segment allocation: " << allocated << "/" << segmentsize << "\n";
-
-      return base_allocator::stats(o, a);
     }
 
   private:

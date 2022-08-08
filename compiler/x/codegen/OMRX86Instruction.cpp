@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -61,7 +61,7 @@
 #include "x/codegen/GuardedDevirtualSnippet.hpp"
 #endif
 #include "x/codegen/OutlinedInstructions.hpp"
-#include "x/codegen/X86Ops.hpp"
+#include "codegen/InstOpCode.hpp"
 #include "x/codegen/X86Register.hpp"
 
 class TR_VirtualGuardSite;
@@ -104,7 +104,7 @@ TR::RealRegister *assign8BitGPRegister(TR::Instruction   *instr,
    }
 
 
-// Assign any GP (including XMM) register to a virtual register.
+// Assign any GP (including XMM/YMM/ZMM) register to a virtual register.
 //
 TR::RealRegister *assignGPRegister(TR::Instruction   *instr,
                                   TR::Register      *virtReg,
@@ -153,59 +153,54 @@ TR::RealRegister *assignGPRegister(TR::Instruction   *instr,
 ////////////////////////////////////////////////////////////////////////////////
 // TR::X86LabelInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
-void TR::X86LabelInstruction::initialize(TR::LabelSymbol* sym, bool b)
+void TR::X86LabelInstruction::initialize(TR::LabelSymbol *sym)
    {
    _symbol = sym;
-   _needToClearFPStack = b;
    _outlinedInstructionBranch = NULL;
    _reloType = TR_NoRelocation;
    _permitShortening = true;
-   if (sym && self()->getOpCodeValue() == LABEL)
+   if (sym && self()->getOpCodeValue() == TR::InstOpCode::label)
       sym->setInstruction(this);
    else if (sym)
       sym->setDirectlyTargeted();
    }
 
-TR::X86LabelInstruction::X86LabelInstruction(TR_X86OpCodes      op,
+TR::X86LabelInstruction::X86LabelInstruction(TR::InstOpCode::Mnemonic      op,
                                              TR::Node*          node,
                                              TR::LabelSymbol*   sym,
-                                             TR::CodeGenerator* cg,
-                                             bool               b)
+                                             TR::CodeGenerator* cg)
   : TR::Instruction(node, op, cg)
    {
-   initialize(sym, b);
+   initialize(sym);
    }
 
 TR::X86LabelInstruction::X86LabelInstruction(TR::Instruction*   precedingInstruction,
-                                             TR_X86OpCodes      op,
+                                             TR::InstOpCode::Mnemonic      op,
                                              TR::LabelSymbol*   sym,
-                                             TR::CodeGenerator* cg,
-                                             bool               b)
+                                             TR::CodeGenerator* cg)
   : TR::Instruction(op, precedingInstruction, cg)
    {
-   initialize(sym, b);
+   initialize(sym);
    }
 
-TR::X86LabelInstruction::X86LabelInstruction(TR_X86OpCodes                     op,
+TR::X86LabelInstruction::X86LabelInstruction(TR::InstOpCode::Mnemonic                     op,
                                              TR::Node*                         node,
                                              TR::LabelSymbol*                  sym,
                                              TR::RegisterDependencyConditions* cond,
-                                             TR::CodeGenerator*                cg,
-                                             bool                              b)
+                                             TR::CodeGenerator*                cg)
   : TR::Instruction(cond, node, op, cg)
    {
-   initialize(sym, b);
+   initialize(sym);
    }
 
 TR::X86LabelInstruction::X86LabelInstruction(TR::Instruction*                  precedingInstruction,
-                                             TR_X86OpCodes                     op,
+                                             TR::InstOpCode::Mnemonic                     op,
                                              TR::LabelSymbol*                  sym,
                                              TR::RegisterDependencyConditions* cond,
-                                             TR::CodeGenerator*                cg,
-                                             bool                              b)
+                                             TR::CodeGenerator*                cg)
   : TR::Instruction(cond, op, precedingInstruction, cg)
    {
-   initialize(sym, b);
+   initialize(sym);
    }
 
 TR::X86LabelInstruction  *TR::X86LabelInstruction::getX86LabelInstruction()
@@ -242,8 +237,8 @@ void TR::X86LabelInstruction::addPostDepsToOutlinedInstructionsBranch()
 
    _outlinedInstructionBranch->setDependencyConditions(mergeDeps);
 
-   TR_X86RegisterDependencyGroup *depGroup = mergeDeps->getPostConditions();
-   for (int32_t i=0; i<mergeDeps->getNumPostConditions(); i++)
+   TR::RegisterDependencyGroup *depGroup = mergeDeps->getPostConditions();
+   for (auto i = 0U; i < mergeDeps->getNumPostConditions(); i++)
       {
       // Bump the use count on all cloned dependencies.
       //
@@ -263,10 +258,6 @@ void TR::X86LabelInstruction::addPostDepsToOutlinedInstructionsBranch()
 void TR::X86LabelInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigned)
    {
    TR::Compilation *comp = cg()->comp();
-   if (getNeedToClearFPStack())
-      {
-      cg()->machine()->popEntireStack();
-      }
 
    if (kindsToBeAssigned & TR_GPR_Mask)
       {
@@ -278,14 +269,14 @@ void TR::X86LabelInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigned
          //
          getDependencyConditions()->assignPostConditionRegisters(this, kindsToBeAssigned, cg());
 
-         if (getOpCodeValue() == LABEL && getLabelSymbol()->isInternalControlFlowMerge())
+         if (getOpCodeValue() == TR::InstOpCode::label && getLabelSymbol()->isInternalControlFlowMerge())
             {
             // This is the merge label of a non-linear internal control flow region.
             // Record the register assigner state before continuing on the main path.
             //
             cg()->prepareForNonLinearRegisterAssignmentAtMerge(this);
             }
-         else if (getOpCodeValue() != LABEL && getLabelSymbol()->isStartOfColdInstructionStream())
+         else if (getOpCodeValue() != TR::InstOpCode::label && getLabelSymbol()->isStartOfColdInstructionStream())
             {
             if (getLabelSymbol()->isNonLinear() && cg()->getUseNonLinearRegisterAssigner())
                {
@@ -314,7 +305,7 @@ void TR::X86LabelInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigned
          //
          getDependencyConditions()->assignPreConditionRegisters(this, kindsToBeAssigned, cg());
          }
-      else if (getOpCodeValue() != LABEL && getLabelSymbol()->isStartOfColdInstructionStream())
+      else if (getOpCodeValue() != TR::InstOpCode::label && getLabelSymbol()->isStartOfColdInstructionStream())
          {
          if (getLabelSymbol()->isNonLinear() && cg()->getUseNonLinearRegisterAssigner())
             {
@@ -330,7 +321,7 @@ void TR::X86LabelInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigned
             assignOutlinedInstructions(kindsToBeAssigned, this);
             }
          }
-      else if (getOpCodeValue() == LABEL && getLabelSymbol()->isInternalControlFlowMerge())
+      else if (getOpCodeValue() == TR::InstOpCode::label && getLabelSymbol()->isInternalControlFlowMerge())
          {
          // This is the merge label of a non-linear internal control flow region.
          // Record the register assigner state before continuing on the main path.
@@ -409,13 +400,13 @@ void TR::X86LabelInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigned
 // TR::X86FenceInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86FenceInstruction::X86FenceInstruction(TR_X86OpCodes op, TR::Node *node, TR::Node * fenceNode, TR::CodeGenerator *cg)
+TR::X86FenceInstruction::X86FenceInstruction(TR::InstOpCode::Mnemonic op, TR::Node *node, TR::Node * fenceNode, TR::CodeGenerator *cg)
    : TR::Instruction(node, op, cg), _fenceNode(fenceNode)
    {
    }
 
 TR::X86FenceInstruction::X86FenceInstruction(TR::Instruction   *precedingInstruction,
-                                                 TR_X86OpCodes    op,
+                                                 TR::InstOpCode::Mnemonic    op,
                                                  TR::Node          *node,
                                                  TR::CodeGenerator *cg)
    : TR::Instruction(op, precedingInstruction, cg), _fenceNode(node)
@@ -426,7 +417,7 @@ TR::X86FenceInstruction::X86FenceInstruction(TR::Instruction   *precedingInstruc
 // TR::X86ImmInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86ImmInstruction::X86ImmInstruction(TR_X86OpCodes     op,
+TR::X86ImmInstruction::X86ImmInstruction(TR::InstOpCode::Mnemonic     op,
                                            TR::Node *         node,
                                            int32_t           imm,
                                            TR::CodeGenerator *cg,
@@ -438,7 +429,7 @@ TR::X86ImmInstruction::X86ImmInstruction(TR_X86OpCodes     op,
    }
 
 TR::X86ImmInstruction::X86ImmInstruction(TR::Instruction   *precedingInstruction,
-                                           TR_X86OpCodes     op,
+                                           TR::InstOpCode::Mnemonic     op,
                                            int32_t           imm,
                                            TR::CodeGenerator *cg,
                                            int32_t           reloKind)
@@ -448,7 +439,7 @@ TR::X86ImmInstruction::X86ImmInstruction(TR::Instruction   *precedingInstruction
    {
    }
 
-TR::X86ImmInstruction::X86ImmInstruction(TR_X86OpCodes                       op,
+TR::X86ImmInstruction::X86ImmInstruction(TR::InstOpCode::Mnemonic                       op,
                                            TR::Node                            *node,
                                            int32_t                             imm,
                                            TR::RegisterDependencyConditions *cond,
@@ -461,7 +452,7 @@ TR::X86ImmInstruction::X86ImmInstruction(TR_X86OpCodes                       op,
    }
 
 TR::X86ImmInstruction::X86ImmInstruction(TR::Instruction                     *precedingInstruction,
-                                           TR_X86OpCodes                       op,
+                                           TR::InstOpCode::Mnemonic                       op,
                                            int32_t                             imm,
                                            TR::RegisterDependencyConditions *cond,
                                            TR::CodeGenerator                   *cg,
@@ -488,7 +479,7 @@ TR::X86ImmInstruction  *TR::X86ImmInstruction::getX86ImmInstruction()
 // TR::X86ImmSnippetInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86ImmSnippetInstruction::X86ImmSnippetInstruction(TR_X86OpCodes                op,
+TR::X86ImmSnippetInstruction::X86ImmSnippetInstruction(TR::InstOpCode::Mnemonic                op,
                                                          TR::Node                     *node,
                                                          int32_t                      imm,
                                                          TR::UnresolvedDataSnippet *us,
@@ -498,7 +489,7 @@ TR::X86ImmSnippetInstruction::X86ImmSnippetInstruction(TR_X86OpCodes            
    }
 
 TR::X86ImmSnippetInstruction::X86ImmSnippetInstruction(TR::Instruction              *precedingInstruction,
-                                                         TR_X86OpCodes                op,
+                                                         TR::InstOpCode::Mnemonic                op,
                                                          int32_t                      imm,
                                                          TR::UnresolvedDataSnippet *us,
                                                          TR::CodeGenerator            *cg)
@@ -515,7 +506,7 @@ TR::Snippet *TR::X86ImmSnippetInstruction::getSnippetForGC()
 // TR::X86ImmSymInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86ImmSymInstruction::X86ImmSymInstruction(TR_X86OpCodes       op,
+TR::X86ImmSymInstruction::X86ImmSymInstruction(TR::InstOpCode::Mnemonic       op,
                                                  TR::Node            *node,
                                                  int32_t             imm,
                                                  TR::SymbolReference *sr,
@@ -526,7 +517,7 @@ TR::X86ImmSymInstruction::X86ImmSymInstruction(TR_X86OpCodes       op,
    }
 
 TR::X86ImmSymInstruction::X86ImmSymInstruction(TR::Instruction     *precedingInstruction,
-                                                 TR_X86OpCodes       op,
+                                                 TR::InstOpCode::Mnemonic       op,
                                                  int32_t             imm,
                                                  TR::SymbolReference *sr,
                                                  TR::CodeGenerator   *cg)
@@ -535,7 +526,7 @@ TR::X86ImmSymInstruction::X86ImmSymInstruction(TR::Instruction     *precedingIns
    {
    }
 
-TR::X86ImmSymInstruction::X86ImmSymInstruction(TR_X86OpCodes                       op,
+TR::X86ImmSymInstruction::X86ImmSymInstruction(TR::InstOpCode::Mnemonic                       op,
                                                  TR::Node                            *node,
                                                  int32_t                             imm,
                                                  TR::SymbolReference                 *sr,
@@ -547,7 +538,7 @@ TR::X86ImmSymInstruction::X86ImmSymInstruction(TR_X86OpCodes                    
    }
 
 TR::X86ImmSymInstruction::X86ImmSymInstruction(TR::Instruction                     *precedingInstruction,
-                                                 TR_X86OpCodes                       op,
+                                                 TR::InstOpCode::Mnemonic                       op,
                                                  int32_t                             imm,
                                                  TR::SymbolReference                 *sr,
                                                  TR::RegisterDependencyConditions *cond,
@@ -561,11 +552,12 @@ TR::X86ImmSymInstruction::X86ImmSymInstruction(TR::Instruction                  
 // TR::X86RegInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86RegInstruction::X86RegInstruction(TR_X86OpCodes op,
+TR::X86RegInstruction::X86RegInstruction(TR::InstOpCode::Mnemonic op,
                                              TR::Node       *node,
                                              TR::Register   *reg,
-                                             TR::CodeGenerator *cg)
-   : TR::Instruction(node, op, cg), _targetRegister(reg)
+                                             TR::CodeGenerator *cg,
+                                             OMR::X86::Encoding encoding)
+   : TR::Instruction(node, op, cg, encoding), _targetRegister(reg)
    {
    useRegister(reg);
    getOpCode().trackUpperBitsOnReg(reg, cg);
@@ -592,21 +584,23 @@ TR::X86RegInstruction::X86RegInstruction(TR_X86OpCodes op,
    }
 
 TR::X86RegInstruction::X86RegInstruction(TR::Instruction *precedingInstruction,
-                                             TR_X86OpCodes  op,
+                                             TR::InstOpCode::Mnemonic  op,
                                              TR::Register    *reg,
-                                             TR::CodeGenerator *cg)
-   : TR::Instruction(op, precedingInstruction, cg), _targetRegister(reg)
+                                             TR::CodeGenerator *cg,
+                                             OMR::X86::Encoding encoding)
+   : TR::Instruction(op, precedingInstruction, cg, encoding), _targetRegister(reg)
    {
    useRegister(reg);
    getOpCode().trackUpperBitsOnReg(reg, cg);
    }
 
-TR::X86RegInstruction::X86RegInstruction(TR_X86OpCodes                       op,
+TR::X86RegInstruction::X86RegInstruction(TR::InstOpCode::Mnemonic                       op,
                                              TR::Node                             *node,
                                              TR::Register                         *reg,
                                              TR::RegisterDependencyConditions  *cond,
-                                             TR::CodeGenerator *cg)
-   : TR::Instruction(cond, node, op, cg), _targetRegister(reg)
+                                             TR::CodeGenerator *cg,
+                                             OMR::X86::Encoding encoding)
+   : TR::Instruction(cond, node, op, cg, encoding), _targetRegister(reg)
    {
    useRegister(reg);
    getOpCode().trackUpperBitsOnReg(reg, cg);
@@ -633,11 +627,12 @@ TR::X86RegInstruction::X86RegInstruction(TR_X86OpCodes                       op,
    }
 
 TR::X86RegInstruction::X86RegInstruction(TR::Instruction                      *precedingInstruction,
-                                             TR_X86OpCodes                       op,
+                                             TR::InstOpCode::Mnemonic                       op,
                                              TR::Register                         *reg,
                                              TR::RegisterDependencyConditions  *cond,
-                                             TR::CodeGenerator *cg)
-   : TR::Instruction(cond, op, precedingInstruction, cg), _targetRegister(reg)
+                                             TR::CodeGenerator *cg,
+                                             OMR::X86::Encoding encoding)
+   : TR::Instruction(cond, op, precedingInstruction, cg, encoding), _targetRegister(reg)
    {
    useRegister(reg);
    getOpCode().trackUpperBitsOnReg(reg, cg);
@@ -753,44 +748,48 @@ void TR::X86RegInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigned)
 // TR::X86RegRegInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86RegRegInstruction::X86RegRegInstruction(TR_X86OpCodes op,
+TR::X86RegRegInstruction::X86RegRegInstruction(TR::InstOpCode::Mnemonic op,
                                                    TR::Node       *node,
                                                    TR::Register   *treg,
                                                    TR::Register   *sreg,
-                                                   TR::CodeGenerator *cg)
-   : TR::X86RegInstruction(treg, node, op, cg), _sourceRegister(sreg)
+                                                   TR::CodeGenerator *cg,
+                                                   OMR::X86::Encoding encoding)
+   : TR::X86RegInstruction(treg, node, op, cg, encoding), _sourceRegister(sreg)
    {
    useRegister(sreg);
    }
 
 TR::X86RegRegInstruction::X86RegRegInstruction(TR::Instruction *precedingInstruction,
-                                                   TR_X86OpCodes  op,
+                                                   TR::InstOpCode::Mnemonic  op,
                                                    TR::Register    *treg,
                                                    TR::Register    *sreg,
-                                                   TR::CodeGenerator *cg)
-   : TR::X86RegInstruction(treg, op, precedingInstruction, cg), _sourceRegister(sreg)
+                                                   TR::CodeGenerator *cg,
+                                                   OMR::X86::Encoding encoding)
+   : TR::X86RegInstruction(treg, op, precedingInstruction, cg, encoding), _sourceRegister(sreg)
    {
    useRegister(sreg);
    }
 
-TR::X86RegRegInstruction::X86RegRegInstruction(TR_X86OpCodes                       op,
+TR::X86RegRegInstruction::X86RegRegInstruction(TR::InstOpCode::Mnemonic                       op,
                                                    TR::Node                             *node,
                                                    TR::Register                         *treg,
                                                    TR::Register                         *sreg,
                                                    TR::RegisterDependencyConditions  *cond,
-                                                   TR::CodeGenerator *cg)
-   : TR::X86RegInstruction(cond, treg, node, op, cg), _sourceRegister(sreg)
+                                                   TR::CodeGenerator *cg,
+                                                   OMR::X86::Encoding encoding)
+   : TR::X86RegInstruction(cond, treg, node, op, cg, encoding), _sourceRegister(sreg)
    {
    useRegister(sreg);
    }
 
 TR::X86RegRegInstruction::X86RegRegInstruction(TR::Instruction                      *precedingInstruction,
-                                                   TR_X86OpCodes                       op,
+                                                   TR::InstOpCode::Mnemonic                       op,
                                                    TR::Register                         *treg,
                                                    TR::Register                         *sreg,
                                                    TR::RegisterDependencyConditions  *cond,
-                                                   TR::CodeGenerator *cg)
-   : TR::X86RegInstruction(cond, treg, op, precedingInstruction, cg), _sourceRegister(sreg)
+                                                   TR::CodeGenerator *cg,
+                                                   OMR::X86::Encoding encoding)
+   : TR::X86RegInstruction(cond, treg, op, precedingInstruction, cg, encoding), _sourceRegister(sreg)
    {
    useRegister(sreg);
    }
@@ -861,10 +860,14 @@ void TR::X86RegRegInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigne
 
       TR_RegisterSizes firstRequestedRegSize = getOpCode().hasByteTarget() ? TR_ByteReg :
                                                getOpCode().hasXMMTarget()  ? TR_QuadWordReg :
+                                               getOpCode().hasYMMTarget()  ? TR_VectorReg256 :
+                                               getOpCode().hasZMMTarget()  ? TR_VectorReg512 :
                                                                              TR_WordReg;
 
       TR_RegisterSizes secondRequestedRegSize = getOpCode().hasByteSource() ? TR_ByteReg :
                                                 getOpCode().hasXMMSource()  ? TR_QuadWordReg :
+                                                getOpCode().hasYMMSource()  ? TR_VectorReg256 :
+                                                getOpCode().hasZMMSource()  ? TR_VectorReg512 :
                                                                               TR_WordReg;
 
       // Ensure both source and target registers have the
@@ -876,7 +879,7 @@ void TR::X86RegRegInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigne
          }
 
       bool regRegCopy = isRegRegMove();
-      TR_X86OpCodes opCode = getOpCodeValue();
+      TR::InstOpCode::Mnemonic opCode = getOpCodeValue();
 
       if (getDependencyConditions())
          {
@@ -999,9 +1002,9 @@ void TR::X86RegRegInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigne
       //
       if (firstRegister == secondRegister)
          {
-         if (opCode == CVTSS2SDRegReg)
+         if (opCode == TR::InstOpCode::CVTSS2SDRegReg)
             secondRegister->setIsSinglePrecision(true);
-         else if (opCode == CVTSD2SSRegReg)
+         else if (opCode == TR::InstOpCode::CVTSD2SSRegReg)
             secondRegister->setIsSinglePrecision(false);
          }
       }
@@ -1023,7 +1026,7 @@ void TR::X86RegRegInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigne
 // TR::X86RegImmInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86RegImmInstruction::X86RegImmInstruction(TR_X86OpCodes     op,
+TR::X86RegImmInstruction::X86RegImmInstruction(TR::InstOpCode::Mnemonic     op,
                                                  TR::Node          *node,
                                                  TR::Register      *treg,
                                                  int32_t           imm,
@@ -1034,7 +1037,7 @@ TR::X86RegImmInstruction::X86RegImmInstruction(TR_X86OpCodes     op,
    }
 
 TR::X86RegImmInstruction::X86RegImmInstruction(TR::Instruction   *precedingInstruction,
-                                                 TR_X86OpCodes     op,
+                                                 TR::InstOpCode::Mnemonic     op,
                                                  TR::Register      *treg,
                                                  int32_t           imm,
                                                  TR::CodeGenerator *cg,
@@ -1044,7 +1047,7 @@ TR::X86RegImmInstruction::X86RegImmInstruction(TR::Instruction   *precedingInstr
    }
 
 
-TR::X86RegImmInstruction::X86RegImmInstruction(TR_X86OpCodes                       op,
+TR::X86RegImmInstruction::X86RegImmInstruction(TR::InstOpCode::Mnemonic                       op,
                                                  TR::Node                            *node,
                                                  TR::Register                        *treg,
                                                  int32_t                             imm,
@@ -1056,7 +1059,7 @@ TR::X86RegImmInstruction::X86RegImmInstruction(TR_X86OpCodes                    
    }
 
 TR::X86RegImmInstruction::X86RegImmInstruction(TR::Instruction                     *precedingInstruction,
-                                                 TR_X86OpCodes                       op,
+                                                 TR::InstOpCode::Mnemonic                       op,
                                                  TR::Register                        *treg,
                                                  int32_t                             imm,
                                                  TR::RegisterDependencyConditions *cond,
@@ -1073,16 +1076,16 @@ void TR::X86RegImmInstruction::adjustVFPState(TR_VFPState *state, TR::CodeGenera
       {
       switch (getOpCodeValue())
          {
-         case ADD4RegImms:
-         case ADD4RegImm4:
-         case ADD8RegImms:
-         case ADD8RegImm4:
+         case TR::InstOpCode::ADD4RegImms:
+         case TR::InstOpCode::ADD4RegImm4:
+         case TR::InstOpCode::ADD8RegImms:
+         case TR::InstOpCode::ADD8RegImm4:
             state->_displacement -= getSourceImmediate();
             break;
-         case SUB4RegImms:
-         case SUB4RegImm4:
-         case SUB8RegImms:
-         case SUB8RegImm4:
+         case TR::InstOpCode::SUB4RegImms:
+         case TR::InstOpCode::SUB4RegImm4:
+         case TR::InstOpCode::SUB8RegImms:
+         case TR::InstOpCode::SUB8RegImm4:
             state->_displacement += getSourceImmediate();
             break;
          default:
@@ -1099,7 +1102,7 @@ void TR::X86RegImmInstruction::adjustVFPState(TR_VFPState *state, TR::CodeGenera
 // TR::X86RegImmSymInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86RegImmSymInstruction::X86RegImmSymInstruction(TR_X86OpCodes       op,
+TR::X86RegImmSymInstruction::X86RegImmSymInstruction(TR::InstOpCode::Mnemonic       op,
                                                        TR::Node            *node,
                                                        TR::Register        *reg,
                                                        int32_t             imm,
@@ -1111,7 +1114,7 @@ TR::X86RegImmSymInstruction::X86RegImmSymInstruction(TR_X86OpCodes       op,
    }
 
 TR::X86RegImmSymInstruction::X86RegImmSymInstruction(TR::Instruction     *precedingInstruction,
-                                                       TR_X86OpCodes       op,
+                                                       TR::InstOpCode::Mnemonic       op,
                                                        TR::Register        *reg,
                                                        int32_t             imm,
                                                        TR::SymbolReference *sr,
@@ -1146,13 +1149,21 @@ TR::X86RegImmSymInstruction::autoSetReloKind()
       {
       setReloKind(TR_DebugCounter);
       }
+   else if (symbol->isBlockFrequency())
+      {
+      setReloKind(TR_BlockFrequency);
+      }
+   else if (symbol->isRecompQueuedFlag())
+      {
+      setReloKind(TR_RecompQueuedFlag);
+      }
    }
 
 ////////////////////////////////////////////////////////////////////////////////
 // TR::X86RegRegImmInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86RegRegImmInstruction::X86RegRegImmInstruction(TR_X86OpCodes     op,
+TR::X86RegRegImmInstruction::X86RegRegImmInstruction(TR::InstOpCode::Mnemonic     op,
                                                        TR::Node          *node,
                                                        TR::Register      *treg,
                                                        TR::Register      *sreg,
@@ -1163,7 +1174,7 @@ TR::X86RegRegImmInstruction::X86RegRegImmInstruction(TR_X86OpCodes     op,
    }
 
 TR::X86RegRegImmInstruction::X86RegRegImmInstruction(TR::Instruction   *precedingInstruction,
-                                                       TR_X86OpCodes     op,
+                                                       TR::InstOpCode::Mnemonic     op,
                                                        TR::Register      *treg,
                                                        TR::Register      *sreg,
                                                        int32_t           imm,
@@ -1176,48 +1187,52 @@ TR::X86RegRegImmInstruction::X86RegRegImmInstruction(TR::Instruction   *precedin
 // TR::X86RegRegRegInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86RegRegRegInstruction::X86RegRegRegInstruction(TR_X86OpCodes op,
+TR::X86RegRegRegInstruction::X86RegRegRegInstruction(TR::InstOpCode::Mnemonic op,
                                                          TR::Node       *node,
                                                          TR::Register   *treg,
                                                          TR::Register   *slreg,
                                                          TR::Register   *srreg,
-                                                         TR::CodeGenerator *cg)
-   : TR::X86RegRegInstruction(srreg, treg, node, op, cg), _source2ndRegister(slreg)
+                                                         TR::CodeGenerator *cg,
+                                                         OMR::X86::Encoding encoding)
+   : TR::X86RegRegInstruction(srreg, treg, node, op, cg, encoding), _source2ndRegister(slreg)
    {
    useRegister(slreg);
    }
 
 TR::X86RegRegRegInstruction::X86RegRegRegInstruction(TR::Instruction *precedingInstruction,
-                                                         TR_X86OpCodes  op,
+                                                         TR::InstOpCode::Mnemonic  op,
                                                          TR::Register    *treg,
                                                          TR::Register    *slreg,
                                                          TR::Register    *srreg,
-                                                         TR::CodeGenerator *cg)
-   : TR::X86RegRegInstruction(srreg, treg, op, precedingInstruction, cg), _source2ndRegister(slreg)
+                                                         TR::CodeGenerator *cg,
+                                                         OMR::X86::Encoding encoding)
+   : TR::X86RegRegInstruction(srreg, treg, op, precedingInstruction, cg, encoding), _source2ndRegister(slreg)
    {
    useRegister(slreg);
    }
 
-TR::X86RegRegRegInstruction::X86RegRegRegInstruction(TR_X86OpCodes                       op,
+TR::X86RegRegRegInstruction::X86RegRegRegInstruction(TR::InstOpCode::Mnemonic                       op,
                                                          TR::Node                             *node,
                                                          TR::Register                         *treg,
                                                          TR::Register                         *slreg,
                                                          TR::Register                         *srreg,
                                                          TR::RegisterDependencyConditions  *cond,
-                                                         TR::CodeGenerator *cg)
-   : TR::X86RegRegInstruction(cond, srreg, treg, node, op, cg), _source2ndRegister(slreg)
+                                                         TR::CodeGenerator *cg,
+                                                         OMR::X86::Encoding encoding)
+   : TR::X86RegRegInstruction(cond, srreg, treg, node, op, cg, encoding), _source2ndRegister(slreg)
    {
    useRegister(slreg);
    }
 
 TR::X86RegRegRegInstruction::X86RegRegRegInstruction(TR::Instruction                      *precedingInstruction,
-                                                         TR_X86OpCodes                       op,
+                                                         TR::InstOpCode::Mnemonic                       op,
                                                          TR::Register                         *treg,
                                                          TR::Register                         *slreg,
                                                          TR::Register                         *srreg,
                                                          TR::RegisterDependencyConditions  *cond,
-                                                         TR::CodeGenerator *cg)
-   : TR::X86RegRegInstruction(cond, srreg, treg, op, precedingInstruction, cg), _source2ndRegister(slreg)
+                                                         TR::CodeGenerator *cg,
+                                                         OMR::X86::Encoding encoding)
+   : TR::X86RegRegInstruction(cond, srreg, treg, op, precedingInstruction, cg, encoding), _source2ndRegister(slreg)
    {
    useRegister(slreg);
    }
@@ -1286,9 +1301,16 @@ void TR::X86RegRegRegInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssi
       }
 
    TR_RegisterSizes firstRequestedRegSize  = getOpCode().hasByteTarget() ? TR_ByteReg :
-                                             getOpCode().hasXMMTarget() ? TR_QuadWordReg :  TR_WordReg;
+                                             getOpCode().hasXMMTarget() ? TR_QuadWordReg :
+                                             getOpCode().hasYMMTarget() ? TR_VectorReg256 :
+                                             getOpCode().hasZMMTarget() ? TR_VectorReg512 :
+                                             TR_WordReg;
+
    TR_RegisterSizes secondRequestedRegSize = getOpCode().hasByteSource() ? TR_ByteReg :
-                                             getOpCode().hasXMMSource()  ? TR_QuadWordReg : TR_WordReg;
+                                             getOpCode().hasXMMSource()  ? TR_QuadWordReg :
+                                             getOpCode().hasYMMSource() ? TR_VectorReg256 :
+                                             getOpCode().hasZMMSource() ? TR_VectorReg512 :
+                                             TR_WordReg;
    TR_RegisterSizes thirdRequestedRegSize  = secondRequestedRegSize;
 
    if (kindsToBeAssigned & getTargetRegister()->getKindAsMask())
@@ -1323,8 +1345,7 @@ void TR::X86RegRegRegInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssi
 
       if (firstRegister->decFutureUseCount() == 0                      &&
           assignedFirstRegister->getState() != TR::RealRegister::Locked &&
-          firstRegister == getTargetRegister()                         &&
-          getOpCodeValue() != WRTBAR)
+          firstRegister == getTargetRegister())
          {
          cg()->traceRegFreed(firstRegister, assignedFirstRegister);
          firstRegister->setAssignedRegister(NULL);
@@ -1415,16 +1436,6 @@ void TR::X86RegRegRegInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssi
             }
          }
 
-      if (firstRegister->getFutureUseCount() == 0                      &&
-          assignedFirstRegister->getState() != TR::RealRegister::Locked &&
-          getOpCodeValue() == WRTBAR)
-         {
-         cg()->traceRegFreed(firstRegister, assignedFirstRegister);
-         firstRegister->setAssignedRegister(NULL);
-         assignedFirstRegister->setAssignedRegister(NULL);
-         assignedFirstRegister->setState(TR::RealRegister::Free);
-         }
-
       setTargetRegister(assignedFirstRegister);
       setSourceRegister(assignedSecondRegister);
       setSource2ndRegister(assignedThirdRegister);
@@ -1457,22 +1468,22 @@ void padUnresolvedReferenceInstruction(TR::Instruction *instr, TR::MemoryReferen
 
 void insertUnresolvedReferenceInstructionMemoryBarrier(TR::CodeGenerator *cg, int32_t barrier, TR::Instruction *inst, TR::MemoryReference *mr, TR::Register *srcReg, TR::MemoryReference *anotherMr)
    {
-      TR_X86OpCode fenceOp;
+      TR::InstOpCode fenceOp;
       bool is5ByteFence = false;
 
-      TR_ASSERT_FATAL(cg->comp()->compileRelocatableCode() || cg->comp()->isOutOfProcessCompilation() || cg->comp()->target().cpu.requiresLFence() == cg->getX86ProcessorInfo().requiresLFENCE(), "requiresLFence() failed\n");
+      TR_ASSERT_FATAL(cg->comp()->compileRelocatableCode() || cg->comp()->isOutOfProcessCompilation() || cg->comp()->compilePortableCode() || cg->comp()->target().cpu.requiresLFence() == cg->getX86ProcessorInfo().requiresLFENCE(), "requiresLFence() failed\n");
 
       if (barrier & LockOR)
          {
-         fenceOp.setOpCodeValue(LOR4MemImms);
+         fenceOp.setOpCodeValue(TR::InstOpCode::LOR4MemImms);
          is5ByteFence = true;
          }
       else if ((barrier & kMemoryFence) == kMemoryFence)
-         fenceOp.setOpCodeValue(MFENCE);
+         fenceOp.setOpCodeValue(TR::InstOpCode::MFENCE);
       else if ((barrier & kLoadFence) && cg->comp()->target().cpu.requiresLFence())
-         fenceOp.setOpCodeValue(LFENCE);
+         fenceOp.setOpCodeValue(TR::InstOpCode::LFENCE);
       else if (barrier & kStoreFence)
-         fenceOp.setOpCodeValue(SFENCE);
+         fenceOp.setOpCodeValue(TR::InstOpCode::SFENCE);
       else
          TR_ASSERT(false, "No valid memory barrier has been found. \n");
 
@@ -1543,7 +1554,7 @@ void insertUnresolvedReferenceInstructionMemoryBarrier(TR::CodeGenerator *cg, in
       deps->stopAddingConditions();
 
       if (deps)
-         generateLabelInstruction(fenceInst, LABEL, doneLabel, deps, cg);
+         generateLabelInstruction(fenceInst, TR::InstOpCode::label, doneLabel, deps, cg);
 
    }
 
@@ -1551,12 +1562,13 @@ void insertUnresolvedReferenceInstructionMemoryBarrier(TR::CodeGenerator *cg, in
 // TR::X86MemInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86MemInstruction::X86MemInstruction(TR_X86OpCodes          op,
+TR::X86MemInstruction::X86MemInstruction(TR::InstOpCode::Mnemonic          op,
                                              TR::Node                *node,
                                              TR::MemoryReference  *mr,
                                              TR::CodeGenerator       *cg,
-                                             TR::Register            *sreg)
-   : TR::Instruction(node, op, cg), _memoryReference(mr)
+                                             TR::Register            *sreg,
+                                             OMR::X86::Encoding encoding)
+   : TR::Instruction(node, op, cg, encoding), _memoryReference(mr)
    {
    mr->useRegisters(this, cg);
    if (mr->getUnresolvedDataSnippet() != NULL)
@@ -1584,11 +1596,12 @@ TR::X86MemInstruction::X86MemInstruction(TR_X86OpCodes          op,
    }
 
 TR::X86MemInstruction::X86MemInstruction(TR::Instruction         *precedingInstruction,
-                                             TR_X86OpCodes          op,
+                                             TR::InstOpCode::Mnemonic          op,
                                              TR::MemoryReference  *mr,
                                              TR::CodeGenerator *cg,
-                                             TR::Register            *sreg)
-   : TR::Instruction(op, precedingInstruction, cg), _memoryReference(mr)
+                                             TR::Register            *sreg,
+                                             OMR::X86::Encoding encoding)
+   : TR::Instruction(op, precedingInstruction, cg, encoding), _memoryReference(mr)
    {
    mr->useRegisters(this, cg);
    if (mr->getUnresolvedDataSnippet() != NULL)
@@ -1605,13 +1618,14 @@ TR::X86MemInstruction::X86MemInstruction(TR::Instruction         *precedingInstr
       }
    }
 
-TR::X86MemInstruction::X86MemInstruction(TR_X86OpCodes                       op,
+TR::X86MemInstruction::X86MemInstruction(TR::InstOpCode::Mnemonic                       op,
                                              TR::Node                             *node,
                                              TR::MemoryReference               *mr,
                                              TR::RegisterDependencyConditions  *cond,
                                              TR::CodeGenerator *cg,
-                                             TR::Register                         *sreg)
-   : TR::Instruction(cond, node, op, cg), _memoryReference(mr)
+                                             TR::Register                         *sreg,
+                                             OMR::X86::Encoding encoding)
+   : TR::Instruction(cond, node, op, cg, encoding), _memoryReference(mr)
    {
    mr->useRegisters(this, cg);
    if (mr->getUnresolvedDataSnippet() != NULL)
@@ -1753,7 +1767,7 @@ void TR::X86MemTableInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssig
 // TR::X86CallMemInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86CallMemInstruction::X86CallMemInstruction(TR_X86OpCodes                       op,
+TR::X86CallMemInstruction::X86CallMemInstruction(TR::InstOpCode::Mnemonic                       op,
                                                      TR::Node                             *node,
                                                      TR::MemoryReference               *mr,
                                                      TR::RegisterDependencyConditions  *cond,
@@ -1763,7 +1777,7 @@ TR::X86CallMemInstruction::X86CallMemInstruction(TR_X86OpCodes                  
    }
 
 TR::X86CallMemInstruction::X86CallMemInstruction(TR::Instruction                      *precedingInstruction,
-                                                     TR_X86OpCodes                       op,
+                                                     TR::InstOpCode::Mnemonic                       op,
                                                      TR::MemoryReference               *mr,
                                                      TR::RegisterDependencyConditions  *cond,
                                                      TR::CodeGenerator *cg)
@@ -1771,7 +1785,7 @@ TR::X86CallMemInstruction::X86CallMemInstruction(TR::Instruction                
    {
    }
 
-TR::X86CallMemInstruction::X86CallMemInstruction(TR_X86OpCodes                       op,
+TR::X86CallMemInstruction::X86CallMemInstruction(TR::InstOpCode::Mnemonic                       op,
                                                      TR::Node                             *node,
                                                      TR::MemoryReference               *mr,
                                                      TR::CodeGenerator *cg)
@@ -1810,7 +1824,7 @@ void TR::X86CallMemInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssign
 // TR::X86MemImmInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86MemImmInstruction::X86MemImmInstruction(TR_X86OpCodes          op,
+TR::X86MemImmInstruction::X86MemImmInstruction(TR::InstOpCode::Mnemonic          op,
                                                  TR::Node               *node,
                                                  TR::MemoryReference *mr,
                                                  int32_t                imm,
@@ -1821,7 +1835,7 @@ TR::X86MemImmInstruction::X86MemImmInstruction(TR_X86OpCodes          op,
    }
 
 TR::X86MemImmInstruction::X86MemImmInstruction(TR::Instruction        *precedingInstruction,
-                                                 TR_X86OpCodes          op,
+                                                 TR::InstOpCode::Mnemonic          op,
                                                  TR::MemoryReference *mr,
                                                  int32_t                imm,
                                                  TR::CodeGenerator      *cg,
@@ -1834,7 +1848,7 @@ TR::X86MemImmInstruction::X86MemImmInstruction(TR::Instruction        *preceding
 // TR::X86MemImmSymInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86MemImmSymInstruction::X86MemImmSymInstruction(TR_X86OpCodes          op,
+TR::X86MemImmSymInstruction::X86MemImmSymInstruction(TR::InstOpCode::Mnemonic          op,
                                                        TR::Node               *node,
                                                        TR::MemoryReference *mr,
                                                        int32_t                imm,
@@ -1845,7 +1859,7 @@ TR::X86MemImmSymInstruction::X86MemImmSymInstruction(TR_X86OpCodes          op,
    }
 
 TR::X86MemImmSymInstruction::X86MemImmSymInstruction(TR::Instruction        *precedingInstruction,
-                                                       TR_X86OpCodes          op,
+                                                       TR::InstOpCode::Mnemonic          op,
                                                        TR::MemoryReference *mr,
                                                        int32_t                imm,
                                                        TR::SymbolReference    *sr,
@@ -1858,44 +1872,48 @@ TR::X86MemImmSymInstruction::X86MemImmSymInstruction(TR::Instruction        *pre
 // TR::X86MemRegInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86MemRegInstruction::X86MemRegInstruction(TR_X86OpCodes          op,
+TR::X86MemRegInstruction::X86MemRegInstruction(TR::InstOpCode::Mnemonic          op,
                                                    TR::Node                *node,
                                                    TR::MemoryReference  *mr,
                                                    TR::Register            *sreg,
-                                                   TR::CodeGenerator *cg)
-   : TR::X86MemInstruction(mr, node, op, cg, sreg), _sourceRegister(sreg)
+                                                   TR::CodeGenerator *cg,
+                                                   OMR::X86::Encoding encoding)
+   : TR::X86MemInstruction(mr, node, op, cg, sreg, encoding), _sourceRegister(sreg)
    {
    useRegister(sreg);
    }
 
 TR::X86MemRegInstruction::X86MemRegInstruction(TR::Instruction         *precedingInstruction,
-                                                   TR_X86OpCodes          op,
+                                                   TR::InstOpCode::Mnemonic          op,
                                                    TR::MemoryReference  *mr,
                                                    TR::Register            *sreg,
-                                                   TR::CodeGenerator *cg)
-   : TR::X86MemInstruction(mr, op, precedingInstruction, cg, sreg), _sourceRegister(sreg)
+                                                   TR::CodeGenerator *cg,
+                                                   OMR::X86::Encoding encoding)
+   : TR::X86MemInstruction(mr, op, precedingInstruction, cg, sreg, encoding), _sourceRegister(sreg)
    {
    useRegister(sreg);
    }
 
-TR::X86MemRegInstruction::X86MemRegInstruction(TR_X86OpCodes                       op,
+TR::X86MemRegInstruction::X86MemRegInstruction(TR::InstOpCode::Mnemonic                       op,
                                                    TR::Node                             *node,
                                                    TR::MemoryReference               *mr,
                                                    TR::Register                         *sreg,
                                                    TR::RegisterDependencyConditions  *cond,
-                                                   TR::CodeGenerator *cg)
-   : TR::X86MemInstruction(cond, mr, node, op, cg, sreg), _sourceRegister(sreg)
+                                                   TR::CodeGenerator *cg,
+                                                   OMR::X86::Encoding encoding)
+   : TR::X86MemInstruction(cond, mr, node, op, cg, sreg, encoding), _sourceRegister(sreg)
    {
    useRegister(sreg);
    }
 
 TR::X86MemRegInstruction::X86MemRegInstruction(TR::Instruction                      *precedingInstruction,
-                                                   TR_X86OpCodes                       op,
+                                                   TR::InstOpCode::Mnemonic                       op,
                                                    TR::MemoryReference               *mr,
                                                    TR::Register                         *sreg,
                                                    TR::RegisterDependencyConditions  *cond,
-                                                   TR::CodeGenerator *cg)
-   : TR::X86MemInstruction(cond, mr, op, precedingInstruction, cg, sreg), _sourceRegister(sreg)
+                                                   TR::CodeGenerator *cg,
+                                                   OMR::X86::Encoding encoding)
+   : TR::X86MemInstruction(cond, mr, op, precedingInstruction, cg, sreg, encoding), _sourceRegister(sreg)
    {
    useRegister(sreg);
    }
@@ -1986,6 +2004,14 @@ void TR::X86MemRegInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigne
          else if (getOpCode().hasXMMSource())
             {
             requestedRegSize = TR_QuadWordReg;
+            }
+         else if (getOpCode().hasYMMSource())
+            {
+            requestedRegSize = TR_VectorReg256;
+            }
+         else if (getOpCode().hasZMMSource())
+            {
+            requestedRegSize = TR_VectorReg512;
             }
 
          if (assignedRegister == NULL)
@@ -2095,7 +2121,7 @@ void TR::X86MemRegInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigne
 // TR::X86MemRegImmInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86MemRegImmInstruction::X86MemRegImmInstruction(TR_X86OpCodes          op,
+TR::X86MemRegImmInstruction::X86MemRegImmInstruction(TR::InstOpCode::Mnemonic          op,
                                                        TR::Node               *node,
                                                        TR::MemoryReference *mr,
                                                        TR::Register           *sreg,
@@ -2106,7 +2132,7 @@ TR::X86MemRegImmInstruction::X86MemRegImmInstruction(TR_X86OpCodes          op,
    }
 
 TR::X86MemRegImmInstruction::X86MemRegImmInstruction(TR::Instruction        *precedingInstruction,
-                                                       TR_X86OpCodes          op,
+                                                       TR::InstOpCode::Mnemonic          op,
                                                        TR::MemoryReference *mr,
                                                        TR::Register           *sreg,
                                                        int32_t                imm,
@@ -2120,12 +2146,13 @@ TR::X86MemRegImmInstruction::X86MemRegImmInstruction(TR::Instruction        *pre
 // TR::X86RegMemInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86RegMemInstruction::X86RegMemInstruction(TR_X86OpCodes          op,
+TR::X86RegMemInstruction::X86RegMemInstruction(TR::InstOpCode::Mnemonic          op,
                                                    TR::Node                *node,
                                                    TR::Register            *treg,
                                                    TR::MemoryReference  *mr,
-                                                   TR::CodeGenerator *cg)
-   : TR::X86RegInstruction(treg, node, op, cg), _memoryReference(mr)
+                                                   TR::CodeGenerator *cg,
+                                                   OMR::X86::Encoding encoding)
+   : TR::X86RegInstruction(treg, node, op, cg, encoding), _memoryReference(mr)
    {
    mr->useRegisters(this, cg);
    if (mr->getUnresolvedDataSnippet() != NULL)
@@ -2137,7 +2164,7 @@ TR::X86RegMemInstruction::X86RegMemInstruction(TR_X86OpCodes          op,
    // a live discardable register.
    //
    if (cg->enableRematerialisation() &&
-      (getOpCodeValue() == LEA2RegMem || getOpCodeValue() ==  LEA4RegMem || getOpCodeValue() == LEA8RegMem) &&
+      (getOpCodeValue() == TR::InstOpCode::LEA2RegMem || getOpCodeValue() ==  TR::InstOpCode::LEA4RegMem || getOpCodeValue() == TR::InstOpCode::LEA8RegMem) &&
       !cg->getLiveDiscardableRegisters().empty())
       {
       cg->clobberLiveDiscardableRegisters(this, mr);
@@ -2145,11 +2172,12 @@ TR::X86RegMemInstruction::X86RegMemInstruction(TR_X86OpCodes          op,
    }
 
 TR::X86RegMemInstruction::X86RegMemInstruction(TR::Instruction         *precedingInstruction,
-                                                   TR_X86OpCodes          op,
+                                                   TR::InstOpCode::Mnemonic          op,
                                                    TR::Register            *treg,
                                                    TR::MemoryReference  *mr,
-                                                   TR::CodeGenerator *cg)
-   : TR::X86RegInstruction(treg, op, precedingInstruction, cg), _memoryReference(mr)
+                                                   TR::CodeGenerator *cg,
+                                                   OMR::X86::Encoding encoding)
+   : TR::X86RegInstruction(treg, op, precedingInstruction, cg, encoding), _memoryReference(mr)
    {
    mr->useRegisters(this, cg);
    if (mr->getUnresolvedDataSnippet() != NULL)
@@ -2158,13 +2186,14 @@ TR::X86RegMemInstruction::X86RegMemInstruction(TR::Instruction         *precedin
       }
    }
 
-TR::X86RegMemInstruction::X86RegMemInstruction(TR_X86OpCodes                       op,
+TR::X86RegMemInstruction::X86RegMemInstruction(TR::InstOpCode::Mnemonic                       op,
                                                    TR::Node                             *node,
                                                    TR::Register                         *treg,
                                                    TR::MemoryReference               *mr,
                                                    TR::RegisterDependencyConditions  *cond,
-                                                   TR::CodeGenerator *cg)
-   : TR::X86RegInstruction(cond, treg, node, op, cg), _memoryReference(mr)
+                                                   TR::CodeGenerator *cg,
+                                                   OMR::X86::Encoding encoding)
+   : TR::X86RegInstruction(cond, treg, node, op, cg, encoding), _memoryReference(mr)
    {
    mr->useRegisters(this, cg);
    if (mr->getUnresolvedDataSnippet() != NULL)
@@ -2176,7 +2205,7 @@ TR::X86RegMemInstruction::X86RegMemInstruction(TR_X86OpCodes                    
    // a live discardable register.
    //
    if (cg->enableRematerialisation() &&
-      (getOpCodeValue() == LEA2RegMem || getOpCodeValue() ==  LEA4RegMem || getOpCodeValue() == LEA8RegMem) &&
+      (getOpCodeValue() == TR::InstOpCode::LEA2RegMem || getOpCodeValue() ==  TR::InstOpCode::LEA4RegMem || getOpCodeValue() == TR::InstOpCode::LEA8RegMem) &&
       !cg->getLiveDiscardableRegisters().empty())
       {
       cg->clobberLiveDiscardableRegisters(this, mr);
@@ -2184,12 +2213,13 @@ TR::X86RegMemInstruction::X86RegMemInstruction(TR_X86OpCodes                    
    }
 
 TR::X86RegMemInstruction::X86RegMemInstruction(TR::Instruction                      *precedingInstruction,
-                                                   TR_X86OpCodes                       op,
+                                                   TR::InstOpCode::Mnemonic                       op,
                                                    TR::Register                         *treg,
                                                    TR::MemoryReference               *mr,
                                                    TR::RegisterDependencyConditions  *cond,
-                                                   TR::CodeGenerator *cg)
-   : TR::X86RegInstruction(cond, treg, op, precedingInstruction, cg), _memoryReference(mr)
+                                                   TR::CodeGenerator *cg,
+                                                   OMR::X86::Encoding encoding)
+   : TR::X86RegInstruction(cond, treg, op, precedingInstruction, cg, encoding), _memoryReference(mr)
    {
    mr->useRegisters(this, cg);
    if (mr->getUnresolvedDataSnippet() != NULL)
@@ -2267,6 +2297,14 @@ void TR::X86RegMemInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigne
       else if (getOpCode().hasXMMTarget())
          {
          requestedRegSize = TR_QuadWordReg;
+         }
+      else if (getOpCode().hasYMMTarget())
+         {
+         requestedRegSize = TR_VectorReg256;
+         }
+      else if (getOpCode().hasZMMTarget())
+         {
+         requestedRegSize = TR_VectorReg512;
          }
 
       if (getDependencyConditions())
@@ -2350,7 +2388,7 @@ void TR::X86RegMemInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigne
          }
       }
 
-   if (getOpCodeValue() == LEARegMem())
+   if (getOpCodeValue() == TR::InstOpCode::LEARegMem())
       {
       TR::Register *solitaryMemrefRegister = NULL;
       if (getMemoryReference()->getDisplacement() == 0)
@@ -2367,7 +2405,7 @@ void TR::X86RegMemInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigne
 // TR::X86RegMemImmInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86RegMemImmInstruction::X86RegMemImmInstruction(TR_X86OpCodes          op,
+TR::X86RegMemImmInstruction::X86RegMemImmInstruction(TR::InstOpCode::Mnemonic          op,
                                                        TR::Node               *node,
                                                        TR::Register           *treg,
                                                        TR::MemoryReference *mr,
@@ -2378,7 +2416,7 @@ TR::X86RegMemImmInstruction::X86RegMemImmInstruction(TR_X86OpCodes          op,
    }
 
 TR::X86RegMemImmInstruction::X86RegMemImmInstruction(TR::Instruction        *precedingInstruction,
-                                                       TR_X86OpCodes          op,
+                                                       TR::InstOpCode::Mnemonic          op,
                                                        TR::Register           *treg,
                                                        TR::MemoryReference *mr,
                                                        int32_t                imm,
@@ -2391,25 +2429,27 @@ TR::X86RegMemImmInstruction::X86RegMemImmInstruction(TR::Instruction        *pre
 // TR::X86RegRegMemInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86RegRegMemInstruction::X86RegRegMemInstruction(TR_X86OpCodes        op,
+TR::X86RegRegMemInstruction::X86RegRegMemInstruction(TR::InstOpCode::Mnemonic        op,
                                                      TR::Node            *node,
                                                      TR::Register        *slreg,
                                                      TR::Register        *srreg,
                                                      TR::MemoryReference *mr,
-                                                     TR::CodeGenerator   *cg)
-   : TR::X86RegMemInstruction(op, node, slreg, mr, cg), _source2ndRegister(srreg)
+                                                     TR::CodeGenerator   *cg,
+                                                     OMR::X86::Encoding encoding)
+   : TR::X86RegMemInstruction(op, node, slreg, mr, cg, encoding), _source2ndRegister(srreg)
    {
    useRegister(srreg);
    }
 
-TR::X86RegRegMemInstruction::X86RegRegMemInstruction(TR_X86OpCodes                      op,
+TR::X86RegRegMemInstruction::X86RegRegMemInstruction(TR::InstOpCode::Mnemonic                      op,
                                                      TR::Node                          *node,
                                                      TR::Register                      *slreg,
                                                      TR::Register                      *srreg,
                                                      TR::MemoryReference               *mr,
                                                      TR::RegisterDependencyConditions  *cond,
-                                                     TR::CodeGenerator                 *cg)
-   : TR::X86RegMemInstruction(op, node, slreg, mr, cond, cg), _source2ndRegister(srreg)
+                                                     TR::CodeGenerator                 *cg,
+                                                     OMR::X86::Encoding encoding)
+   : TR::X86RegMemInstruction(op, node, slreg, mr, cond, cg, encoding), _source2ndRegister(srreg)
    {
    useRegister(srreg);
    }
@@ -2465,7 +2505,10 @@ void TR::X86RegRegMemInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssi
       TR::RealRegister *assignedTargetRegister    = NULL;
       TR::RealRegister *assignedSource2ndRegister = NULL;
       TR_RegisterSizes  requestedRegSize          = getOpCode().hasByteTarget() ? TR_ByteReg :
-                                                    getOpCode().hasXMMTarget()  ? TR_QuadWordReg : TR_WordReg;
+                                                    getOpCode().hasXMMTarget()  ? TR_QuadWordReg :
+                                                    getOpCode().hasYMMTarget()  ? TR_VectorReg256 :
+                                                    getOpCode().hasZMMTarget()  ? TR_VectorReg512 :
+                                                    TR_WordReg;
 
       if (kindsToBeAssigned & getTargetRegister()->getKindAsMask())
          {
@@ -2549,7 +2592,7 @@ void TR::X86RegRegMemInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssi
 // TR::X86FPRegInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86FPRegInstruction::X86FPRegInstruction(TR_X86OpCodes op,
+TR::X86FPRegInstruction::X86FPRegInstruction(TR::InstOpCode::Mnemonic op,
                                                  TR::Node       *node,
                                                  TR::Register   *reg,
                                                  TR::CodeGenerator *cg)
@@ -2558,7 +2601,7 @@ TR::X86FPRegInstruction::X86FPRegInstruction(TR_X86OpCodes op,
    }
 
 TR::X86FPRegInstruction::X86FPRegInstruction(TR::Instruction *precedingInstruction,
-                                                 TR_X86OpCodes  op,
+                                                 TR::InstOpCode::Mnemonic  op,
                                                  TR::Register    *reg,
                                                  TR::CodeGenerator *cg)
    : TR::X86RegInstruction(reg, op, precedingInstruction, cg)
@@ -2613,7 +2656,7 @@ void TR::X86FPRegInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigned
 // TR::X86FPRegRegInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86FPRegRegInstruction::X86FPRegRegInstruction(TR_X86OpCodes op,
+TR::X86FPRegRegInstruction::X86FPRegRegInstruction(TR::InstOpCode::Mnemonic op,
                                                        TR::Node       *node,
                                                        TR::Register   *treg,
                                                        TR::Register   *sreg,
@@ -2622,7 +2665,7 @@ TR::X86FPRegRegInstruction::X86FPRegRegInstruction(TR_X86OpCodes op,
    {
    }
 
-TR::X86FPRegRegInstruction::X86FPRegRegInstruction(TR_X86OpCodes op,
+TR::X86FPRegRegInstruction::X86FPRegRegInstruction(TR::InstOpCode::Mnemonic op,
                                                        TR::Node       *node,
                                                        TR::Register   *treg,
                                                        TR::Register   *sreg,
@@ -2633,7 +2676,7 @@ TR::X86FPRegRegInstruction::X86FPRegRegInstruction(TR_X86OpCodes op,
    }
 
 TR::X86FPRegRegInstruction::X86FPRegRegInstruction(TR::Instruction *precedingInstruction,
-                                                       TR_X86OpCodes  op,
+                                                       TR::InstOpCode::Mnemonic  op,
                                                        TR::Register    *treg,
                                                        TR::Register    *sreg,
                                                        TR::CodeGenerator *cg)
@@ -2708,7 +2751,7 @@ uint32_t TR::X86FPRegRegInstruction::assignTargetSourceRegisters()
 // TR::X86FPST0ST1RegRegInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86FPST0ST1RegRegInstruction::X86FPST0ST1RegRegInstruction(TR_X86OpCodes  op,
+TR::X86FPST0ST1RegRegInstruction::X86FPST0ST1RegRegInstruction(TR::InstOpCode::Mnemonic  op,
                                                                  TR::Node        *node,
                                                                  TR::Register    *treg,
                                                                  TR::Register    *sreg,
@@ -2717,7 +2760,7 @@ TR::X86FPST0ST1RegRegInstruction::X86FPST0ST1RegRegInstruction(TR_X86OpCodes  op
    {
    }
 
-TR::X86FPST0ST1RegRegInstruction::X86FPST0ST1RegRegInstruction(TR_X86OpCodes  op,
+TR::X86FPST0ST1RegRegInstruction::X86FPST0ST1RegRegInstruction(TR::InstOpCode::Mnemonic  op,
                                                                  TR::Node        *node,
                                                                  TR::Register    *treg,
                                                                  TR::Register    *sreg,
@@ -2728,7 +2771,7 @@ TR::X86FPST0ST1RegRegInstruction::X86FPST0ST1RegRegInstruction(TR_X86OpCodes  op
    }
 
 TR::X86FPST0ST1RegRegInstruction::X86FPST0ST1RegRegInstruction(TR::Instruction *precedingInstruction,
-                                                                 TR_X86OpCodes  op,
+                                                                 TR::InstOpCode::Mnemonic  op,
                                                                  TR::Register    *treg,
                                                                  TR::Register    *sreg,
                                                                  TR::CodeGenerator *cg)
@@ -2770,7 +2813,7 @@ void TR::X86FPST0ST1RegRegInstruction::assignRegisters(TR_RegisterKinds kindsToB
 // TR::X86FPSTiST0RegRegInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86FPSTiST0RegRegInstruction::X86FPSTiST0RegRegInstruction(TR_X86OpCodes  op,
+TR::X86FPSTiST0RegRegInstruction::X86FPSTiST0RegRegInstruction(TR::InstOpCode::Mnemonic  op,
                                                                    TR::Node        *node,
                                                                    TR::Register    *treg,
                                                                    TR::Register    *sreg,
@@ -2781,7 +2824,7 @@ TR::X86FPSTiST0RegRegInstruction::X86FPSTiST0RegRegInstruction(TR_X86OpCodes  op
    }
 
 TR::X86FPSTiST0RegRegInstruction::X86FPSTiST0RegRegInstruction(TR::Instruction *precedingInstruction,
-                                                                   TR_X86OpCodes  op,
+                                                                   TR::InstOpCode::Mnemonic  op,
                                                                    TR::Register    *treg,
                                                                    TR::Register    *sreg,
                                                                    TR::CodeGenerator *cg, bool forcePop)
@@ -2844,12 +2887,12 @@ void TR::X86FPSTiST0RegRegInstruction::assignRegisters(TR_RegisterKinds kindsToB
                }
 
             TR::RealRegister *fpReg = machine->fpMapToStackRelativeRegister(targetRegister);
-            new (cg()->trHeapMemory()) TR::X86FPRegInstruction(cursor, FSTPReg, fpReg, cg());
+            new (cg()->trHeapMemory()) TR::X86FPRegInstruction(cursor, TR::InstOpCode::FSTPReg, fpReg, cg());
             }
          else
            //if (result & kSourceCanBePopped)
             {
-            TR_X86OpCodes popOpCode = machine->fpDeterminePopOpCode(getOpCodeValue());
+            TR::InstOpCode::Mnemonic popOpCode = machine->fpDeterminePopOpCode(getOpCodeValue());
             setOpCodeValue(popOpCode);
             machine->fpStackPop();
             }
@@ -2861,7 +2904,7 @@ void TR::X86FPSTiST0RegRegInstruction::assignRegisters(TR_RegisterKinds kindsToB
 // TR::X86FPST0STiRegRegInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86FPST0STiRegRegInstruction::X86FPST0STiRegRegInstruction(TR_X86OpCodes  op,
+TR::X86FPST0STiRegRegInstruction::X86FPST0STiRegRegInstruction(TR::InstOpCode::Mnemonic  op,
                                                                    TR::Node        *node,
                                                                    TR::Register    *treg,
                                                                    TR::Register    *sreg,
@@ -2871,7 +2914,7 @@ TR::X86FPST0STiRegRegInstruction::X86FPST0STiRegRegInstruction(TR_X86OpCodes  op
    }
 
 TR::X86FPST0STiRegRegInstruction::X86FPST0STiRegRegInstruction(TR::Instruction *precedingInstruction,
-                                                                   TR_X86OpCodes  op,
+                                                                   TR::InstOpCode::Mnemonic  op,
                                                                    TR::Register    *treg,
                                                                    TR::Register    *sreg,
                                                                    TR::CodeGenerator *cg)
@@ -2939,7 +2982,7 @@ void TR::X86FPST0STiRegRegInstruction::assignRegisters(TR_RegisterKinds kindsToB
                }
 
             TR::RealRegister *fpReg = machine->fpMapToStackRelativeRegister(sourceRegister);
-            new (cg()->trHeapMemory()) TR::X86FPRegInstruction(cursor, FSTPReg, fpReg, cg());
+            new (cg()->trHeapMemory()) TR::X86FPRegInstruction(cursor, TR::InstOpCode::FSTPReg, fpReg, cg());
             machine->fpStackPop();
             }
          }
@@ -2950,7 +2993,7 @@ void TR::X86FPST0STiRegRegInstruction::assignRegisters(TR_RegisterKinds kindsToB
 // TR::X86FPArithmeticRegRegInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86FPArithmeticRegRegInstruction::X86FPArithmeticRegRegInstruction(TR_X86OpCodes  op,
+TR::X86FPArithmeticRegRegInstruction::X86FPArithmeticRegRegInstruction(TR::InstOpCode::Mnemonic  op,
                                                                            TR::Node        *node,
                                                                            TR::Register    *treg,
                                                                            TR::Register    *sreg,
@@ -2960,7 +3003,7 @@ TR::X86FPArithmeticRegRegInstruction::X86FPArithmeticRegRegInstruction(TR_X86OpC
    }
 
 TR::X86FPArithmeticRegRegInstruction::X86FPArithmeticRegRegInstruction(TR::Instruction *precedingInstruction,
-                                                                           TR_X86OpCodes  op,
+                                                                           TR::InstOpCode::Mnemonic  op,
                                                                            TR::Register    *treg,
                                                                            TR::Register    *sreg,
                                                                            TR::CodeGenerator *cg)
@@ -2993,14 +3036,14 @@ void TR::X86FPArithmeticRegRegInstruction::assignRegisters(TR_RegisterKinds kind
 
       if (result & kSourceCanBePopped)
          {
-         TR_X86OpCodes popOpCode;
+         TR::InstOpCode::Mnemonic popOpCode;
 
          if (!machine->isFPRTopOfStack(sourceRegister) &&
               machine->isFPRTopOfStack(targetRegister))
             {
             // The target operand is already at TOS: generate a reverse and pop instruction.
             //
-            TR_X86OpCodes reverseOpCode = machine->fpDetermineReverseOpCode(getOpCodeValue());
+            TR::InstOpCode::Mnemonic reverseOpCode = machine->fpDetermineReverseOpCode(getOpCodeValue());
             popOpCode = machine->fpDeterminePopOpCode(reverseOpCode);
 
             (void)machine->fpStackFXCH(this->getPrev(), sourceRegister, false);
@@ -3043,461 +3086,83 @@ void TR::X86FPArithmeticRegRegInstruction::assignRegisters(TR_RegisterKinds kind
       }
    }
 
-////////////////////////////////////////////////////////////////////////////////
-// TR::X86FPCompareRegRegInstruction:: member functions
-////////////////////////////////////////////////////////////////////////////////
 
-TR::X86FPCompareRegRegInstruction::X86FPCompareRegRegInstruction(TR_X86OpCodes  op,
-                                                                     TR::Node        *node,
-                                                                     TR::Register    *treg,
-                                                                     TR::Register    *sreg,
-                                                                     TR::CodeGenerator *cg)
-   : TR::X86FPRegRegInstruction(sreg, treg, node, op, cg)
+TR::InstOpCode::Mnemonic getBranchOrSetOpCodeForFPComparison(TR::ILOpCodes cmpOp)
    {
-   }
-
-TR::X86FPCompareRegRegInstruction::X86FPCompareRegRegInstruction(TR::Instruction *precedingInstruction,
-                                                                     TR_X86OpCodes  op,
-                                                                     TR::Register    *treg,
-                                                                     TR::Register    *sreg,
-                                                                     TR::CodeGenerator *cg)
-   : TR::X86FPRegRegInstruction(sreg, treg, op, precedingInstruction, cg)
-   {
-   }
-
-void TR::X86FPCompareRegRegInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigned)
-   {
-
-   if (kindsToBeAssigned & TR_X87_Mask)
-      {
-      TR::Register     *sourceRegister = getSourceRegister();
-      TR::Register     *targetRegister = getTargetRegister();
-      TR::Machine *machine = cg()->machine();
-      uint32_t         result = 0;
-      bool             needLateSourcePop = false;
-      TR::RealRegister *fpReg;
-
-      result = TR::X86FPRegRegInstruction::assignTargetSourceRegisters();
-
-      TR_ASSERT( result & kSourceOnFPStack,
-              "TR::X86FPCompareRegRegInstruction::assignRegisters ==> source not on FP stack!" );
-
-      TR_ASSERT( result & kTargetOnFPStack,
-              "TR::X86FPCompareRegRegInstruction::assignRegisters ==> target not on FP stack!" );
-
-      if (result & (kSourceCanBePopped | kTargetCanBePopped))
-         {
-         TR_X86OpCodes popOpCode;
-
-         if ((result & (kSourceCanBePopped | kTargetCanBePopped)) == (kSourceCanBePopped | kTargetCanBePopped))
-            {
-            machine->fpCoerceRegistersToTopOfStack(this->getPrev(), targetRegister, sourceRegister, false);
-
-            if (!machine->isFPRTopOfStack(targetRegister))
-               {
-               swapOperands();
-               }
-
-            if (getOpCodeValue() == FCOMIRegReg || getOpCodeValue() == DCOMIRegReg)
-               {
-               popOpCode = FCOMIPReg;
-               needLateSourcePop = true;
-               }
-            else
-               {
-               popOpCode = FCOMPP;
-               }
-            }
-         else if (result & kTargetCanBePopped)
-            {
-            if (!machine->isFPRTopOfStack(targetRegister))
-               {
-               (void)machine->fpStackFXCH(this->getPrev(), targetRegister);
-               }
-
-            if (getOpCodeValue() == FCOMIRegReg || getOpCodeValue() == DCOMIRegReg)
-               {
-               popOpCode = FCOMIPReg;
-               }
-            else
-               {
-               popOpCode = FCOMPReg;
-               }
-            }
-         else if (result & kSourceCanBePopped)
-            {
-            needLateSourcePop = true;
-            popOpCode = getOpCodeValue();
-
-            if (!machine->isFPRTopOfStack(targetRegister))
-               {
-               if (swapOperands())
-                  {
-                  needLateSourcePop = false;
-
-                  if (getOpCodeValue() == FCOMIRegReg || getOpCodeValue() == DCOMIRegReg)
-                     {
-                     popOpCode = FCOMIPReg;
-                     }
-                  else
-                     {
-                     popOpCode = FCOMPReg;
-                     }
-                  }
-               }
-            }
-         else
-            {
-            // This condition should be guaranteed after the FPCompareAnalyser.
-            //
-            TR_ASSERT(0,"TR::X86FPCompareRegRegInstruction::assignRegisters() ==> source operand should not be dead after compare!");
-            }
-
-         setOpCodeValue(popOpCode);
-         }
-      else
-         {
-         // Both operands are live after the compare.  This should ONLY occur in the presence
-         // of a global register allocator.
-         //
-         if (machine->isFPRTopOfStack(sourceRegister) && (sourceRegister != targetRegister))
-            {
-            swapOperands();
-            }
-         else if (!machine->isFPRTopOfStack(targetRegister))
-            {
-            (void)machine->fpStackFXCH(this->getPrev(), targetRegister);
-            }
-         }
-
-      // Final assignment of real registers to this instruction
-      //
-      fpReg = machine->fpMapToStackRelativeRegister(sourceRegister);
-      setSourceRegister(fpReg);
-      fpReg = machine->fpMapToStackRelativeRegister(targetRegister);
-      setTargetRegister(fpReg);
-
-      if (result & kTargetCanBePopped)
-         {
-         machine->fpStackPop();
-         }
-
-      if (result & kSourceCanBePopped)
-         {
-         if (needLateSourcePop)
-            {
-            TR::Instruction *cursor = this;
-            if (!machine->isFPRTopOfStack(sourceRegister))
-               {
-               cursor = machine->fpStackFXCH(this, sourceRegister);
-               }
-
-            TR::RealRegister *realFPReg = machine->fpMapToStackRelativeRegister(sourceRegister);
-            new (cg()->trHeapMemory()) TR::X86FPRegInstruction(cursor, FSTPReg, realFPReg, cg());
-            }
-
-         machine->fpStackPop();
-         }
-      }
-   }
-
-// Corrects the order of operands in an FP comparison.
-// Returns true if the registers can stay swapped by
-// reversing the sense of the comparison operator,
-// otherwise adds an FXCH and returns false.
-//
-bool TR::X86FPCompareRegRegInstruction::swapOperands()
-   {
-   TR::Node      *node      = getNode();
-   TR::ILOpCodes  swappedOp = node->getOpCode().getOpCodeForSwapChildren();
-
-   if (debug("dumpFPRA"))
-      diagnostic("Register operands out of order: ");
-
-   if (// !debug("saveFXCHs")       ||
-       swappedOp == TR::BadILOp   ||
-       // these cases lead to complicated tests
-       swappedOp == TR::iffcmple  ||
-       swappedOp == TR::ifdcmple  ||
-       swappedOp == TR::fcmple    ||
-       swappedOp == TR::dcmple    ||
-       swappedOp == TR::iffcmpgtu ||
-       swappedOp == TR::ifdcmpgtu ||
-       swappedOp == TR::fcmpgtu   ||
-       swappedOp == TR::dcmpgtu   ||
-       // the following cases lead to complicated tests if using FCOMI,
-       // or lead to code growth (extra CMP) if using FCOM.
-       swappedOp == TR::iffcmplt  ||
-       swappedOp == TR::ifdcmplt  ||
-       swappedOp == TR::fcmplt    ||
-       swappedOp == TR::dcmplt    ||
-       swappedOp == TR::iffcmpgeu ||
-       swappedOp == TR::ifdcmpgeu ||
-       swappedOp == TR::fcmpgeu   ||
-       swappedOp == TR::dcmpgeu)
-      {
-      if (debug("dumpFPRA"))
-         diagnostic("fxch inserted\n");
-
-      (void) cg()->machine()->fpStackFXCH(this->getPrev(), getTargetRegister());
-      return false;
-      }
-
-   if (debug("dumpFPRA"))
-      diagnostic("%s -> ", node->getOpCode().getName());
-
-   // Communicate to FCMPEVAL what the new opcode is.
-   // This cobbles the tree node; probably not a good idea if
-   // the IL is still needed after register assignment.
-   TR::Node::recreate(node, swappedOp);
-
-   if (debug("dumpFPRA"))
-      diagnostic("%s, ", node->getOpCode().getName());
-
-   // Fix up the branch or set following the comparison.
-   TR::Instruction  *cursor = getNext();
-
-   while (cursor != NULL)
-      {
-      TR_X86OpCode  cursorOp = cursor->getOpCode();
-
-      if (cursorOp.isBranchOp() || cursorOp.isSetRegInstruction())
-         break;
-
-      cursor = cursor->getNext();
-      }
-
-   if (cursor != NULL)
-      {
-      if (debug("dumpFPRA"))
-         diagnostic("%s -> ", cursor->getOpCode().getOpCodeName(cg()));
-
-      TR_X86OpCodes instr = getOpCodeValue();
-      instr = getBranchOrSetOpCodeForFPComparison(swappedOp, (instr == FCOMIRegReg || instr == DCOMIRegReg));
-      cursor->setOpCodeValue(instr);
-
-      if (debug("dumpFPRA"))
-         diagnostic("%s\n", cursor->getOpCode().getOpCodeName(cg()));
-      }
-   else
-      {
-      TR_ASSERT(0, "\nTR::X86FPCompareRegRegInstruction::swapOperands() ==> branch or set instruction not found for FP comparison!\n");
-      }
-
-   return true;
-   }
-
-////////////////////////////////////////////////////////////////////////////////
-// TR::X86FPCompareEvalInstruction:: member functions
-////////////////////////////////////////////////////////////////////////////////
-
-TR::X86FPCompareEvalInstruction::X86FPCompareEvalInstruction(TR_X86OpCodes  op,
-                                                                 TR::Node        *node,
-                                                                 TR::Register    *accRegister,
-                                                                 TR::CodeGenerator *cg)
-   : TR::Instruction(node, op, cg), _accRegister(accRegister)
-   {
-   }
-
-TR::X86FPCompareEvalInstruction::X86FPCompareEvalInstruction(TR_X86OpCodes                       op,
-                                                                 TR::Node                             *node,
-                                                                 TR::Register                         *accRegister,
-                                                                 TR::RegisterDependencyConditions  *cond,
-                                                                 TR::CodeGenerator *cg)
-   : TR::Instruction(cond, node, op, cg), _accRegister(accRegister)
-   {
-   }
-
-void TR::X86FPCompareEvalInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigned)
-   {
-   TR::Instruction  *cursor = this;
-   TR::Node            *node   = getNode();
-   TR::ILOpCodes        cmpOp  = node->getOpCodeValue();
-
-   OMR::X86::Instruction::assignRegisters(kindsToBeAssigned);
-
-   if (kindsToBeAssigned & TR_GPR_Mask)
-      {
-      TR_ASSERT(_accRegister != NULL, "TR::X86FPCompareEvalInstruction::assignRegisters() ==> _accRegister is NULL\n");
-
-      // eax should have been assigned to _accRegister at this point.
-      //
-      TR::Register *accRegister = _accRegister->getAssignedRegister();
-      TR_ASSERT(accRegister != NULL, "TR::X86FPCompareEvalInstruction::assignRegisters() ==> _accRegister has not been assigned!\n");
-
-      switch (cmpOp)
-         {
-         case TR::ifdcmpleu:
-         case TR::iffcmpleu:
-         case TR::ifdcmpgt:
-         case TR::iffcmpgt:
-         case TR::dcmpleu:
-         case TR::fcmpleu:
-         case TR::dcmpgt:
-         case TR::fcmpgt:
-            cursor = new (cg()->trHeapMemory()) TR::X86RegImmInstruction(cursor, AND2RegImm2, accRegister, 0x4500, cg());
-            break;
-
-         case TR::ifdcmple:
-         case TR::iffcmple:
-         case TR::ifdcmpgtu:
-         case TR::iffcmpgtu:
-         case TR::dcmple:
-         case TR::fcmple:
-         case TR::dcmpgtu:
-         case TR::fcmpgtu:
-            TR_ASSERT(0, "TR::X86FPCompareEvalRegInstruction::assignRegisters() ==> shouldn't be able to generate this condition!\n" );
-            break;
-
-         case TR::ifdcmpltu:
-         case TR::iffcmpltu:
-         case TR::ifdcmpge:
-         case TR::iffcmpge:
-         case TR::dcmpltu:
-         case TR::fcmpltu:
-         case TR::dcmpge:
-         case TR::fcmpge:
-            cursor = new (cg()->trHeapMemory()) TR::X86RegImmInstruction(cursor, AND2RegImm2, accRegister, 0x0500, cg());
-            break;
-
-         case TR::ifdcmplt:
-         case TR::iffcmplt:
-         case TR::ifdcmpgeu:
-         case TR::iffcmpgeu:
-         case TR::dcmplt:
-         case TR::fcmplt:
-         case TR::dcmpgeu:
-         case TR::fcmpgeu:
-            cursor = new (cg()->trHeapMemory()) TR::X86RegImmInstruction(cursor, AND2RegImm2, accRegister, 0x4500, cg());
-            cursor = new (cg()->trHeapMemory()) TR::X86RegImmInstruction(cursor, CMP2RegImm2, accRegister, 0x0100, cg());
-            break;
-
-         case TR::ifdcmpneu:
-         case TR::iffcmpneu:
-         case TR::dcmpneu:
-         case TR::fcmpneu:
-         case TR::ifdcmpeq:
-         case TR::iffcmpeq:
-         case TR::dcmpeq:
-         case TR::fcmpeq:
-            cursor = new (cg()->trHeapMemory()) TR::X86RegImmInstruction(cursor, AND2RegImm2, accRegister, 0x4500, cg());
-            cursor = new (cg()->trHeapMemory()) TR::X86RegImmInstruction(cursor, CMP2RegImm2, accRegister, 0x4000, cg());
-            break;
-
-         case TR::fcmpl:
-         case TR::fcmpg:
-         case TR::dcmpl:
-         case TR::dcmpg:
-            TR_ASSERT(cg()->comp()->target().is32Bit(), "AMD64 doesn't support SAHF");
-            cursor = new (cg()->trHeapMemory()) TR::Instruction(SAHF, cursor, cg());
-            break;
-
-         default:
-            TR_ASSERT(0, "TR::X86FPCompareEvalRegInstruction::assignRegisters() ==> invalid comparison op: %d\n", cmpOp);
-            break;
-         }
-
-      // Remove this instruction from the stream.
-      if (getPrev())
-         {
-         getPrev()->setNext(getNext());
-         }
-
-      if (getNext())
-         {
-         getNext()->setPrev(getPrev());
-         }
-      }
-   }
-
-TR_X86OpCodes getBranchOrSetOpCodeForFPComparison(TR::ILOpCodes cmpOp, bool useFCOMIInstructions)
-   {
-   TR_X86OpCodes op;
+   TR::InstOpCode::Mnemonic op;
 
    switch (cmpOp)
       {
       case TR::iffcmpeq:
       case TR::ifdcmpeq:
-         op = JE4;
+         op = TR::InstOpCode::JE4;
          break;
 
       case TR::fcmpeq:
       case TR::dcmpeq:
-         op = SETE1Reg;
+         op = TR::InstOpCode::SETE1Reg;
          break;
 
       case TR::iffcmpneu:
       case TR::ifdcmpneu:
       case TR::iffcmpne:
       case TR::ifdcmpne:
-         op = JNE4;
+         op = TR::InstOpCode::JNE4;
          break;
 
       case TR::fcmpneu:
       case TR::dcmpneu:
       case TR::fcmpne:
       case TR::dcmpne:
-         op = SETNE1Reg;
+         op = TR::InstOpCode::SETNE1Reg;
          break;
 
       case TR::iffcmpleu:
       case TR::ifdcmpleu:
-         op = useFCOMIInstructions ? JBE4 : JNE4;
+         op = TR::InstOpCode::JBE4;
          break;
 
       case TR::fcmpleu:
       case TR::dcmpleu:
-         op = useFCOMIInstructions ? SETBE1Reg : SETNE1Reg;
+         op = TR::InstOpCode::SETBE1Reg;
          break;
 
       case TR::iffcmpgt:
       case TR::ifdcmpgt:
-         op = useFCOMIInstructions ? JA4 : JE4;
+         op = TR::InstOpCode::JA4;
          break;
 
       case TR::fcmpgt:
       case TR::dcmpgt:
-         op = useFCOMIInstructions ? SETA1Reg : SETE1Reg;
-         break;
-
-      case TR::iffcmpltu:
-      case TR::ifdcmpltu:
-         op = useFCOMIInstructions ? JB4 : JNE4;
-         break;
-
-      case TR::fcmpltu:
-      case TR::dcmpltu:
-         op = useFCOMIInstructions ? SETB1Reg : SETNE1Reg;
-         break;
-
-      case TR::iffcmpge:
-      case TR::ifdcmpge:
-         op = useFCOMIInstructions ? JAE4 : JE4;
-         break;
-
-      case TR::fcmpge:
-      case TR::dcmpge:
-         op = useFCOMIInstructions ? SETAE1Reg : SETE1Reg;
+         op = TR::InstOpCode::SETA1Reg;
          break;
 
       case TR::iffcmplt:
       case TR::ifdcmplt:
-         op = useFCOMIInstructions ? JB4 : JE4;
+      case TR::iffcmpltu:
+      case TR::ifdcmpltu:
+         op = TR::InstOpCode::JB4;
          break;
 
       case TR::fcmplt:
       case TR::dcmplt:
-         op = useFCOMIInstructions ? SETB1Reg : SETE1Reg;
+      case TR::fcmpltu:
+      case TR::dcmpltu:
+         op = TR::InstOpCode::SETB1Reg;
          break;
 
+      case TR::iffcmpge:
+      case TR::ifdcmpge:
       case TR::iffcmpgeu:
       case TR::ifdcmpgeu:
-         op = useFCOMIInstructions ? JAE4 : JNE4;
+         op = TR::InstOpCode::JAE4;
          break;
 
+      case TR::fcmpge:
+      case TR::dcmpge:
       case TR::fcmpgeu:
       case TR::dcmpgeu:
-         op = useFCOMIInstructions ? SETAE1Reg : SETNE1Reg;
+         op = TR::InstOpCode::SETAE1Reg;
          break;
 
 #ifdef DEBUG
@@ -3531,7 +3196,7 @@ TR_X86OpCodes getBranchOrSetOpCodeForFPComparison(TR::ILOpCodes cmpOp, bool useF
 // TR::X86FPRemainderRegRegInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86FPRemainderRegRegInstruction::X86FPRemainderRegRegInstruction( TR_X86OpCodes  op,
+TR::X86FPRemainderRegRegInstruction::X86FPRemainderRegRegInstruction( TR::InstOpCode::Mnemonic  op,
                                                                        TR::Node        *node,
                                                                        TR::Register    *treg,
                                                                        TR::Register    *sreg,
@@ -3540,7 +3205,7 @@ TR::X86FPRemainderRegRegInstruction::X86FPRemainderRegRegInstruction( TR_X86OpCo
    {
    }
 
-TR::X86FPRemainderRegRegInstruction::X86FPRemainderRegRegInstruction( TR_X86OpCodes  op,
+TR::X86FPRemainderRegRegInstruction::X86FPRemainderRegRegInstruction( TR::InstOpCode::Mnemonic  op,
                                                                        TR::Node        *node,
                                                                        TR::Register    *treg,
                                                                        TR::Register    *sreg,
@@ -3553,7 +3218,7 @@ TR::X86FPRemainderRegRegInstruction::X86FPRemainderRegRegInstruction( TR_X86OpCo
    }
 
 TR::X86FPRemainderRegRegInstruction::X86FPRemainderRegRegInstruction( TR::Instruction *precedingInstruction,
-                                                                       TR_X86OpCodes  op,
+                                                                       TR::InstOpCode::Mnemonic  op,
                                                                        TR::Register    *treg,
                                                                        TR::Register    *sreg,
                                                                        TR::CodeGenerator *cg)
@@ -3572,10 +3237,10 @@ void TR::X86FPRemainderRegRegInstruction::assignRegisters(TR_RegisterKinds kinds
       TR::LabelSymbol *loopLabel = TR::LabelSymbol::create(cg()->trHeapMemory(),cg());
       TR::RegisterDependencyConditions  *deps = getDependencyConditions();
 
-      new (cg()->trHeapMemory()) TR::X86LabelInstruction(getPrev(), LABEL, loopLabel, cg());
-      TR::Instruction  *cursor = new (cg()->trHeapMemory()) TR::X86RegInstruction( this, STSWAcc, accReg, cg());
-      cursor = new (cg()->trHeapMemory()) TR::X86RegImmInstruction( cursor, TEST2RegImm2, accReg, 0x0400, cg());
-      new (cg()->trHeapMemory()) TR::X86LabelInstruction( cursor, JNE4, loopLabel, deps, cg());
+      new (cg()->trHeapMemory()) TR::X86LabelInstruction(getPrev(), TR::InstOpCode::label, loopLabel, cg());
+      TR::Instruction  *cursor = new (cg()->trHeapMemory()) TR::X86RegInstruction( this, TR::InstOpCode::STSWAcc, accReg, cg());
+      cursor = new (cg()->trHeapMemory()) TR::X86RegImmInstruction( cursor, TR::InstOpCode::TEST2RegImm2, accReg, 0x0400, cg());
+      new (cg()->trHeapMemory()) TR::X86LabelInstruction( cursor, TR::InstOpCode::JNE4, loopLabel, deps, cg());
 
       if (_accRegister->decFutureUseCount() == 0)
          {
@@ -3606,7 +3271,7 @@ void TR::X86FPRemainderRegRegInstruction::assignRegisters(TR_RegisterKinds kinds
 // TR::X86FPMemRegInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86FPMemRegInstruction::X86FPMemRegInstruction(TR_X86OpCodes          op,
+TR::X86FPMemRegInstruction::X86FPMemRegInstruction(TR::InstOpCode::Mnemonic          op,
                                                        TR::Node                *node,
                                                        TR::MemoryReference  *mr,
                                                        TR::Register            *sreg,
@@ -3616,7 +3281,7 @@ TR::X86FPMemRegInstruction::X86FPMemRegInstruction(TR_X86OpCodes          op,
    }
 
 TR::X86FPMemRegInstruction::X86FPMemRegInstruction(TR::Instruction         *precedingInstruction,
-                                                       TR_X86OpCodes          op,
+                                                       TR::InstOpCode::Mnemonic          op,
                                                        TR::MemoryReference  *mr,
                                                        TR::Register            *sreg,
                                                        TR::CodeGenerator *cg)
@@ -3692,7 +3357,7 @@ void TR::X86FPMemRegInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssig
 // TR::X86FPRegMemInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86FPRegMemInstruction::X86FPRegMemInstruction(TR_X86OpCodes          op,
+TR::X86FPRegMemInstruction::X86FPRegMemInstruction(TR::InstOpCode::Mnemonic          op,
                                                        TR::Node                *node,
                                                        TR::Register            *treg,
                                                        TR::MemoryReference  *mr,
@@ -3702,7 +3367,7 @@ TR::X86FPRegMemInstruction::X86FPRegMemInstruction(TR_X86OpCodes          op,
    }
 
 TR::X86FPRegMemInstruction::X86FPRegMemInstruction(TR::Instruction         *precedingInstruction,
-                                                       TR_X86OpCodes          op,
+                                                       TR::InstOpCode::Mnemonic          op,
                                                        TR::Register            *treg,
                                                        TR::MemoryReference  *mr,
                                                        TR::CodeGenerator *cg)
@@ -3778,14 +3443,14 @@ void TR::X86FPRegMemInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssig
 
       if (targetRegister->decFutureUseCount() == 0)
          {
-         if (getOpCodeValue() == FLDRegMem || getOpCodeValue() == DLDRegMem)
+         if (getOpCodeValue() == TR::InstOpCode::FLDRegMem || getOpCodeValue() == TR::InstOpCode::DLDRegMem)
             {
             // Temporary patch
             //
             // If the target register is not used, pop it off the FP stack.  This can happen after
             // the optimizer runs and eliminates unnecessary stores of unresolved data.
             //
-            new (cg()->trHeapMemory()) TR::X86FPRegInstruction(this, FSTPReg, fpReg, cg());
+            new (cg()->trHeapMemory()) TR::X86FPRegInstruction(this, TR::InstOpCode::FSTPReg, fpReg, cg());
 
             // Only two uses were added after it was determined the future use count was zero.
             //
@@ -3883,7 +3548,7 @@ TR::X86BoundaryAvoidanceInstruction::betterPadLength(
 // TR::AMD64RegImm64SymInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::AMD64RegImm64SymInstruction::AMD64RegImm64SymInstruction(TR_X86OpCodes           op,
+TR::AMD64RegImm64SymInstruction::AMD64RegImm64SymInstruction(TR::InstOpCode::Mnemonic           op,
                                                                TR::Node                *node,
                                                                TR::Register            *reg,
                                                                uint64_t                imm,
@@ -3895,7 +3560,7 @@ TR::AMD64RegImm64SymInstruction::AMD64RegImm64SymInstruction(TR_X86OpCodes      
    }
 
 TR::AMD64RegImm64SymInstruction::AMD64RegImm64SymInstruction(TR::Instruction         *precedingInstruction,
-                                                               TR_X86OpCodes           op,
+                                                               TR::InstOpCode::Mnemonic           op,
                                                                TR::Register            *reg,
                                                                uint64_t                imm,
                                                                TR::SymbolReference     *sr,
@@ -3915,6 +3580,10 @@ TR::AMD64RegImm64SymInstruction::autoSetReloKind()
       setReloKind(TR_ConstantPool);
    else if (symbol->isStatic() && !getSymbolReference()->isUnresolved() && !symbol->isClassObject() && !symbol->isNotDataAddress())
       setReloKind(TR_DataAddress);
+   else if (symbol->isBlockFrequency())
+      setReloKind(TR_BlockFrequency);
+   else if (symbol->isRecompQueuedFlag())
+      setReloKind(TR_RecompQueuedFlag);
    else
       setReloKind(-1);
    }
@@ -3929,37 +3598,37 @@ TR::Instruction* generateBreakOnDFSet(TR::CodeGenerator *cg, TR::Instruction* cu
       cursor = cg->getAppendInstruction();
 
    TR::RealRegister *espReal = cg->machine()->getRealRegister(TR::RealRegister::esp);
-   cursor = generateInstruction(cursor, PUSHFD, cg);
+   cursor = generateInstruction(cursor, TR::InstOpCode::PUSHFD, cg);
    TR::LabelSymbol* begLabel = generateLabelSymbol(cg);
    TR::LabelSymbol* endLabel = generateLabelSymbol(cg);
    begLabel->setStartInternalControlFlow();
    endLabel->setEndInternalControlFlow();
 
    const int32_t dfMask = 0x400;
-   cursor = generateLabelInstruction(cursor, LABEL, begLabel, cg);
-   cursor = generateMemImmInstruction(cursor, TEST2MemImm2, generateX86MemoryReference(espReal, 0, cg), dfMask, cg);
-   cursor = generateLabelInstruction(cursor, JE1, endLabel, cg);
-   cursor = generateInstruction(cursor, BADIA32Op, cg);
-   cursor = generateLabelInstruction(cursor, LABEL, endLabel, cg);
-   cursor = generateInstruction(cursor, POPFD, cg);
+   cursor = generateLabelInstruction(cursor, TR::InstOpCode::label, begLabel, cg);
+   cursor = generateMemImmInstruction(cursor, TR::InstOpCode::TEST2MemImm2, generateX86MemoryReference(espReal, 0, cg), dfMask, cg);
+   cursor = generateLabelInstruction(cursor, TR::InstOpCode::JE1, endLabel, cg);
+   cursor = generateInstruction(cursor, TR::InstOpCode::INT3, cg);
+   cursor = generateLabelInstruction(cursor, TR::InstOpCode::label, endLabel, cg);
+   cursor = generateInstruction(cursor, TR::InstOpCode::POPFD, cg);
 
    return cursor;
    }
 
 TR::Instruction  *
-generateInstruction(TR::Instruction *prev, TR_X86OpCodes op, TR::CodeGenerator *cg)
+generateInstruction(TR::Instruction *prev, TR::InstOpCode::Mnemonic op, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::Instruction(op, prev, cg);
    }
 
 TR::Instruction  *
-generateInstruction(TR_X86OpCodes op, TR::Node * node, TR::CodeGenerator *cg)
+generateInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::Instruction(node, op, cg);
    }
 
 TR::Instruction  *
-generateInstruction(TR_X86OpCodes op,
+generateInstruction(TR::InstOpCode::Mnemonic op,
                     TR::Node * node,
                     TR::RegisterDependencyConditions  *cond, TR::CodeGenerator *cg)
    {
@@ -3967,35 +3636,35 @@ generateInstruction(TR_X86OpCodes op,
    }
 
 TR::X86MemInstruction  *
-generateMemInstruction(TR_X86OpCodes op, TR::Node * node, TR::MemoryReference  * mr, TR::CodeGenerator *cg)
+generateMemInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::MemoryReference  * mr, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86MemInstruction(op, node, mr, cg);
    }
 
 TR::X86MemInstruction  *
-generateMemInstruction(TR::Instruction *precedingInstruction, TR_X86OpCodes op, TR::MemoryReference  * mr, TR::CodeGenerator *cg)
+generateMemInstruction(TR::Instruction *precedingInstruction, TR::InstOpCode::Mnemonic op, TR::MemoryReference  * mr, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86MemInstruction(precedingInstruction, op, mr, cg);
    }
 
 TR::X86MemInstruction  *
-generateMemInstruction(TR_X86OpCodes op, TR::Node * node, TR::MemoryReference  * mr, TR::RegisterDependencyConditions  *cond, TR::CodeGenerator *cg)
+generateMemInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::MemoryReference  * mr, TR::RegisterDependencyConditions  *cond, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86MemInstruction(op, node, mr, cond, cg);
    }
 
-TR::X86MemTableInstruction * generateMemTableInstruction(TR_X86OpCodes op, TR::Node *node, TR::MemoryReference *mr, ncount_t numEntries, TR::CodeGenerator *cg)
+TR::X86MemTableInstruction * generateMemTableInstruction(TR::InstOpCode::Mnemonic op, TR::Node *node, TR::MemoryReference *mr, ncount_t numEntries, TR::CodeGenerator *cg)
    {
    return new(cg->trHeapMemory()) TR::X86MemTableInstruction(op, node, mr, numEntries, cg);
    }
 
-TR::X86MemTableInstruction * generateMemTableInstruction(TR_X86OpCodes op, TR::Node *node, TR::MemoryReference *mr, ncount_t numEntries, TR::RegisterDependencyConditions *deps, TR::CodeGenerator *cg)
+TR::X86MemTableInstruction * generateMemTableInstruction(TR::InstOpCode::Mnemonic op, TR::Node *node, TR::MemoryReference *mr, ncount_t numEntries, TR::RegisterDependencyConditions *deps, TR::CodeGenerator *cg)
    {
    return new(cg->trHeapMemory()) TR::X86MemTableInstruction(op, node, mr, numEntries, deps, cg);
    }
 
 TR::X86MemImmSymInstruction  *
-generateMemImmSymInstruction(TR_X86OpCodes          op,
+generateMemImmSymInstruction(TR::InstOpCode::Mnemonic          op,
                              TR::Node               *node,
                              TR::MemoryReference *mr,
                              int32_t                imm,
@@ -4006,19 +3675,19 @@ generateMemImmSymInstruction(TR_X86OpCodes          op,
    }
 
 TR::X86ImmInstruction  *
-generateImmInstruction(TR_X86OpCodes op, TR::Node * node, int32_t imm, TR::CodeGenerator *cg)
+generateImmInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, int32_t imm, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86ImmInstruction(op, node, imm, cg);
    }
 
 TR::X86ImmInstruction  *
-generateImmInstruction(TR_X86OpCodes op, TR::Node * node, int32_t imm, TR::CodeGenerator *cg, int32_t reloKind)
+generateImmInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, int32_t imm, TR::CodeGenerator *cg, int32_t reloKind)
    {
    return new (cg->trHeapMemory()) TR::X86ImmInstruction(op, node, imm, cg, reloKind);
    }
 
 TR::X86ImmInstruction  *
-generateImmInstruction(TR_X86OpCodes                       op,
+generateImmInstruction(TR::InstOpCode::Mnemonic                       op,
                        TR::Node                            *node,
                        int32_t                             imm,
                        TR::RegisterDependencyConditions *cond,
@@ -4028,25 +3697,25 @@ generateImmInstruction(TR_X86OpCodes                       op,
    }
 
 TR::X86ImmInstruction  *
-generateImmInstruction(TR::Instruction *prev, TR_X86OpCodes op, int32_t imm, TR::CodeGenerator *cg)
+generateImmInstruction(TR::Instruction *prev, TR::InstOpCode::Mnemonic op, int32_t imm, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86ImmInstruction(prev, op, imm, cg);
    }
 
 TR::X86ImmInstruction  *
-generateImmInstruction(TR::Instruction *prev, TR_X86OpCodes op, int32_t imm, TR::RegisterDependencyConditions *cond, TR::CodeGenerator *cg)
+generateImmInstruction(TR::Instruction *prev, TR::InstOpCode::Mnemonic op, int32_t imm, TR::RegisterDependencyConditions *cond, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86ImmInstruction(prev, op, imm, cond, cg);
    }
 
 TR::X86RegInstruction  *
-generateRegInstruction(TR_X86OpCodes op, TR::Node * node, TR::Register * treg, TR::CodeGenerator *cg)
+generateRegInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * treg, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86RegInstruction(op, node, treg, cg);
    }
 
 TR::X86RegInstruction  *
-generateRegInstruction(TR_X86OpCodes                       op,
+generateRegInstruction(TR::InstOpCode::Mnemonic                       op,
                        TR::Node                             *node,
                        TR::Register                         *treg,
                        TR::RegisterDependencyConditions  *cond, TR::CodeGenerator *cg)
@@ -4055,13 +3724,13 @@ generateRegInstruction(TR_X86OpCodes                       op,
    }
 
 TR::X86RegInstruction  *
-generateRegInstruction(TR::Instruction *prev, TR_X86OpCodes op, TR::Register * reg1, TR::CodeGenerator *cg)
+generateRegInstruction(TR::Instruction *prev, TR::InstOpCode::Mnemonic op, TR::Register * reg1, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86RegInstruction(reg1, op, prev, cg);
    }
 
 TR::X86RegInstruction  *
-generateRegInstruction(TR::Instruction *prev, TR_X86OpCodes op, TR::Register *reg1, TR::RegisterDependencyConditions *cond, TR::CodeGenerator *cg)
+generateRegInstruction(TR::Instruction *prev, TR::InstOpCode::Mnemonic op, TR::Register *reg1, TR::RegisterDependencyConditions *cond, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86RegInstruction(cond, reg1, op, prev, cg);
    }
@@ -4139,7 +3808,7 @@ generateAlignmentInstruction(TR::Instruction *precedingInstruction, uint8_t boun
    }
 
 TR::X86LabelInstruction  *
-generateLabelInstruction(TR_X86OpCodes   op,
+generateLabelInstruction(TR::InstOpCode::Mnemonic   op,
                          TR::Node        * node,
                          TR::LabelSymbol * sym,
                          TR::CodeGenerator *cg)
@@ -4149,7 +3818,7 @@ generateLabelInstruction(TR_X86OpCodes   op,
 
 TR::X86LabelInstruction  *
 generateLabelInstruction(TR::Instruction * pred,
-                         TR_X86OpCodes   op,
+                         TR::InstOpCode::Mnemonic   op,
                          TR::LabelSymbol * sym,
                          TR::CodeGenerator *cg)
    {
@@ -4157,7 +3826,7 @@ generateLabelInstruction(TR::Instruction * pred,
    }
 
 TR::X86LabelInstruction  *
-generateLabelInstruction(TR_X86OpCodes                       op,
+generateLabelInstruction(TR::InstOpCode::Mnemonic                       op,
                          TR::Node                             *node,
                          TR::LabelSymbol                       *sym,
                          TR::RegisterDependencyConditions  *cond,
@@ -4168,7 +3837,7 @@ generateLabelInstruction(TR_X86OpCodes                       op,
 
 TR::X86LabelInstruction  *
 generateLabelInstruction(TR::Instruction                      *prev,
-                         TR_X86OpCodes                       op,
+                         TR::InstOpCode::Mnemonic                       op,
                          TR::LabelSymbol                       *sym,
                          TR::RegisterDependencyConditions  *cond,
                          TR::CodeGenerator *cg)
@@ -4177,7 +3846,7 @@ generateLabelInstruction(TR::Instruction                      *prev,
    }
 
 TR::X86LabelInstruction  *
-generateLongLabelInstruction(TR_X86OpCodes op, TR::Node * node, TR::LabelSymbol * sym, TR::CodeGenerator *cg)
+generateLongLabelInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::LabelSymbol * sym, TR::CodeGenerator *cg)
    {
    TR::X86LabelInstruction *toReturn = new (cg->trHeapMemory()) TR::X86LabelInstruction(op, node, sym, cg);
    toReturn->prohibitShortening();
@@ -4185,7 +3854,7 @@ generateLongLabelInstruction(TR_X86OpCodes op, TR::Node * node, TR::LabelSymbol 
    }
 
 TR::X86LabelInstruction  *
-generateLongLabelInstruction(TR_X86OpCodes                       op,
+generateLongLabelInstruction(TR::InstOpCode::Mnemonic                       op,
                              TR::Node                             *node,
                              TR::LabelSymbol                       *sym,
                              TR::RegisterDependencyConditions  *cond, TR::CodeGenerator *cg)
@@ -4196,11 +3865,10 @@ generateLongLabelInstruction(TR_X86OpCodes                       op,
    }
 
 TR::X86LabelInstruction  *
-generateLabelInstruction(TR_X86OpCodes     opCode,
+generateLabelInstruction(TR::InstOpCode::Mnemonic     opCode,
                          TR::Node           *node,
                          TR::LabelSymbol     *label,
                          TR::Node           *glRegDep,
-                         List<TR::Register> *popRegisters,
                          bool               evaluateGlRegDeps,
                          TR::CodeGenerator *cg)
    {
@@ -4213,7 +3881,7 @@ generateLabelInstruction(TR_X86OpCodes     opCode,
       generateLabelInstruction(opCode,
                                node,
                                label,
-                               generateRegisterDependencyConditions(glRegDep, cg, 0, popRegisters),
+                               generateRegisterDependencyConditions(glRegDep, cg, 0),
                                cg);
 
    return instr;
@@ -4227,13 +3895,12 @@ static TR_AtomicRegion longBranchAtomicRegions[] =
 
 TR::X86LabelInstruction *
 generateJumpInstruction(
-   TR_X86OpCodes     opCode,
-   TR::Node          *jumpNode,
-   TR::CodeGenerator *cg,
-   bool              needsVMThreadRegister,
-   bool              evaluateGlRegDeps)
+      TR::InstOpCode::Mnemonic opCode,
+      TR::Node *jumpNode,
+      TR::CodeGenerator *cg,
+      bool evaluateGlRegDeps)
    {
-   TR::LabelSymbol          *destinationLabel = jumpNode->getBranchDestination()->getNode()->getLabel();
+   TR::LabelSymbol *destinationLabel = jumpNode->getBranchDestination()->getNode()->getLabel();
    TR::X86LabelInstruction *inst;
 
    (jumpNode->getNumChildren() > 0) ?
@@ -4241,7 +3908,6 @@ generateJumpInstruction(
                                       jumpNode,
                                       destinationLabel,
                                       jumpNode->getFirstChild(),
-                                      0,
                                       evaluateGlRegDeps,
                                       cg) :
              inst = generateLabelInstruction(opCode,
@@ -4254,38 +3920,17 @@ generateJumpInstruction(
 
 TR::X86LabelInstruction *
 generateConditionalJumpInstruction(
-   TR_X86OpCodes     opCode,
-   TR::Node          *ifNode,
-   TR::CodeGenerator *cg,
-   bool              needsVMThreadRegister)
+      TR::InstOpCode::Mnemonic opCode,
+      TR::Node *ifNode,
+      TR::CodeGenerator *cg)
    {
-   TR::Compilation *comp = cg->comp();
-   TR::X86LabelInstruction  * inst;
-   TR::LabelSymbol           * destinationLabel = ifNode->getBranchDestination()->getNode()->getLabel();
+   TR::X86LabelInstruction *inst;
+   TR::LabelSymbol *destinationLabel = ifNode->getBranchDestination()->getNode()->getLabel();
 
    if (ifNode->getNumChildren() == 3)
       {
-      List<TR::Register> popRegisters(cg->trMemory());
       TR::Node* glRegDep = ifNode->getChild(2);
-      inst = generateLabelInstruction(opCode, ifNode, destinationLabel, glRegDep, &popRegisters, cg);
-
-      if (inst->getDependencyConditions())
-         {
-         inst->getDependencyConditions()->setMayNeedToPopFPRegisters(true);
-         }
-
-      if (!popRegisters.isEmpty())
-         {
-         ListIterator<TR::Register> popRegsIt(&popRegisters);
-         for (TR::Register *popRegister = popRegsIt.getFirst();
-              popRegister != NULL;
-              popRegister = popRegsIt.getNext())
-            {
-            generateFPSTiST0RegRegInstruction(FSTRegReg, ifNode, popRegister, popRegister,
-            cg);
-            cg->stopUsingRegister(popRegister);
-            }
-         }
+      inst = generateLabelInstruction(opCode, ifNode, destinationLabel, glRegDep, true, cg);
       }
    else
       {
@@ -4296,7 +3941,7 @@ generateConditionalJumpInstruction(
    }
 
 TR::X86FenceInstruction  *
-generateFenceInstruction(TR_X86OpCodes op, TR::Node * node, TR::Node * fenceNode, TR::CodeGenerator *cg)
+generateFenceInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Node * fenceNode, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86FenceInstruction(op, node, fenceNode, cg);
    }
@@ -4305,19 +3950,19 @@ generateFenceInstruction(TR_X86OpCodes op, TR::Node * node, TR::Node * fenceNode
 TR::X86VirtualGuardNOPInstruction  *
 generateVirtualGuardNOPInstruction(TR::Node * node, TR_VirtualGuardSite *site, TR::RegisterDependencyConditions  *deps, TR::CodeGenerator *cg)
    {
-   return new (cg->trHeapMemory()) TR::X86VirtualGuardNOPInstruction(VirtualGuardNOP, node, site, deps, cg);
+   return new (cg->trHeapMemory()) TR::X86VirtualGuardNOPInstruction(TR::InstOpCode::vgnop, node, site, deps, cg);
    }
 
 TR::X86VirtualGuardNOPInstruction  *
 generateVirtualGuardNOPInstruction(TR::Node * node, TR_VirtualGuardSite *site, TR::RegisterDependencyConditions  *deps, TR::LabelSymbol *label, TR::CodeGenerator *cg)
    {
-   return new (cg->trHeapMemory()) TR::X86VirtualGuardNOPInstruction(VirtualGuardNOP, node, site, deps, cg, label);
+   return new (cg->trHeapMemory()) TR::X86VirtualGuardNOPInstruction(TR::InstOpCode::vgnop, node, site, deps, cg, label);
    }
 
 TR::X86VirtualGuardNOPInstruction  *
 generateVirtualGuardNOPInstruction(TR::Instruction *i, TR::Node * node, TR_VirtualGuardSite *site, TR::RegisterDependencyConditions  *deps, TR::LabelSymbol *label, TR::CodeGenerator *cg)
    {
-   return new (cg->trHeapMemory()) TR::X86VirtualGuardNOPInstruction(i, VirtualGuardNOP, node, site, deps, cg, label);
+   return new (cg->trHeapMemory()) TR::X86VirtualGuardNOPInstruction(i, TR::InstOpCode::vgnop, node, site, deps, cg, label);
    }
 
 bool TR::X86VirtualGuardNOPInstruction::usesRegister(TR::Register *reg)
@@ -4334,7 +3979,7 @@ bool TR::X86VirtualGuardNOPInstruction::refsRegister(TR::Register *reg) { return
 #endif
 
 TR::X86RegImmInstruction  *
-generateRegImmInstruction(TR_X86OpCodes                       op,
+generateRegImmInstruction(TR::InstOpCode::Mnemonic                       op,
                           TR::Node                             *node,
                           TR::Register                         *treg,
                           int32_t                              imm,
@@ -4344,148 +3989,167 @@ generateRegImmInstruction(TR_X86OpCodes                       op,
    }
 
 TR::X86RegImmInstruction  *
-generateRegImmInstruction(TR::Instruction *instr, TR_X86OpCodes op, TR::Register * treg, int32_t imm, TR::CodeGenerator *cg, int32_t reloKind)
+generateRegImmInstruction(TR::Instruction *instr, TR::InstOpCode::Mnemonic op, TR::Register * treg, int32_t imm, TR::CodeGenerator *cg, int32_t reloKind)
    {
    return new (cg->trHeapMemory()) TR::X86RegImmInstruction(instr, op, treg, imm, cg, reloKind);
    }
 
 TR::X86RegImmInstruction  *
-generateRegImmInstruction(TR_X86OpCodes op, TR::Node * node,  TR::Register * treg, int32_t imm, TR::CodeGenerator *cg, int32_t reloKind)
+generateRegImmInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node,  TR::Register * treg, int32_t imm, TR::CodeGenerator *cg, int32_t reloKind)
    {
    return new (cg->trHeapMemory()) TR::X86RegImmInstruction(op, node, treg, imm, cg, reloKind);
    }
 
 TR::X86RegImmSymInstruction  *
-generateRegImmSymInstruction(TR_X86OpCodes op, TR::Node * node, TR::Register * treg, int32_t imm, TR::SymbolReference *sr, TR::CodeGenerator *cg)
+generateRegImmSymInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * treg, int32_t imm, TR::SymbolReference *sr, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86RegImmSymInstruction(op, node, treg, imm, sr, cg);
    }
 
 TR::X86RegMemInstruction  *
-generateRegMemInstruction(TR_X86OpCodes op, TR::Node * node, TR::Register * treg, TR::MemoryReference  * mr, TR::CodeGenerator *cg)
+generateRegMemInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * treg, TR::MemoryReference  * mr, TR::CodeGenerator *cg, OMR::X86::Encoding encoding)
    {
-   return new (cg->trHeapMemory()) TR::X86RegMemInstruction(op, node, treg, mr, cg);
+   return new (cg->trHeapMemory()) TR::X86RegMemInstruction(op, node, treg, mr, cg, encoding);
    }
 
 TR::X86RegMemInstruction  *
-generateRegMemInstruction(TR_X86OpCodes                       op,
+generateRegMemInstruction(TR::InstOpCode::Mnemonic                       op,
                           TR::Node                             *node,
                           TR::Register                         *treg,
                           TR::MemoryReference               *mr,
-                          TR::RegisterDependencyConditions  *cond, TR::CodeGenerator *cg)
+                          TR::RegisterDependencyConditions  *cond,
+                          TR::CodeGenerator *cg,
+                          OMR::X86::Encoding encoding)
    {
-   return new (cg->trHeapMemory()) TR::X86RegMemInstruction(op, node, treg, mr, cond, cg);
+   return new (cg->trHeapMemory()) TR::X86RegMemInstruction(op, node, treg, mr, cond, cg, encoding);
    }
 
 TR::X86RegMemInstruction  *
-generateRegMemInstruction(TR::Instruction *instr, TR_X86OpCodes op, TR::Register * treg, TR::MemoryReference  * mr, TR::CodeGenerator *cg)
+generateRegMemInstruction(TR::Instruction *instr, TR::InstOpCode::Mnemonic op, TR::Register * treg, TR::MemoryReference  * mr, TR::CodeGenerator *cg, OMR::X86::Encoding encoding)
    {
-   return new (cg->trHeapMemory()) TR::X86RegMemInstruction(instr, op, treg, mr, cg);
+   return new (cg->trHeapMemory()) TR::X86RegMemInstruction(instr, op, treg, mr, cg, encoding);
    }
 
 TR::X86RegRegInstruction  *
-generateRegRegInstruction(TR_X86OpCodes op, TR::Node * node, TR::Register * treg, TR::Register * sreg, TR::CodeGenerator *cg)
+generateRegRegInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * treg, TR::Register * sreg, TR::CodeGenerator *cg, OMR::X86::Encoding encoding)
    {
-   return new (cg->trHeapMemory()) TR::X86RegRegInstruction(op, node, treg, sreg, cg);
+   return new (cg->trHeapMemory()) TR::X86RegRegInstruction(op, node, treg, sreg, cg, encoding);
    }
 
 TR::X86RegRegInstruction  *
-generateRegRegInstruction(TR_X86OpCodes                       op,
+generateRegRegInstruction(TR::InstOpCode::Mnemonic                       op,
                           TR::Node                             *node,
                           TR::Register                         *treg,
                           TR::Register                         *sreg,
-                          TR::RegisterDependencyConditions  *cond, TR::CodeGenerator *cg)
+                          TR::RegisterDependencyConditions  *cond,
+                          TR::CodeGenerator *cg,
+                          OMR::X86::Encoding encoding)
    {
-   return new (cg->trHeapMemory()) TR::X86RegRegInstruction(op, node, treg, sreg, cond, cg);
+   return new (cg->trHeapMemory()) TR::X86RegRegInstruction(op, node, treg, sreg, cond, cg, encoding);
    }
 
 TR::X86RegRegInstruction  *
 generateRegRegInstruction(TR::Instruction *instr,
-                          TR_X86OpCodes  op,
+                          TR::InstOpCode::Mnemonic  op,
                           TR::Register    *treg,
-                          TR::Register    *sreg, TR::CodeGenerator *cg)
+                          TR::Register    *sreg,
+                          TR::CodeGenerator *cg,
+                          OMR::X86::Encoding encoding)
    {
-   return new (cg->trHeapMemory()) TR::X86RegRegInstruction(instr, op, treg, sreg, cg);
+   return new (cg->trHeapMemory()) TR::X86RegRegInstruction(instr, op, treg, sreg, cg, encoding);
    }
 
 TR::X86RegRegRegInstruction  *
-generateRegRegRegInstruction(TR_X86OpCodes op, TR::Node * node, TR::Register * reg1, TR::Register * reg2, TR::Register * reg3, TR::CodeGenerator *cg)
+generateRegRegRegInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * reg1, TR::Register * reg2, TR::Register * reg3, TR::CodeGenerator *cg, OMR::X86::Encoding encoding)
    {
-   return new (cg->trHeapMemory()) TR::X86RegRegRegInstruction(op, node, reg1, reg2, reg3, cg);
+   TR_ASSERT_FATAL(encoding != OMR::X86::Legacy, "Cannot use legacy SSE encoding for 3-operand instruction");
+   TR_ASSERT_FATAL(encoding == OMR::X86::Default ? cg->comp()->target().cpu.supportsAVX() : true, "Cannot use legacy SSE encoding for 3-operand instruction");
+
+   return new (cg->trHeapMemory()) TR::X86RegRegRegInstruction(op, node, reg1, reg2, reg3, cg, encoding);
    }
 
 TR::X86RegRegRegInstruction  *
-generateRegRegRegInstruction(TR_X86OpCodes                     op,
+generateRegRegRegInstruction(TR::InstOpCode::Mnemonic            op,
                              TR::Node                         *node,
                              TR::Register                     *reg1,
                              TR::Register                     *reg2,
                              TR::Register                     *reg3,
                              TR::RegisterDependencyConditions *cond,
-                             TR::CodeGenerator                *cg)
+                             TR::CodeGenerator                *cg,
+                             OMR::X86::Encoding               encoding)
    {
-   return new (cg->trHeapMemory()) TR::X86RegRegRegInstruction(op, node, reg1, reg2, reg3, cond, cg);
+   TR_ASSERT_FATAL(encoding != OMR::X86::Legacy, "Cannot use legacy SSE encoding for 3-operand instruction");
+   TR_ASSERT_FATAL(encoding == OMR::X86::Default ? cg->comp()->target().cpu.supportsAVX() : true, "Cannot use legacy SSE encoding for 3-operand instruction");
+   return new (cg->trHeapMemory()) TR::X86RegRegRegInstruction(op, node, reg1, reg2, reg3, cond, cg, encoding);
    }
 
 TR::X86RegRegMemInstruction  *
-generateRegRegMemInstruction(TR_X86OpCodes op, TR::Node * node, TR::Register * reg1, TR::Register * reg2, TR::MemoryReference  * mr, TR::CodeGenerator *cg)
+generateRegRegMemInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * reg1, TR::Register * reg2, TR::MemoryReference  * mr, TR::CodeGenerator *cg, OMR::X86::Encoding encoding)
    {
-   return new (cg->trHeapMemory()) TR::X86RegRegMemInstruction(op, node, reg1, reg2, mr, cg);
+   TR_ASSERT_FATAL(encoding != OMR::X86::Legacy, "Cannot use legacy SSE encoding for 3-operand instruction");
+   TR_ASSERT_FATAL(encoding == OMR::X86::Default ? cg->comp()->target().cpu.supportsAVX() : true, "Cannot use legacy SSE encoding for 3-operand instruction");
+   return new (cg->trHeapMemory()) TR::X86RegRegMemInstruction(op, node, reg1, reg2, mr, cg, encoding);
    }
 
 TR::X86RegRegMemInstruction  *
-generateRegRegMemInstruction(TR_X86OpCodes                     op,
+generateRegRegMemInstruction(TR::InstOpCode::Mnemonic                     op,
                              TR::Node                         *node,
                              TR::Register                     *reg1,
                              TR::Register                     *reg2,
                              TR::MemoryReference              *mr,
                              TR::RegisterDependencyConditions *cond,
-                             TR::CodeGenerator                *cg)
+                             TR::CodeGenerator                *cg,
+                             OMR::X86::Encoding encoding)
    {
-   return new (cg->trHeapMemory()) TR::X86RegRegMemInstruction(op, node, reg1, reg2, mr, cond, cg);
+   TR_ASSERT_FATAL(encoding != OMR::X86::Legacy, "Cannot use legacy SSE encoding for 3-operand instruction");
+   TR_ASSERT_FATAL(encoding == OMR::X86::Default ? cg->comp()->target().cpu.supportsAVX() : true, "Cannot use legacy SSE encoding for 3-operand instruction");
+   return new (cg->trHeapMemory()) TR::X86RegRegMemInstruction(op, node, reg1, reg2, mr, cond, cg, encoding);
    }
 
 TR::X86MemImmInstruction  *
-generateMemImmInstruction(TR_X86OpCodes op, TR::Node * node, TR::MemoryReference  * mr, int32_t imm, TR::CodeGenerator *cg, int32_t reloKind)
+generateMemImmInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::MemoryReference  * mr, int32_t imm, TR::CodeGenerator *cg, int32_t reloKind)
    {
    return new (cg->trHeapMemory()) TR::X86MemImmInstruction(op, node, mr, imm, cg, reloKind);
    }
 
 TR::X86MemImmInstruction  *
-generateMemImmInstruction(TR::Instruction *precedingInstruction, TR_X86OpCodes op, TR::MemoryReference  * mr, int32_t imm, TR::CodeGenerator *cg, int32_t reloKind)
+generateMemImmInstruction(TR::Instruction *precedingInstruction, TR::InstOpCode::Mnemonic op, TR::MemoryReference  * mr, int32_t imm, TR::CodeGenerator *cg, int32_t reloKind)
    {
    return new (cg->trHeapMemory()) TR::X86MemImmInstruction(precedingInstruction, op, mr, imm, cg, reloKind);
    }
 
 TR::X86MemRegInstruction*
-generateMemRegInstruction(TR::Instruction *precedingInstruction, TR_X86OpCodes op, TR::MemoryReference  *mr, TR::Register *sreg, TR::CodeGenerator *cg)
+generateMemRegInstruction(TR::Instruction *precedingInstruction, TR::InstOpCode::Mnemonic op, TR::MemoryReference  *mr, TR::Register *sreg, TR::CodeGenerator *cg, OMR::X86::Encoding encoding)
    {
-   return new (cg->trHeapMemory()) TR::X86MemRegInstruction(precedingInstruction, op, mr, sreg, cg);
+   return new (cg->trHeapMemory()) TR::X86MemRegInstruction(precedingInstruction, op, mr, sreg, cg, encoding);
    }
 
 TR::X86MemRegInstruction  *
-generateMemRegInstruction(TR_X86OpCodes op, TR::Node * node, TR::MemoryReference  * mr, TR::Register * sreg, TR::CodeGenerator *cg)
+generateMemRegInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::MemoryReference  * mr, TR::Register * sreg, TR::CodeGenerator *cg, OMR::X86::Encoding encoding)
    {
-   return new (cg->trHeapMemory()) TR::X86MemRegInstruction(op, node, mr, sreg, cg);
+   return new (cg->trHeapMemory()) TR::X86MemRegInstruction(op, node, mr, sreg, cg, encoding);
    }
 
 TR::X86MemRegInstruction  *
-generateMemRegInstruction(TR_X86OpCodes                       op,
-                          TR::Node                             *node,
-                          TR::MemoryReference               *mr,
-                          TR::Register                         *sreg,
-                          TR::RegisterDependencyConditions  *cond, TR::CodeGenerator *cg)
+generateMemRegInstruction(TR::InstOpCode::Mnemonic op,
+                          TR::Node *node,
+                          TR::MemoryReference *mr,
+                          TR::Register *sreg,
+                          TR::RegisterDependencyConditions  *cond,
+                          TR::CodeGenerator *cg,
+                          OMR::X86::Encoding encoding)
    {
-   return new (cg->trHeapMemory()) TR::X86MemRegInstruction(op, node, mr, sreg, cond, cg);
+   return new (cg->trHeapMemory()) TR::X86MemRegInstruction(op, node, mr, sreg, cond, cg, encoding);
    }
 
 TR::X86ImmSymInstruction  *
-generateImmSymInstruction(TR_X86OpCodes op, TR::Node * node, int32_t imm, TR::SymbolReference * sr, TR::CodeGenerator *cg)
+generateImmSymInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, int32_t imm, TR::SymbolReference * sr, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86ImmSymInstruction(op, node, imm, sr, cg);
    }
 
 TR::X86ImmSymInstruction  *
-generateImmSymInstruction(TR_X86OpCodes                       op,
+generateImmSymInstruction(TR::InstOpCode::Mnemonic                       op,
                           TR::Node                             *node,
                           int32_t                              imm,
                           TR::SymbolReference                  *sr,
@@ -4495,37 +4159,37 @@ generateImmSymInstruction(TR_X86OpCodes                       op,
    }
 
 TR::X86ImmSymInstruction  *
-generateImmSymInstruction(TR::Instruction *prev, TR_X86OpCodes op, int32_t imm, TR::SymbolReference * sr, TR::CodeGenerator *cg)
+generateImmSymInstruction(TR::Instruction *prev, TR::InstOpCode::Mnemonic op, int32_t imm, TR::SymbolReference * sr, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86ImmSymInstruction(prev, op, imm, sr, cg);
    }
 
 TR::X86ImmSymInstruction  *
-generateImmSymInstruction(TR::Instruction *prev, TR_X86OpCodes op, int32_t imm, TR::SymbolReference *sr, TR::RegisterDependencyConditions *cond, TR::CodeGenerator *cg)
+generateImmSymInstruction(TR::Instruction *prev, TR::InstOpCode::Mnemonic op, int32_t imm, TR::SymbolReference *sr, TR::RegisterDependencyConditions *cond, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86ImmSymInstruction(prev, op, imm, sr, cond, cg);
    }
 
 TR::X86ImmSnippetInstruction  *
-generateImmSnippetInstruction(TR_X86OpCodes op, TR::Node * node, int32_t imm, TR::UnresolvedDataSnippet * snippet, TR::CodeGenerator *cg)
+generateImmSnippetInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, int32_t imm, TR::UnresolvedDataSnippet * snippet, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86ImmSnippetInstruction(op, node, imm, snippet, cg);
    }
 
 TR::X86RegMemImmInstruction  *
-generateRegMemImmInstruction(TR_X86OpCodes op, TR::Node * node, TR::Register * reg, TR::MemoryReference  * mr, int32_t imm, TR::CodeGenerator *cg)
+generateRegMemImmInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * reg, TR::MemoryReference  * mr, int32_t imm, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86RegMemImmInstruction(op, node, reg, mr, imm, cg);
    }
 
 TR::X86RegRegImmInstruction  *
-generateRegRegImmInstruction(TR_X86OpCodes op, TR::Node * node, TR::Register * treg, TR::Register * sreg, int32_t imm, TR::CodeGenerator *cg)
+generateRegRegImmInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * treg, TR::Register * sreg, int32_t imm, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86RegRegImmInstruction(op, node, treg, sreg, imm, cg);
    }
 
 TR::X86CallMemInstruction  *
-generateCallMemInstruction(TR_X86OpCodes                       op,
+generateCallMemInstruction(TR::InstOpCode::Mnemonic                       op,
                            TR::Node                             *node,
                            TR::MemoryReference               *mr,
                            TR::RegisterDependencyConditions  *cond, TR::CodeGenerator *cg)
@@ -4534,7 +4198,7 @@ generateCallMemInstruction(TR_X86OpCodes                       op,
    }
 
 TR::X86CallMemInstruction  *
-generateCallMemInstruction(TR_X86OpCodes                       op,
+generateCallMemInstruction(TR::InstOpCode::Mnemonic                       op,
                            TR::Node                             *node,
                            TR::MemoryReference               *mr, TR::CodeGenerator *cg)
    {
@@ -4543,7 +4207,7 @@ generateCallMemInstruction(TR_X86OpCodes                       op,
 
 TR::X86CallMemInstruction  *
 generateCallMemInstruction(TR::Instruction *prevInstr,
-                           TR_X86OpCodes op,
+                           TR::InstOpCode::Mnemonic op,
                            TR::MemoryReference *mr,
                            TR::RegisterDependencyConditions *cond,
                            TR::CodeGenerator *cg)
@@ -4556,7 +4220,7 @@ generateHelperCallInstruction(TR::Instruction * cursor, TR_RuntimeHelper index, 
    {
    TR::SymbolReference * helperSymRef = cg->symRefTab()->findOrCreateRuntimeHelper(index);
    cg->resetIsLeafMethod();
-   return new (cg->trHeapMemory()) TR::X86ImmSymInstruction(cursor, CALLImm4, (uintptr_t)helperSymRef->getMethodAddress(), helperSymRef, cg);
+   return new (cg->trHeapMemory()) TR::X86ImmSymInstruction(cursor, TR::InstOpCode::CALLImm4, static_cast<int32_t>(reinterpret_cast<intptr_t>(helperSymRef->getMethodAddress())), helperSymRef, cg);
    }
 
 TR::X86ImmSymInstruction  *
@@ -4565,9 +4229,9 @@ generateHelperCallInstruction(TR::Node * node, TR_RuntimeHelper index, TR::Regis
    TR::SymbolReference * helperSymRef = cg->symRefTab()->findOrCreateRuntimeHelper(index);
    cg->resetIsLeafMethod();
    return generateImmSymInstruction(
-         CALLImm4,
+         TR::InstOpCode::CALLImm4,
          node,
-         (uintptr_t)helperSymRef->getMethodAddress(),
+         static_cast<int32_t>(reinterpret_cast<intptr_t>(helperSymRef->getMethodAddress())),
          helperSymRef,
          dependencies,
          cg);
@@ -4640,79 +4304,61 @@ TR::X86VFPCallCleanupInstruction *generateVFPCallCleanupInstruction(int32_t adju
    }
 
 TR::X86FPRegInstruction  *
-generateFPRegInstruction(TR_X86OpCodes op, TR::Node * node, TR::Register * reg, TR::CodeGenerator *cg)
+generateFPRegInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * reg, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86FPRegInstruction(op, node, reg, cg);
    }
 
 TR::X86FPST0ST1RegRegInstruction  *
-generateFPST0ST1RegRegInstruction(TR_X86OpCodes op, TR::Node * node, TR::Register * treg, TR::Register * sreg, TR::CodeGenerator *cg)
+generateFPST0ST1RegRegInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * treg, TR::Register * sreg, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86FPST0ST1RegRegInstruction(op, node, treg, sreg, cg);
    }
 
 TR::X86FPST0STiRegRegInstruction  *
-generateFPST0STiRegRegInstruction(TR_X86OpCodes op, TR::Node * node, TR::Register * treg, TR::Register * sreg, TR::CodeGenerator *cg)
+generateFPST0STiRegRegInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * treg, TR::Register * sreg, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86FPST0STiRegRegInstruction(op, node, treg, sreg, cg);
    }
 
 TR::X86FPSTiST0RegRegInstruction  *
-generateFPSTiST0RegRegInstruction(TR_X86OpCodes op, TR::Node * node, TR::Register * treg, TR::Register * sreg, TR::CodeGenerator *cg, bool forcePop)
+generateFPSTiST0RegRegInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * treg, TR::Register * sreg, TR::CodeGenerator *cg, bool forcePop)
    {
    return new (cg->trHeapMemory()) TR::X86FPSTiST0RegRegInstruction(op, node, treg, sreg, cg, forcePop);
    }
 
 TR::X86FPArithmeticRegRegInstruction  *
-generateFPArithmeticRegRegInstruction(TR_X86OpCodes op, TR::Node * node, TR::Register * treg, TR::Register * sreg, TR::CodeGenerator *cg)
+generateFPArithmeticRegRegInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * treg, TR::Register * sreg, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86FPArithmeticRegRegInstruction(op, node, treg, sreg, cg);
    }
 
-TR::X86FPCompareRegRegInstruction  *
-generateFPCompareRegRegInstruction(TR_X86OpCodes op, TR::Node * node, TR::Register * treg, TR::Register * sreg, TR::CodeGenerator *cg)
-   {
-   return new (cg->trHeapMemory()) TR::X86FPCompareRegRegInstruction(op, node, treg, sreg, cg);
-   }
-
-TR::X86FPCompareEvalInstruction  *
-generateFPCompareEvalInstruction(TR_X86OpCodes op, TR::Node * node, TR::Register * accRegister, TR::CodeGenerator *cg)
-   {
-   return new (cg->trHeapMemory()) TR::X86FPCompareEvalInstruction(op, node, accRegister, cg);
-   }
-
-TR::X86FPCompareEvalInstruction  *
-generateFPCompareEvalInstruction(TR_X86OpCodes op, TR::Node * node, TR::Register * accRegister, TR::RegisterDependencyConditions  * cond, TR::CodeGenerator *cg)
-   {
-   return new (cg->trHeapMemory()) TR::X86FPCompareEvalInstruction(op, node, accRegister, cond, cg);
-   }
-
 TR::X86FPRemainderRegRegInstruction  *
-generateFPRemainderRegRegInstruction( TR_X86OpCodes op, TR::Node * node, TR::Register * treg, TR::Register * sreg, TR::CodeGenerator *cg)
+generateFPRemainderRegRegInstruction( TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * treg, TR::Register * sreg, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86FPRemainderRegRegInstruction( op, node, treg, sreg, cg);
    }
 
 TR::X86FPRemainderRegRegInstruction  *
-generateFPRemainderRegRegInstruction( TR_X86OpCodes op, TR::Node * node, TR::Register * treg, TR::Register * sreg, TR::Register *accReg, TR::RegisterDependencyConditions  *cond, TR::CodeGenerator *cg)
+generateFPRemainderRegRegInstruction( TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * treg, TR::Register * sreg, TR::Register *accReg, TR::RegisterDependencyConditions  *cond, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86FPRemainderRegRegInstruction( op, node, treg, sreg, accReg, cond, cg);
    }
 
 TR::X86FPMemRegInstruction  *
-generateFPMemRegInstruction(TR_X86OpCodes op, TR::Node * node, TR::MemoryReference  * mr, TR::Register * sreg, TR::CodeGenerator *cg)
+generateFPMemRegInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::MemoryReference  * mr, TR::Register * sreg, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86FPMemRegInstruction(op, node, mr, sreg, cg);
    }
 
 TR::X86FPRegMemInstruction  *
-generateFPRegMemInstruction(TR_X86OpCodes op, TR::Node * node, TR::Register * treg, TR::MemoryReference  * mr, TR::CodeGenerator *cg)
+generateFPRegMemInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * treg, TR::MemoryReference  * mr, TR::CodeGenerator *cg)
    {
    return new (cg->trHeapMemory()) TR::X86FPRegMemInstruction(op, node, treg, mr, cg);
    }
 
 TR::X86FPReturnInstruction  *
-generateFPReturnInstruction(TR_X86OpCodes                       op,
+generateFPReturnInstruction(TR::InstOpCode::Mnemonic                       op,
                             TR::Node                             *node,
                             TR::RegisterDependencyConditions  *cond, TR::CodeGenerator *cg)
    {
@@ -4720,7 +4366,7 @@ generateFPReturnInstruction(TR_X86OpCodes                       op,
    }
 
 TR::X86FPReturnImmInstruction  *
-generateFPReturnImmInstruction(TR_X86OpCodes                        op,
+generateFPReturnImmInstruction(TR::InstOpCode::Mnemonic                        op,
                                TR::Node                             *node,
                                int32_t                              imm,
                                TR::RegisterDependencyConditions  *cond, TR::CodeGenerator *cg)
@@ -4729,7 +4375,7 @@ generateFPReturnImmInstruction(TR_X86OpCodes                        op,
    }
 
 TR::AMD64RegImm64Instruction *
-generateRegImm64Instruction(TR_X86OpCodes     op,
+generateRegImm64Instruction(TR::InstOpCode::Mnemonic     op,
                            TR::Node          *node,
                            TR::Register      *treg,
                            uint64_t          imm,
@@ -4741,7 +4387,7 @@ generateRegImm64Instruction(TR_X86OpCodes     op,
 
 TR::AMD64RegImm64Instruction *
 generateRegImm64Instruction(TR::Instruction   *precedingInstruction,
-                            TR_X86OpCodes     op,
+                            TR::InstOpCode::Mnemonic     op,
                             TR::Register      *treg,
                             uint64_t          imm,
                             TR::CodeGenerator *cg,
@@ -4751,7 +4397,7 @@ generateRegImm64Instruction(TR::Instruction   *precedingInstruction,
    }
 
 TR::AMD64RegImm64Instruction *
-generateRegImm64Instruction(TR_X86OpCodes                        op,
+generateRegImm64Instruction(TR::InstOpCode::Mnemonic                        op,
                             TR::Node                             *node,
                             TR::Register                         *treg,
                             uint64_t                             imm,
@@ -4764,7 +4410,7 @@ generateRegImm64Instruction(TR_X86OpCodes                        op,
 
 TR::AMD64RegImm64Instruction *
 generateRegImm64Instruction(TR::Instruction                      *precedingInstruction,
-                            TR_X86OpCodes                        op,
+                            TR::InstOpCode::Mnemonic                        op,
                             TR::Register                         *treg,
                             uint64_t                             imm,
                             TR::RegisterDependencyConditions  *cond,
@@ -4775,7 +4421,7 @@ generateRegImm64Instruction(TR::Instruction                      *precedingInstr
    }
 
 TR::AMD64Imm64Instruction *
-generateImm64Instruction(TR_X86OpCodes     op,
+generateImm64Instruction(TR::InstOpCode::Mnemonic     op,
                          TR::Node          *node,
                          uint64_t          imm,
                          TR::CodeGenerator *cg)
@@ -4785,7 +4431,7 @@ generateImm64Instruction(TR_X86OpCodes     op,
 
 TR::AMD64Imm64Instruction *
 generateImm64Instruction(TR::Instruction   *precedingInstruction,
-                         TR_X86OpCodes     op,
+                         TR::InstOpCode::Mnemonic     op,
                          uint64_t          imm,
                          TR::CodeGenerator *cg)
    {
@@ -4793,7 +4439,7 @@ generateImm64Instruction(TR::Instruction   *precedingInstruction,
    }
 
 TR::AMD64Imm64Instruction *
-generateImm64Instruction(TR_X86OpCodes                        op,
+generateImm64Instruction(TR::InstOpCode::Mnemonic                        op,
                          TR::Node *                            node,
                          uint64_t                             imm,
                          TR::RegisterDependencyConditions  *cond,
@@ -4804,7 +4450,7 @@ generateImm64Instruction(TR_X86OpCodes                        op,
 
 TR::AMD64Imm64Instruction *
 generateImm64Instruction(TR::Instruction                      *precedingInstruction,
-                         TR_X86OpCodes                        op,
+                         TR::InstOpCode::Mnemonic                        op,
                          uint64_t                             imm,
                          TR::RegisterDependencyConditions  *cond,
                          TR::CodeGenerator                    *cg)
@@ -4815,7 +4461,7 @@ generateImm64Instruction(TR::Instruction                      *precedingInstruct
 // TR::AMD64Imm64SymInstruction
 //
 TR::AMD64RegImm64SymInstruction *
-generateRegImm64SymInstruction(TR_X86OpCodes       op,
+generateRegImm64SymInstruction(TR::InstOpCode::Mnemonic       op,
                                TR::Node            *node,
                                TR::Register        *reg,
                                uint64_t            imm,
@@ -4827,7 +4473,7 @@ generateRegImm64SymInstruction(TR_X86OpCodes       op,
 
 TR::AMD64RegImm64SymInstruction *
 generateRegImm64SymInstruction(TR::Instruction     *precedingInstruction,
-                               TR_X86OpCodes       op,
+                               TR::InstOpCode::Mnemonic       op,
                                TR::Register        *reg,
                                uint64_t            imm,
                                TR::SymbolReference *sr,
@@ -4837,7 +4483,7 @@ generateRegImm64SymInstruction(TR::Instruction     *precedingInstruction,
    }
 
 TR::AMD64Imm64SymInstruction *
-generateImm64SymInstruction(TR_X86OpCodes       op,
+generateImm64SymInstruction(TR::InstOpCode::Mnemonic       op,
                             TR::Node            *node,
                             uint64_t            imm,
                             TR::SymbolReference *sr,
@@ -4848,7 +4494,7 @@ generateImm64SymInstruction(TR_X86OpCodes       op,
 
 TR::AMD64Imm64SymInstruction *
 generateImm64SymInstruction(TR::Instruction     *precedingInstruction,
-                            TR_X86OpCodes       op,
+                            TR::InstOpCode::Mnemonic       op,
                             uint64_t            imm,
                             TR::SymbolReference *sr,
                             TR::CodeGenerator   *cg)
@@ -4857,7 +4503,7 @@ generateImm64SymInstruction(TR::Instruction     *precedingInstruction,
    }
 
 TR::AMD64Imm64SymInstruction *
-generateImm64SymInstruction(TR_X86OpCodes                        op,
+generateImm64SymInstruction(TR::InstOpCode::Mnemonic                        op,
                            TR::Node                             *node,
                            uint64_t                             imm,
                            TR::SymbolReference                  *sr,
@@ -4869,7 +4515,7 @@ generateImm64SymInstruction(TR_X86OpCodes                        op,
 
 TR::AMD64Imm64SymInstruction *
 generateImm64SymInstruction(TR::Instruction                      *precedingInstruction,
-                            TR_X86OpCodes                        op,
+                            TR::InstOpCode::Mnemonic                        op,
                             uint64_t                             imm,
                             TR::SymbolReference                  *sr,
                             TR::RegisterDependencyConditions  *cond,

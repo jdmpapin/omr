@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -74,7 +74,7 @@
 #include "x/codegen/CompareAnalyser.hpp"
 #include "x/codegen/FPTreeEvaluator.hpp"
 #include "x/codegen/X86Instruction.hpp"
-#include "x/codegen/X86Ops.hpp"
+#include "codegen/InstOpCode.hpp"
 
 class TR_OpaqueClassBlock;
 class TR_OpaqueMethodBlock;
@@ -135,8 +135,8 @@ static inline TR::Instruction *generateWiderCompare(TR::Node *node, TR::Register
    // the recommended fix is to use a compare register with a 32-bit value
    // instead
    //
-   generateRegRegInstruction(MOVSXReg4Reg2, node, targetReg, targetReg, cg);
-   return generateRegImmInstruction(CMP4RegImm4, node, targetReg, value, cg);
+   generateRegRegInstruction(TR::InstOpCode::MOVSXReg4Reg2, node, targetReg, targetReg, cg);
+   return generateRegImmInstruction(TR::InstOpCode::CMP4RegImm4, node, targetReg, static_cast<int32_t>(value), cg);
    }
 
 bool isConditionCodeSetForCompareToZero(TR::Node *node, bool justTestZeroFlag)
@@ -224,7 +224,7 @@ bool isConditionCodeSetForCompareToZero(TR::Node *node, bool justTestZeroFlag)
             }
          }
 
-      if (prevInstr->getOpCodeValue() == LABEL)
+      if (prevInstr->getOpCodeValue() == TR::InstOpCode::label)
          {
          // This instruction is a possible branch target.
          return false;
@@ -260,7 +260,7 @@ static void binarySearchCaseSpace(TR::Register *selectorReg,
                                   TR::CodeGenerator *cg)
    {
    uint32_t numCases  = highChild - lowChild + 1;
-   TR_X86OpCodes opCode;
+   TR::InstOpCode::Mnemonic opCode;
    uint32_t pivot;
    if ((pivot = sumOf2ConsecutivePowersOf2(numCases)) == 0)
       {
@@ -280,18 +280,18 @@ static void binarySearchCaseSpace(TR::Register *selectorReg,
       //  so sign extension is valid)
       if (pivotValue >= -128 && pivotValue <= 127)
          {
-         opCode = CMP4RegImms;
+         opCode = TR::InstOpCode::CMP4RegImms;
          }
       else
          {
-         opCode = CMP4RegImm4;
+         opCode = TR::InstOpCode::CMP4RegImm4;
          }
       generateRegImmInstruction(opCode, lookupNode, selectorReg, pivotValue, cg);
       TR::LabelSymbol *startLabel = generateLabelSymbol(cg);
       TR::LabelSymbol *pivotLabel = generateLabelSymbol(cg);
       startLabel->setStartInternalControlFlow();
       pivotLabel->setEndInternalControlFlow();
-      generateLabelInstruction(LABEL, lookupNode, startLabel, cg);
+      generateLabelInstruction(TR::InstOpCode::label, lookupNode, startLabel, cg);
 
       // We are guaranteed that the case children are sorted.
       // Image the Z32 number lines
@@ -312,19 +312,19 @@ static void binarySearchCaseSpace(TR::Register *selectorReg,
       else
          isUnsigned = false;
 
-      generateLabelInstruction(isUnsigned ? JA4 : JG4, lookupNode, pivotLabel, cg);
+      generateLabelInstruction(isUnsigned ? TR::InstOpCode::JA4 : TR::InstOpCode::JG4, lookupNode, pivotLabel, cg);
 
       if (lowChild == pivot)
          {
-         generateJumpInstruction(JE4, lookupNode->getChild(lowChild), cg);
-         generateJumpInstruction(JMP4, lookupNode->getChild(1), cg, false, evaluateDefaultGlRegDeps);
+         generateJumpInstruction(TR::InstOpCode::JE4, lookupNode->getChild(lowChild), cg);
+         generateJumpInstruction(TR::InstOpCode::JMP4, lookupNode->getChild(1), cg, evaluateDefaultGlRegDeps);
          evaluateDefaultGlRegDeps = false;
          }
       else
          {
          binarySearchCaseSpace(selectorReg, lookupNode, lowChild, pivot, evaluateDefaultGlRegDeps, cg);
          }
-      generateLabelInstruction(LABEL, lookupNode, pivotLabel, cg);
+      generateLabelInstruction(TR::InstOpCode::label, lookupNode, pivotLabel, cg);
       }
    else
       TR_ASSERT(pivot == lowChild - 1 && lowChild == highChild, "unexpected pivot value in binarySearchCaseSpace");
@@ -338,16 +338,16 @@ static void binarySearchCaseSpace(TR::Register *selectorReg,
       //  so sign extension is valid)
       if (highValue >= -128 && highValue <= 127)
          {
-         opCode = CMP4RegImms;
+         opCode = TR::InstOpCode::CMP4RegImms;
          }
       else
          {
-         opCode = CMP4RegImm4;
+         opCode = TR::InstOpCode::CMP4RegImm4;
          }
       generateRegImmInstruction(opCode, lookupNode, selectorReg, highValue, cg);
 
-      generateJumpInstruction(JE4, lookupNode->getChild(highChild), cg);
-      generateJumpInstruction(JMP4, lookupNode->getChild(1), cg, false, evaluateDefaultGlRegDeps);
+      generateJumpInstruction(TR::InstOpCode::JE4, lookupNode->getChild(highChild), cg);
+      generateJumpInstruction(TR::InstOpCode::JMP4, lookupNode->getChild(1), cg, evaluateDefaultGlRegDeps);
       evaluateDefaultGlRegDeps = false;
       }
    else
@@ -365,11 +365,15 @@ TR::Register *OMR::X86::TreeEvaluator::lookupEvaluator(TR::Node *node, TR::CodeG
    bool selectorRegInGlRegDeps = false;
    TR::LabelSymbol *startLabel = generateLabelSymbol(cg);
    TR::LabelSymbol *endLabel = generateLabelSymbol(cg);
-   TR::RegisterDependencyConditions  *deps = generateRegisterDependencyConditions((uint8_t) 0, TR::RealRegister::MaxAssignableRegisters, cg);
+
+   TR::Machine *machine = cg->machine();
+   uint32_t maxAssignableRegisters = machine->maxAssignableRegisters();
+
+   TR::RegisterDependencyConditions  *deps = generateRegisterDependencyConditions((uint8_t) 0, maxAssignableRegisters, cg);
 
    startLabel->setStartInternalControlFlow();
    endLabel->setEndInternalControlFlow();
-   generateLabelInstruction(LABEL, node, startLabel, cg);
+   generateLabelInstruction(TR::InstOpCode::label, node, startLabel, cg);
 
    for (int i=1; i< node->getNumChildren(); i++)
       {
@@ -421,7 +425,7 @@ TR::Register *OMR::X86::TreeEvaluator::lookupEvaluator(TR::Node *node, TR::CodeG
 
    deps->addPostCondition(selectorReg, depsRegisterIndex, cg);
    deps->stopAddingConditions();
-   generateLabelInstruction(LABEL, node, endLabel, deps, cg);
+   generateLabelInstruction(TR::InstOpCode::label, node, endLabel, deps, cg);
 
    return NULL;
    }
@@ -434,7 +438,7 @@ TR::Register *OMR::X86::TreeEvaluator::tableEvaluator(TR::Node *node, TR::CodeGe
       (intptr_t*)cg->allocateCodeMemory(numBranchTableEntries * sizeof(branchTable[0]), cg->getCurrentEvaluationBlock()->isCold());
 
    TR::Register *selectorReg = cg->evaluate(node->getFirstChild());
-   TR_X86OpCodes opCode;
+   TR::InstOpCode::Mnemonic opCode;
 
    bool canSkipBoundTest = node->isSafeToSkipTableBoundCheck();
 
@@ -444,18 +448,18 @@ TR::Register *OMR::X86::TreeEvaluator::tableEvaluator(TR::Node *node, TR::CodeGe
       {
       if (numBranchTableEntries <= 127)
          {
-         opCode = CMP4RegImms;
+         opCode = TR::InstOpCode::CMP4RegImms;
          }
       else
          {
-         opCode = CMP4RegImm4;
+         opCode = TR::InstOpCode::CMP4RegImm4;
          }
 
       generateRegImmInstruction(opCode, node, selectorReg, numBranchTableEntries, cg);
 
       // The glRegDep is hung off the default case statement.
       //
-      generateJumpInstruction(JAE4, secondChild, cg, true);
+      generateJumpInstruction(TR::InstOpCode::JAE4, secondChild, cg);
       }
    else
       {
@@ -477,7 +481,7 @@ TR::Register *OMR::X86::TreeEvaluator::tableEvaluator(TR::Node *node, TR::CodeGe
       label->setCodeLocation(reinterpret_cast<uint8_t*>(branchTable));
       TR::MemoryReference *branchTableLeaMR = generateX86MemoryReference(label, cg);
       branchTableReg = cg->allocateRegister();
-      generateRegMemInstruction(LEA8RegMem, node, branchTableReg, branchTableLeaMR, cg);
+      generateRegMemInstruction(TR::InstOpCode::LEA8RegMem, node, branchTableReg, branchTableLeaMR, cg);
       jumpMR = generateX86MemoryReference(branchTableReg, selectorReg, 3, cg);
       }
    else
@@ -504,11 +508,11 @@ TR::Register *OMR::X86::TreeEvaluator::tableEvaluator(TR::Node *node, TR::CodeGe
 
    if (cg->getLinkage()->getProperties().getMethodMetaDataRegister() != TR::RealRegister::NoReg)
       {
-      jmpTableInstruction = generateMemTableInstruction(JMPMem, node, jumpMR, numBranchTableEntries, deps, cg);
+      jmpTableInstruction = generateMemTableInstruction(TR::InstOpCode::JMPMem, node, jumpMR, numBranchTableEntries, deps, cg);
       }
    else
       {
-      generateMemInstruction(JMPMem, node, jumpMR, deps, cg);
+      generateMemInstruction(TR::InstOpCode::JMPMem, node, jumpMR, deps, cg);
       }
 
    for (i = 2; i < node->getNumChildren(); ++i)
@@ -531,30 +535,30 @@ TR::Register *OMR::X86::TreeEvaluator::tableEvaluator(TR::Node *node, TR::CodeGe
 
 TR::Register *OMR::X86::TreeEvaluator::minmaxEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   TR_X86OpCodes CMP  = BADIA32Op;
-   TR_X86OpCodes MOV  = BADIA32Op;
-   TR_X86OpCodes CMOV = BADIA32Op;
+   TR::InstOpCode::Mnemonic CMP  = TR::InstOpCode::bad;
+   TR::InstOpCode::Mnemonic MOV  = TR::InstOpCode::bad;
+   TR::InstOpCode::Mnemonic CMOV = TR::InstOpCode::bad;
    switch (node->getOpCodeValue())
       {
       case TR::imin:
-         CMP = CMP4RegReg;
-         MOV = MOV4RegReg;
-         CMOV = CMOVG4RegReg;
+         CMP = TR::InstOpCode::CMP4RegReg;
+         MOV = TR::InstOpCode::MOV4RegReg;
+         CMOV = TR::InstOpCode::CMOVG4RegReg;
          break;
       case TR::imax:
-         CMP = CMP4RegReg;
-         MOV = MOV4RegReg;
-         CMOV = CMOVL4RegReg;
+         CMP = TR::InstOpCode::CMP4RegReg;
+         MOV = TR::InstOpCode::MOV4RegReg;
+         CMOV = TR::InstOpCode::CMOVL4RegReg;
          break;
       case TR::lmin:
-         CMP = CMP8RegReg;
-         MOV = MOV8RegReg;
-         CMOV = CMOVG8RegReg;
+         CMP = TR::InstOpCode::CMP8RegReg;
+         MOV = TR::InstOpCode::MOV8RegReg;
+         CMOV = TR::InstOpCode::CMOVG8RegReg;
          break;
       case TR::lmax:
-         CMP = CMP8RegReg;
-         MOV = MOV8RegReg;
-         CMOV = CMOVL8RegReg;
+         CMP = TR::InstOpCode::CMP8RegReg;
+         MOV = TR::InstOpCode::MOV8RegReg;
+         CMOV = TR::InstOpCode::CMOVL8RegReg;
          break;
       default:
          TR_ASSERT(false, "INCORRECT IL OPCODE.");
@@ -696,18 +700,17 @@ void OMR::X86::TreeEvaluator::compareIntegersForEquality(TR::Node *node, TR::Cod
                      {
                      // memory case
                      TR::MemoryReference  *tempMR = generateX86MemoryReference(andFirstChild, cg);
-                     TR_X86OpCodes testInstr;
                      if(((mask >> 8) == 0) || (andSecondChild->getSize() == 1))
-                        generateMemImmInstruction(TEST1MemImm1, node, tempMR, mask, cg);
+                        generateMemImmInstruction(TR::InstOpCode::TEST1MemImm1, node, tempMR, static_cast<int32_t>(mask), cg);
                      else if(andSecondChild->getSize() == 2)
                         {
                         TR::Register *tempReg = cg->allocateRegister();
                         TR::TreeEvaluator::loadConstant(node, mask, TR_RematerializableShort, cg, tempReg);
-                        generateMemRegInstruction(TEST2MemReg, node, tempMR, tempReg, cg);
+                        generateMemRegInstruction(TR::InstOpCode::TEST2MemReg, node, tempMR, tempReg, cg);
                         cg->stopUsingRegister(tempReg);
                         }
                      else
-                        generateMemImmInstruction(TESTMemImm4(is64Bit), node, tempMR, mask, cg);
+                        generateMemImmInstruction(TR::InstOpCode::TESTMemImm4(is64Bit), node, tempMR, static_cast<int32_t>(mask), cg);
                      tempMR->decNodeReferenceCounts(cg);
                      }
                   else
@@ -730,13 +733,13 @@ void OMR::X86::TreeEvaluator::compareIntegersForEquality(TR::Node *node, TR::Cod
                         {
                         tempReg = cg->evaluate(andFirstChild);
                         }
-                     TR_X86OpCodes testInstr;
+                     TR::InstOpCode::Mnemonic testInstr;
                      if(((mask >> 8) == 0 && !andFirstChild->isInvalid8BitGlobalRegister()) ||
                         (andSecondChild->getSize() == 1))
-                        testInstr = TEST1RegImm1;
+                        testInstr = TR::InstOpCode::TEST1RegImm1;
                      else
-                        testInstr = TESTRegImm4(is64Bit);
-                     generateRegImmInstruction(testInstr, node, tempReg, mask, cg);
+                        testInstr = TR::InstOpCode::TESTRegImm4(is64Bit);
+                     generateRegImmInstruction(testInstr, node, tempReg, static_cast<int32_t>(mask), cg);
                      }
                   if (conversionSkipped)
                      {
@@ -751,25 +754,25 @@ void OMR::X86::TreeEvaluator::compareIntegersForEquality(TR::Node *node, TR::Cod
                else
                   {
                   TR_X86BinaryCommutativeAnalyser  temp(cg);
-                  TR_X86OpCodes testRRInstr, testMRInstr, movRRInstr;
+                  TR::InstOpCode::Mnemonic testRRInstr, testMRInstr, movRRInstr;
                   uint32_t size = firstChild->getSize();
                   if(size == 1)
                      {
-                     testRRInstr = TEST1RegReg;
-                     testMRInstr = TEST1MemReg;
-                     movRRInstr = MOV1RegReg;
+                     testRRInstr = TR::InstOpCode::TEST1RegReg;
+                     testMRInstr = TR::InstOpCode::TEST1MemReg;
+                     movRRInstr = TR::InstOpCode::MOV1RegReg;
                      }
                   else if(size == 2)
                      {
-                     testRRInstr = TEST2RegReg;
-                     testMRInstr = TEST2MemReg;
-                     movRRInstr = MOV2RegReg;
+                     testRRInstr = TR::InstOpCode::TEST2RegReg;
+                     testMRInstr = TR::InstOpCode::TEST2MemReg;
+                     movRRInstr = TR::InstOpCode::MOV2RegReg;
                      }
                   else
                      {
-                     testRRInstr = TESTRegReg(is64Bit);
-                     testMRInstr = TESTMemReg(is64Bit);
-                     movRRInstr = MOVRegReg(is64Bit);
+                     testRRInstr = TR::InstOpCode::TESTRegReg(is64Bit);
+                     testMRInstr = TR::InstOpCode::TESTMemReg(is64Bit);
+                     movRRInstr = TR::InstOpCode::MOVRegReg(is64Bit);
                      }
                   temp.genericAnalyser(firstChild, testRRInstr, testMRInstr, movRRInstr, true);
                   }
@@ -816,13 +819,13 @@ void OMR::X86::TreeEvaluator::compareIntegersForEquality(TR::Node *node, TR::Cod
                      {
                      TR::MemoryReference  *tempMR = generateX86MemoryReference(firstChild, cg);
                      if (compareSize == 1)
-                        generateMemImmInstruction(CMP1MemImm1, node, tempMR, 0, cg);
+                        generateMemImmInstruction(TR::InstOpCode::CMP1MemImm1, node, tempMR, 0, cg);
                      else if (compareSize == 2)
                         {
                         //shouldn't use Imm2 instructions
                         TR::Register *tempReg = cg->allocateRegister();
                         TR::TreeEvaluator::loadConstant(node, 0, TR_RematerializableShort, cg, tempReg);
-                        generateMemRegInstruction(CMP2MemReg, node, tempMR, tempReg, cg);
+                        generateMemRegInstruction(TR::InstOpCode::CMP2MemReg, node, tempMR, tempReg, cg);
                         cg->stopUsingRegister(tempReg);
                         }
                      else
@@ -840,9 +843,9 @@ void OMR::X86::TreeEvaluator::compareIntegersForEquality(TR::Node *node, TR::Cod
                      else
                         {
                         if (compareSize == 1)
-                           generateRegRegInstruction(TEST1RegReg, node, firstChildReg, firstChildReg, cg);
+                           generateRegRegInstruction(TR::InstOpCode::TEST1RegReg, node, firstChildReg, firstChildReg, cg);
                         else if (compareSize == 2)
-                           generateRegRegInstruction(TEST2RegReg, node, firstChildReg, firstChildReg, cg);
+                           generateRegRegInstruction(TR::InstOpCode::TEST2RegReg, node, firstChildReg, firstChildReg, cg);
                         else
                            TR::TreeEvaluator::compareGPRegisterToImmediateForEquality(node, firstChildReg, 0, cg);
                         }
@@ -878,31 +881,31 @@ void OMR::X86::TreeEvaluator::compareIntegersForEquality(TR::Node *node, TR::Cod
                {
                TR::MemoryReference  *tempMR = generateX86MemoryReference(firstChild, cg);
                if (compareSize == 1)
-                  generateMemImmInstruction(CMP1MemImm1, node, tempMR, constValue, cg);
+                  generateMemImmInstruction(TR::InstOpCode::CMP1MemImm1, node, tempMR, static_cast<int32_t>(constValue), cg);
                else if (compareSize == 2)
                   {
                   //shouldn't use Imm2 instructions
                   TR::Register *tempReg = cg->allocateRegister();
                   TR::TreeEvaluator::loadConstant(node, constValue, TR_RematerializableShort, cg, tempReg);
-                  generateMemRegInstruction(CMP2MemReg, node, tempMR, tempReg, cg);
+                  generateMemRegInstruction(TR::InstOpCode::CMP2MemReg, node, tempMR, tempReg, cg);
                   cg->stopUsingRegister(tempReg);
                   }
                else
-                  TR::TreeEvaluator::compareGPMemoryToImmediate(node, tempMR, constValue, cg);
+                  TR::TreeEvaluator::compareGPMemoryToImmediate(node, tempMR, static_cast<int32_t>(constValue), cg);
                tempMR->decNodeReferenceCounts(cg);
                }
             else
                {
                TR::Register *firstChildReg = cg->evaluate(firstChild);
                if (compareSize == 1)
-                  generateRegImmInstruction(CMP1RegImm1, node, firstChildReg, constValue, cg);
+                  generateRegImmInstruction(TR::InstOpCode::CMP1RegImm1, node, firstChildReg, static_cast<int32_t>(constValue), cg);
                else if (compareSize == 2)
                   {
-                  ///generateRegImmInstruction(CMP2RegImm2, node, firstChildReg, constValue, cg);
+                  ///generateRegImmInstruction(TR::InstOpCode::CMP2RegImm2, node, firstChildReg, constValue, cg);
                   generateWiderCompare(node, firstChildReg, constValue, cg);
                   }
                else
-                  TR::TreeEvaluator::compareGPRegisterToImmediateForEquality(node, firstChildReg, constValue, cg);
+                  TR::TreeEvaluator::compareGPRegisterToImmediateForEquality(node, firstChildReg, static_cast<int32_t>(constValue), cg);
                }
 
             if (secondChild->getOpCodeValue() == TR::aconst)
@@ -918,15 +921,15 @@ void OMR::X86::TreeEvaluator::compareIntegersForEquality(TR::Node *node, TR::Cod
          uint32_t size = secondChild->getSize();
          TR::Register *firstChildReg = cg->evaluate(firstChild);
          if(size == 1)
-            cmpInstruction = generateRegImmInstruction(CMP1RegImm1, node, firstChildReg, constValue, cg);
+            cmpInstruction = generateRegImmInstruction(TR::InstOpCode::CMP1RegImm1, node, firstChildReg, static_cast<int32_t>(constValue), cg);
          else if (size == 2)
             {
-            ///cmpInstruction = generateRegImmInstruction(CMP2RegImm2, node, firstChildReg, constValue, cg);
+            ///cmpInstruction = generateRegImmInstruction(TR::InstOpCode::CMP2RegImm2, node, firstChildReg, constValue, cg);
             cmpInstruction = generateWiderCompare(node, firstChildReg, constValue, cg);
             }
          else
             {
-            cmpInstruction = generateRegImmInstruction(CMPRegImm4(is64Bit), node, firstChildReg, constValue, cg);
+            cmpInstruction = generateRegImmInstruction(TR::InstOpCode::CMPRegImm4(is64Bit), node, firstChildReg, static_cast<int32_t>(constValue), cg);
             }
          TR::Symbol *symbol = NULL;
          if (node && secondChild->getOpCode().hasSymbolReference())
@@ -981,24 +984,24 @@ void OMR::X86::TreeEvaluator::compareIntegersForEquality(TR::Node *node, TR::Cod
          }
 
       uint32_t size = firstChild->getSize();
-      TR_X86OpCodes cmpRRInstr, cmpRMInstr, cmpMRInstr;
+      TR::InstOpCode::Mnemonic cmpRRInstr, cmpRMInstr, cmpMRInstr;
       if(size == 1)
          {
-         cmpRRInstr = CMP1RegReg;
-         cmpRMInstr = CMP1RegMem;
-         cmpMRInstr = CMP1MemReg;
+         cmpRRInstr = TR::InstOpCode::CMP1RegReg;
+         cmpRMInstr = TR::InstOpCode::CMP1RegMem;
+         cmpMRInstr = TR::InstOpCode::CMP1MemReg;
          }
       else if(size == 2)
          {
-         cmpRRInstr = CMP2RegReg;
-         cmpRMInstr = CMP2RegMem;
-         cmpMRInstr = CMP2MemReg;
+         cmpRRInstr = TR::InstOpCode::CMP2RegReg;
+         cmpRMInstr = TR::InstOpCode::CMP2RegMem;
+         cmpMRInstr = TR::InstOpCode::CMP2MemReg;
          }
       else
          {
-         cmpRRInstr = CMPRegReg(is64Bit);
-         cmpRMInstr = CMPRegMem(is64Bit);
-         cmpMRInstr = CMPMemReg(is64Bit);
+         cmpRRInstr = TR::InstOpCode::CMPRegReg(is64Bit);
+         cmpRMInstr = TR::InstOpCode::CMPRegMem(is64Bit);
+         cmpMRInstr = TR::InstOpCode::CMPMemReg(is64Bit);
          }
       temp.integerCompareAnalyser(node, cmpRRInstr, cmpRMInstr, cmpMRInstr);
 
@@ -1047,12 +1050,12 @@ void OMR::X86::TreeEvaluator::compareIntegersForOrder(
              firstChild->getReferenceCount() == 1)
             {
             TR::MemoryReference  *tempMR = generateX86MemoryReference(firstChild, cg);
-            TR::TreeEvaluator::compareGPMemoryToImmediate(node, tempMR, constValue, cg);
+            TR::TreeEvaluator::compareGPMemoryToImmediate(node, tempMR, static_cast<int32_t>(constValue), cg);
             tempMR->decNodeReferenceCounts(cg);
             }
          else
             {
-            TR::TreeEvaluator::compareGPRegisterToImmediate(node, cg->evaluate(firstChild), constValue, cg);
+            TR::TreeEvaluator::compareGPRegisterToImmediate(node, cg->evaluate(firstChild), static_cast<int32_t>(constValue), cg);
             }
          }
 
@@ -1071,7 +1074,7 @@ void OMR::X86::TreeEvaluator::compareIntegersForOrder(
          firstChild,
          secondChild,
          false,
-         CMPRegReg(is64Bit), CMPRegMem(is64Bit), CMPMemReg(is64Bit));
+         TR::InstOpCode::CMPRegReg(is64Bit), TR::InstOpCode::CMPRegMem(is64Bit), TR::InstOpCode::CMPMemReg(is64Bit));
       }
    }
 
@@ -1098,12 +1101,12 @@ void OMR::X86::TreeEvaluator::compare2BytesForOrder(TR::Node *node, TR::CodeGene
          TR::MemoryReference  *tempMR = generateX86MemoryReference(firstChild, cg);
          //try to avoid Imm2 instructions
          if(isByteValue)
-            generateMemImmInstruction(CMP2MemImms, firstChild, tempMR, value, cg);
+            generateMemImmInstruction(TR::InstOpCode::CMP2MemImms, firstChild, tempMR, value, cg);
          else
             {
             TR::Register *tempReg = cg->allocateRegister();
             TR::TreeEvaluator::loadConstant(node, value, TR_RematerializableShort, cg, tempReg);
-            generateMemRegInstruction(CMP2MemReg, node, tempMR, tempReg, cg);
+            generateMemRegInstruction(TR::InstOpCode::CMP2MemReg, node, tempMR, tempReg, cg);
             cg->stopUsingRegister(tempReg);
             }
          tempMR->decNodeReferenceCounts(cg);
@@ -1118,7 +1121,7 @@ void OMR::X86::TreeEvaluator::compare2BytesForOrder(TR::Node *node, TR::CodeGene
    else
       {
       TR_X86CompareAnalyser  temp(cg);
-      temp.integerCompareAnalyser(node, CMP2RegReg, CMP2RegMem, CMP2MemReg);
+      temp.integerCompareAnalyser(node, TR::InstOpCode::CMP2RegReg, TR::InstOpCode::CMP2RegMem, TR::InstOpCode::CMP2MemReg);
       }
    }
 
@@ -1134,12 +1137,12 @@ void OMR::X86::TreeEvaluator::compareBytesForOrder(TR::Node *node, TR::CodeGener
           firstChild->getOpCode().isMemoryReference())
          {
          TR::MemoryReference  *tempMR = generateX86MemoryReference(firstChild, cg);
-         generateMemImmInstruction(CMP1MemImm1, firstChild, tempMR, secondChild->getByte(), cg);
+         generateMemImmInstruction(TR::InstOpCode::CMP1MemImm1, firstChild, tempMR, secondChild->getByte(), cg);
          tempMR->decNodeReferenceCounts(cg);
          }
       else
          {
-         generateRegImmInstruction(CMP1RegImm1, node, cg->evaluate(firstChild), secondChild->getByte(), cg);
+         generateRegImmInstruction(TR::InstOpCode::CMP1RegImm1, node, cg->evaluate(firstChild), secondChild->getByte(), cg);
          }
       cg->decReferenceCount(firstChild);
       cg->decReferenceCount(secondChild);
@@ -1147,14 +1150,14 @@ void OMR::X86::TreeEvaluator::compareBytesForOrder(TR::Node *node, TR::CodeGener
    else
       {
       TR_X86CompareAnalyser  temp(cg);
-      temp.integerCompareAnalyser(node, CMP1RegReg, CMP1RegMem, CMP1MemReg);
+      temp.integerCompareAnalyser(node, TR::InstOpCode::CMP1RegReg, TR::InstOpCode::CMP1RegMem, TR::InstOpCode::CMP1MemReg);
       }
    }
 
 
 TR::Register *OMR::X86::TreeEvaluator::gotoEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   generateJumpInstruction(JMP4, node, cg, false);
+   generateJumpInstruction(TR::InstOpCode::JMP4, node, cg);
    return NULL;
    }
 
@@ -1167,29 +1170,16 @@ TR::Register *OMR::X86::TreeEvaluator::igotoEvaluator(TR::Node* node, TR::CodeGe
       TR::Node* secondChild = node->getSecondChild();
       TR_ASSERT(secondChild->getOpCodeValue() == TR::GlRegDeps, "second child of a igoto should be a TR::GlRegDeps");
       cg->evaluate(secondChild);
-      List<TR::Register> popRegisters(cg->trMemory());
 
-      secondChildDeps = generateRegisterDependencyConditions(secondChild, cg, 0, &popRegisters);
+      secondChildDeps = generateRegisterDependencyConditions(secondChild, cg, 0);
       cg->decReferenceCount(secondChild);
-
-      if (!popRegisters.isEmpty())
-         {
-         ListIterator<TR::Register> popRegsIt(&popRegisters);
-         for (TR::Register *popRegister = popRegsIt.getFirst();
-              popRegister != NULL;
-              popRegister = popRegsIt.getNext())
-            {
-            generateFPSTiST0RegRegInstruction(FSTRegReg, node, popRegister, popRegister, cg);
-            cg->stopUsingRegister(popRegister);
-            }
-         }
       }
 
    TR::Register* jumpTargetReg  = cg->evaluate(node->getFirstChild());
    if (secondChildDeps)
-      generateRegInstruction(JMPReg, node, jumpTargetReg, secondChildDeps, cg);
+      generateRegInstruction(TR::InstOpCode::JMPReg, node, jumpTargetReg, secondChildDeps, cg);
    else
-      generateRegInstruction(JMPReg, node, jumpTargetReg, cg);
+      generateRegInstruction(TR::InstOpCode::JMPReg, node, jumpTargetReg, cg);
    cg->decReferenceCount(node->getFirstChild());
    return NULL;
    }
@@ -1203,7 +1193,7 @@ TR::Register *OMR::X86::TreeEvaluator::integerReturnEvaluator(TR::Node *node, TR
    if (cg->enableSinglePrecisionMethods() &&
        comp->getJittedMethodSymbol()->usesSinglePrecisionMode())
       {
-      generateMemInstruction(LDCWMem, node, generateX86MemoryReference(cg->findOrCreate2ByteConstant(node, DOUBLE_PRECISION_ROUND_TO_NEAREST), cg), cg);
+      generateMemInstruction(TR::InstOpCode::LDCWMem, node, generateX86MemoryReference(cg->findOrCreate2ByteConstant(node, DOUBLE_PRECISION_ROUND_TO_NEAREST), cg), cg);
       }
 
    TR::Node     *firstChild     = node->getFirstChild();
@@ -1222,11 +1212,11 @@ TR::Register *OMR::X86::TreeEvaluator::integerReturnEvaluator(TR::Node *node, TR
 
    if (linkageProperties.getCallerCleanup())
       {
-      generateInstruction(RET, node, dependencies, cg);
+      generateInstruction(TR::InstOpCode::RET, node, dependencies, cg);
       }
    else
       {
-      generateImmInstruction(RETImm2, node, 0, dependencies, cg);
+      generateImmInstruction(TR::InstOpCode::RETImm2, node, 0, dependencies, cg);
       }
 
    if (comp->getMethodSymbol()->getLinkageConvention() == TR_Private)
@@ -1270,16 +1260,16 @@ TR::Register *OMR::X86::TreeEvaluator::returnEvaluator(TR::Node *node, TR::CodeG
    if (cg->enableSinglePrecisionMethods() &&
        comp->getJittedMethodSymbol()->usesSinglePrecisionMode())
       {
-      generateMemInstruction(LDCWMem, node, generateX86MemoryReference(cg->findOrCreate2ByteConstant(node, DOUBLE_PRECISION_ROUND_TO_NEAREST), cg), cg);
+      generateMemInstruction(TR::InstOpCode::LDCWMem, node, generateX86MemoryReference(cg->findOrCreate2ByteConstant(node, DOUBLE_PRECISION_ROUND_TO_NEAREST), cg), cg);
       }
 
    if (cg->getProperties().getCallerCleanup())
       {
-      generateInstruction(RET, node, cg);
+      generateInstruction(TR::InstOpCode::RET, node, cg);
       }
    else
       {
-      generateImmInstruction(RETImm2, node, 0, cg);
+      generateImmInstruction(TR::InstOpCode::RETImm2, node, 0, cg);
       }
 
    if (comp->getMethodSymbol()->getLinkageConvention() == TR_Private)
@@ -1329,22 +1319,22 @@ TR::Register *OMR::X86::TreeEvaluator::iselectEvaluator(TR::Node *node, TR::Code
       TR::TreeEvaluator::compareIntegersForEquality(condition, cg);
       //if ((conditionOp == TR::icmpeq) || (conditionOp == TR::lcmpeq))
       if (conditionOp.isCompareTrueIfEqual())
-         generateRegRegInstruction(CMOVNERegReg(trueValIs64Bit), node, trueReg, falseReg, cg);
+         generateRegRegInstruction(TR::InstOpCode::CMOVNERegReg(trueValIs64Bit), node, trueReg, falseReg, cg);
       else
-         generateRegRegInstruction(CMOVERegReg(trueValIs64Bit), node, trueReg, falseReg, cg);
+         generateRegRegInstruction(TR::InstOpCode::CMOVERegReg(trueValIs64Bit), node, trueReg, falseReg, cg);
       }
    else if (!longCompareOn32bit && conditionOp.isCompareForOrder() && condition->getFirstChild()->getOpCode().isIntegerOrAddress())
       {
       TR::TreeEvaluator::compareIntegersForOrder(condition, cg);
       generateRegRegInstruction((conditionOp.isCompareTrueIfEqual()) ?
-                   ((conditionOp.isCompareTrueIfGreater()) ? CMOVLRegReg(trueValIs64Bit) : CMOVGRegReg(trueValIs64Bit)) :
-                   ((conditionOp.isCompareTrueIfGreater()) ? CMOVLERegReg(trueValIs64Bit) : CMOVGERegReg(trueValIs64Bit)), node, trueReg, falseReg, cg);
+                   ((conditionOp.isCompareTrueIfGreater()) ? TR::InstOpCode::CMOVLRegReg(trueValIs64Bit) : TR::InstOpCode::CMOVGRegReg(trueValIs64Bit)) :
+                   ((conditionOp.isCompareTrueIfGreater()) ? TR::InstOpCode::CMOVLERegReg(trueValIs64Bit) : TR::InstOpCode::CMOVGERegReg(trueValIs64Bit)), node, trueReg, falseReg, cg);
       }
    else
       {
       TR::Register *condReg  = cg->evaluate(condition);
-      generateRegRegInstruction(TEST4RegReg, node, condReg, condReg, cg); // condition is always an int
-      generateRegRegInstruction(CMOVERegReg(trueValIs64Bit), node, trueReg, falseReg, cg);
+      generateRegRegInstruction(TR::InstOpCode::TEST4RegReg, node, condReg, condReg, cg); // condition is always an int
+      generateRegRegInstruction(TR::InstOpCode::CMOVERegReg(trueValIs64Bit), node, trueReg, falseReg, cg);
       }
 
    if (node->getOpCodeValue() == TR::bselect &&
@@ -1379,7 +1369,7 @@ TR::Register *OMR::X86::TreeEvaluator::integerIfCmpeqEvaluator(TR::Node *node, T
          cg->evaluate(firstChild);
          cg->evaluate(secondChild);
 
-         generateConditionalJumpInstruction(JO4, node, cg, true);
+         generateConditionalJumpInstruction(TR::InstOpCode::JO4, node, cg);
 
          cg->decReferenceCount(firstChild);
          cg->decReferenceCount(secondChild);
@@ -1399,7 +1389,7 @@ TR::Register *OMR::X86::TreeEvaluator::integerIfCmpeqEvaluator(TR::Node *node, T
 
    TR::TreeEvaluator::compareIntegersForEquality(node, cg);
 
-   generateConditionalJumpInstruction(JE4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JE4, node, cg);
    return NULL;
    }
 
@@ -1453,7 +1443,7 @@ TR::Register *OMR::X86::TreeEvaluator::integerIfCmpneEvaluator(TR::Node *node, T
             cg->evaluate(firstChild);
             cg->evaluate(secondChild);
 
-            generateConditionalJumpInstruction(JNO4, node, cg, true);
+            generateConditionalJumpInstruction(TR::InstOpCode::JNO4, node, cg);
 
             cg->decReferenceCount(firstChild);
             cg->decReferenceCount(secondChild);
@@ -1485,15 +1475,15 @@ TR::Register *OMR::X86::TreeEvaluator::integerIfCmpneEvaluator(TR::Node *node, T
 
           if (loadReg)
              {
-             generateRegImmInstruction(TEST4RegImm4, node, loadReg, ( ((int32_t)-1) << node->getFirstChild()->getSecondChild()->getInt() ), cg);
+             generateRegImmInstruction(TR::InstOpCode::TEST4RegImm4, node, loadReg, ( ((int32_t)-1) << node->getFirstChild()->getSecondChild()->getInt() ), cg);
              }
           else
              {
              TR::MemoryReference  *sourceMR = generateX86MemoryReference(loadNode, cg);
-             generateMemImmInstruction(TEST4MemImm4, node, sourceMR, ( ((int32_t)-1) << node->getFirstChild()->getSecondChild()->getInt() ), cg);
+             generateMemImmInstruction(TR::InstOpCode::TEST4MemImm4, node, sourceMR, ( ((int32_t)-1) << node->getFirstChild()->getSecondChild()->getInt() ), cg);
              }
 
-         TR::X86LabelInstruction *instr = generateConditionalJumpInstruction(JNE4, node, cg, true);
+         TR::X86LabelInstruction *instr = generateConditionalJumpInstruction(TR::InstOpCode::JNE4, node, cg);
          generateMergedGuardCodeIfNeeded(node, cg, instr);
 
          cg->recursivelyDecReferenceCount(node->getFirstChild());
@@ -1521,7 +1511,7 @@ TR::Register *OMR::X86::TreeEvaluator::integerIfCmpneEvaluator(TR::Node *node, T
       //            }
       //         }
 
-      TR::X86LabelInstruction *instr = generateConditionalJumpInstruction(JNE4, node, cg, true);
+      TR::X86LabelInstruction *instr = generateConditionalJumpInstruction(TR::InstOpCode::JNE4, node, cg);
       generateMergedGuardCodeIfNeeded(node, cg, instr);
 
       return NULL;
@@ -1542,7 +1532,7 @@ bool OMR::X86::TreeEvaluator::generateIAddOrSubForOverflowCheck(TR::Node *compar
       // leftChild might appear twice in this tree, and we need a clobber evaluate only if it also appears elsewhere
       bool leftNeedsCopy = u.leftChild->getReferenceCount() > 2 || (u.leftChild->getReferenceCount() > 1 && u.operationNode->getRegister());
       TR::Register *leftReg  = leftNeedsCopy ? cg->intClobberEvaluate(u.leftChild) : cg->evaluate(u.leftChild);
-      TR_X86OpCodes opCode = u.operationNode->getOpCode().isAdd()? ADD4RegReg : SUB4RegReg;
+      TR::InstOpCode::Mnemonic opCode = u.operationNode->getOpCode().isAdd()? TR::InstOpCode::ADD4RegReg : TR::InstOpCode::SUB4RegReg;
       generateRegRegInstruction(opCode, u.operationNode, leftReg, rightReg, cg);
       if (!u.operationNode->getRegister())
          {
@@ -1581,18 +1571,18 @@ bool OMR::X86::TreeEvaluator::generateLAddOrSubForOverflowCheck(TR::Node *compar
       TR::Register *leftReg  = leftNeedsCopy? cg->longClobberEvaluate(u.leftChild) : cg->evaluate(u.leftChild);
       if (cg->comp()->target().is64Bit())
          {
-         TR_X86OpCodes opCode = u.operationNode->getOpCode().isAdd()? ADD8RegReg : SUB8RegReg;
+         TR::InstOpCode::Mnemonic opCode = u.operationNode->getOpCode().isAdd()? TR::InstOpCode::ADD8RegReg : TR::InstOpCode::SUB8RegReg;
          generateRegRegInstruction(opCode, u.operationNode, leftReg, rightReg, cg);
          }
       else if (u.operationNode->getOpCode().isAdd())
          {
-         generateRegRegInstruction(ADD4RegReg, u.operationNode, leftReg->getLowOrder(),  rightReg->getLowOrder(),  cg);
-         generateRegRegInstruction(ADC4RegReg, u.operationNode, leftReg->getHighOrder(), rightReg->getHighOrder(), cg);
+         generateRegRegInstruction(TR::InstOpCode::ADD4RegReg, u.operationNode, leftReg->getLowOrder(),  rightReg->getLowOrder(),  cg);
+         generateRegRegInstruction(TR::InstOpCode::ADC4RegReg, u.operationNode, leftReg->getHighOrder(), rightReg->getHighOrder(), cg);
          }
       else
          {
-         generateRegRegInstruction(SUB4RegReg, u.operationNode, leftReg->getLowOrder(),  rightReg->getLowOrder(),  cg);
-         generateRegRegInstruction(SBB4RegReg, u.operationNode, leftReg->getHighOrder(), rightReg->getHighOrder(), cg);
+         generateRegRegInstruction(TR::InstOpCode::SUB4RegReg, u.operationNode, leftReg->getLowOrder(),  rightReg->getLowOrder(),  cg);
+         generateRegRegInstruction(TR::InstOpCode::SBB4RegReg, u.operationNode, leftReg->getHighOrder(), rightReg->getHighOrder(), cg);
          }
       if (!u.operationNode->getRegister())
          {
@@ -1617,12 +1607,12 @@ TR::Register *OMR::X86::TreeEvaluator::integerIfCmpltEvaluator(TR::Node *node, T
          TR::TreeEvaluator::generateLAddOrSubForOverflowCheck(node, cg)
        : TR::TreeEvaluator::generateIAddOrSubForOverflowCheck(node, cg))
       {
-      generateConditionalJumpInstruction(JO4, node, cg, true);
+      generateConditionalJumpInstruction(TR::InstOpCode::JO4, node, cg);
       }
    else
       {
       TR::TreeEvaluator::compareIntegersForOrder(node, cg);
-      generateConditionalJumpInstruction(JL4, node, cg, true);
+      generateConditionalJumpInstruction(TR::InstOpCode::JL4, node, cg);
       }
    return NULL;
    }
@@ -1633,12 +1623,12 @@ TR::Register *OMR::X86::TreeEvaluator::integerIfCmpgeEvaluator(TR::Node *node, T
          TR::TreeEvaluator::generateLAddOrSubForOverflowCheck(node, cg)
        : TR::TreeEvaluator::generateIAddOrSubForOverflowCheck(node, cg))
       {
-      generateConditionalJumpInstruction(JNO4, node, cg, true);
+      generateConditionalJumpInstruction(TR::InstOpCode::JNO4, node, cg);
       }
    else
       {
       TR::TreeEvaluator::compareIntegersForOrder(node, cg);
-      generateConditionalJumpInstruction(JGE4, node, cg, true);
+      generateConditionalJumpInstruction(TR::InstOpCode::JGE4, node, cg);
       }
    return NULL;
    }
@@ -1646,42 +1636,42 @@ TR::Register *OMR::X86::TreeEvaluator::integerIfCmpgeEvaluator(TR::Node *node, T
 TR::Register *OMR::X86::TreeEvaluator::integerIfCmpgtEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compareIntegersForOrder(node, cg);
-   generateConditionalJumpInstruction(JG4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JG4, node, cg);
    return NULL;
    }
 
 TR::Register *OMR::X86::TreeEvaluator::integerIfCmpleEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compareIntegersForOrder(node, cg);
-   generateConditionalJumpInstruction(JLE4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JLE4, node, cg);
    return NULL;
    }
 
 TR::Register *OMR::X86::TreeEvaluator::unsignedIntegerIfCmpltEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compareIntegersForOrder(node, cg);
-   generateConditionalJumpInstruction(JB4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JB4, node, cg);
    return NULL;
    }
 
 TR::Register *OMR::X86::TreeEvaluator::unsignedIntegerIfCmpgeEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compareIntegersForOrder(node, cg);
-   generateConditionalJumpInstruction(JAE4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JAE4, node, cg);
    return NULL;
    }
 
 TR::Register *OMR::X86::TreeEvaluator::unsignedIntegerIfCmpgtEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compareIntegersForOrder(node, cg);
-   generateConditionalJumpInstruction(JA4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JA4, node, cg);
    return NULL;
    }
 
 TR::Register *OMR::X86::TreeEvaluator::unsignedIntegerIfCmpleEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compareIntegersForOrder(node, cg);
-   generateConditionalJumpInstruction(JBE4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JBE4, node, cg);
    return NULL;
    }
 
@@ -1703,7 +1693,7 @@ TR::Register *OMR::X86::TreeEvaluator::ifbcmpeqEvaluator(TR::Node *node, TR::Cod
           firstChild->getOpCode().isMemoryReference())
          {
          TR::MemoryReference  *tempMR = generateX86MemoryReference(firstChild, cg);
-         generateMemImmInstruction(CMP1MemImm1, firstChild, tempMR, value, cg);
+         generateMemImmInstruction(TR::InstOpCode::CMP1MemImm1, firstChild, tempMR, value, cg);
          tempMR->decNodeReferenceCounts(cg);
          cg->decReferenceCount(firstChild);
          cg->decReferenceCount(secondChild);
@@ -1733,7 +1723,7 @@ TR::Register *OMR::X86::TreeEvaluator::ifbcmpeqEvaluator(TR::Node *node, TR::Cod
              expr->getOpCode().isMemoryReference())
             {
             TR::MemoryReference *tempMR = generateX86MemoryReference(expr, cg);
-            generateMemImmInstruction(TEST1MemImm1, expr, tempMR, value, cg);
+            generateMemImmInstruction(TR::InstOpCode::TEST1MemImm1, expr, tempMR, value, cg);
             tempMR->decNodeReferenceCounts(cg);
             cg->decReferenceCount(firstChild);
             cg->decReferenceCount(secondChild);
@@ -1743,7 +1733,7 @@ TR::Register *OMR::X86::TreeEvaluator::ifbcmpeqEvaluator(TR::Node *node, TR::Cod
          else
             {
             TR::Register *targetRegister = cg->evaluate(expr);
-            generateRegImmInstruction(TEST1RegImm1, node, targetRegister, value, cg);
+            generateRegImmInstruction(TR::InstOpCode::TEST1RegImm1, node, targetRegister, value, cg);
             cg->recursivelyDecReferenceCount(firstChild);
             cg->decReferenceCount(secondChild);
             }
@@ -1753,11 +1743,11 @@ TR::Register *OMR::X86::TreeEvaluator::ifbcmpeqEvaluator(TR::Node *node, TR::Cod
          TR::Register *targetRegister   = cg->evaluate(firstChild);
          if (value == 0)
             {
-            generateRegRegInstruction(TEST1RegReg, node, targetRegister, targetRegister, cg);
+            generateRegRegInstruction(TR::InstOpCode::TEST1RegReg, node, targetRegister, targetRegister, cg);
             }
          else
             {
-            generateRegImmInstruction(CMP1RegImm1, node, targetRegister, value, cg);
+            generateRegImmInstruction(TR::InstOpCode::CMP1RegImm1, node, targetRegister, value, cg);
             }
          cg->decReferenceCount(firstChild);
          cg->decReferenceCount(secondChild);
@@ -1766,16 +1756,16 @@ TR::Register *OMR::X86::TreeEvaluator::ifbcmpeqEvaluator(TR::Node *node, TR::Cod
    else
       {
       TR_X86CompareAnalyser  temp(cg);
-      temp.integerCompareAnalyser(node, CMP1RegReg, CMP1RegMem, CMP1MemReg);
+      temp.integerCompareAnalyser(node, TR::InstOpCode::CMP1RegReg, TR::InstOpCode::CMP1RegMem, TR::InstOpCode::CMP1MemReg);
       }
 
-   TR_X86OpCodes opCode;
+   TR::InstOpCode::Mnemonic opCode;
    if (node->getOpCodeValue() == TR::ifbcmpeq)
-      opCode = reverseBranch ? JNE4 : JE4;
+      opCode = reverseBranch ? TR::InstOpCode::JNE4 : TR::InstOpCode::JE4;
    else
-      opCode = reverseBranch ? JE4 : JNE4;
+      opCode = reverseBranch ? TR::InstOpCode::JE4 : TR::InstOpCode::JNE4;
 
-   generateConditionalJumpInstruction(opCode, node, cg, true);
+   generateConditionalJumpInstruction(opCode, node, cg);
    return NULL;
    }
 
@@ -1784,56 +1774,56 @@ TR::Register *OMR::X86::TreeEvaluator::ifbcmpeqEvaluator(TR::Node *node, TR::Cod
 TR::Register *OMR::X86::TreeEvaluator::ifbcmpltEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compareBytesForOrder(node, cg);
-   generateConditionalJumpInstruction(JL4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JL4, node, cg);
    return NULL;
    }
 
 TR::Register *OMR::X86::TreeEvaluator::ifbucmpltEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compareBytesForOrder(node, cg);
-   generateConditionalJumpInstruction(JB4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JB4, node, cg);
    return NULL;
    }
 
 TR::Register *OMR::X86::TreeEvaluator::ifbcmpgeEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compareBytesForOrder(node, cg);
-   generateConditionalJumpInstruction(JGE4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JGE4, node, cg);
    return NULL;
    }
 
 TR::Register *OMR::X86::TreeEvaluator::ifbucmpgeEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compareBytesForOrder(node, cg);
-   generateConditionalJumpInstruction(JAE4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JAE4, node, cg);
    return NULL;
    }
 
 TR::Register *OMR::X86::TreeEvaluator::ifbcmpgtEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compareBytesForOrder(node, cg);
-   generateConditionalJumpInstruction(JG4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JG4, node, cg);
    return NULL;
    }
 
 TR::Register *OMR::X86::TreeEvaluator::ifbucmpgtEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compareBytesForOrder(node, cg);
-   generateConditionalJumpInstruction(JA4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JA4, node, cg);
    return NULL;
    }
 
 TR::Register *OMR::X86::TreeEvaluator::ifbcmpleEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compareBytesForOrder(node, cg);
-   generateConditionalJumpInstruction(JLE4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JLE4, node, cg);
    return NULL;
    }
 
 TR::Register *OMR::X86::TreeEvaluator::ifbucmpleEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compareBytesForOrder(node, cg);
-   generateConditionalJumpInstruction(JBE4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JBE4, node, cg);
    return NULL;
    }
 
@@ -1855,14 +1845,14 @@ TR::Register *OMR::X86::TreeEvaluator::ifscmpeqEvaluator(TR::Node *node, TR::Cod
 
          if (value >= -128 && value <= 127)
             {
-            generateMemImmInstruction(CMP2MemImms, firstChild, tempMR, value, cg);
+            generateMemImmInstruction(TR::InstOpCode::CMP2MemImms, firstChild, tempMR, value, cg);
             }
          else
             {
             //try to avoid Imm2 instructions
             TR::Register *tempReg = cg->allocateRegister();
             TR::TreeEvaluator::loadConstant(node, value, TR_RematerializableShort, cg, tempReg);
-            generateMemRegInstruction(CMP2MemReg, node, tempMR, tempReg, cg);
+            generateMemRegInstruction(TR::InstOpCode::CMP2MemReg, node, tempMR, tempReg, cg);
             cg->stopUsingRegister(tempReg);
             }
          tempMR->decNodeReferenceCounts(cg);
@@ -1874,16 +1864,16 @@ TR::Register *OMR::X86::TreeEvaluator::ifscmpeqEvaluator(TR::Node *node, TR::Cod
             {
             if (value == 0)
                {
-               generateRegRegInstruction(TEST2RegReg, node, targetRegister, targetRegister, cg);
+               generateRegRegInstruction(TR::InstOpCode::TEST2RegReg, node, targetRegister, targetRegister, cg);
                }
             else
                {
-               generateRegImmInstruction(CMP2RegImms, node, targetRegister, value, cg);
+               generateRegImmInstruction(TR::InstOpCode::CMP2RegImms, node, targetRegister, value, cg);
                }
             }
          else
             {
-            ///generateRegImmInstruction(CMP2RegImm2, node, targetRegister, value, cg);
+            ///generateRegImmInstruction(TR::InstOpCode::CMP2RegImm2, node, targetRegister, value, cg);
             generateWiderCompare(node, targetRegister, value, cg);
             }
          }
@@ -1893,10 +1883,9 @@ TR::Register *OMR::X86::TreeEvaluator::ifscmpeqEvaluator(TR::Node *node, TR::Cod
    else
       {
       TR_X86CompareAnalyser  temp(cg);
-      temp.integerCompareAnalyser(node, CMP2RegReg, CMP2RegMem, CMP2MemReg);
+      temp.integerCompareAnalyser(node, TR::InstOpCode::CMP2RegReg, TR::InstOpCode::CMP2RegMem, TR::InstOpCode::CMP2MemReg);
       }
-   generateConditionalJumpInstruction(node->getOpCodeValue() == TR::ifscmpeq ? JE4 : JNE4,
-                                      node, cg, true);
+   generateConditionalJumpInstruction(node->getOpCodeValue() == TR::ifscmpeq ? TR::InstOpCode::JE4 : TR::InstOpCode::JNE4, node, cg);
    return NULL;
    }
 
@@ -1905,66 +1894,66 @@ TR::Register *OMR::X86::TreeEvaluator::ifscmpeqEvaluator(TR::Node *node, TR::Cod
 TR::Register *OMR::X86::TreeEvaluator::ifscmpltEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compare2BytesForOrder(node, cg);
-   generateConditionalJumpInstruction(JL4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JL4, node, cg);
    return NULL;
    }
 
 TR::Register *OMR::X86::TreeEvaluator::ifscmpgeEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compare2BytesForOrder(node, cg);
-   generateConditionalJumpInstruction(JGE4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JGE4, node, cg);
    return NULL;
    }
 
 TR::Register *OMR::X86::TreeEvaluator::ifscmpgtEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compare2BytesForOrder(node, cg);
-   generateConditionalJumpInstruction(JG4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JG4, node, cg);
    return NULL;
    }
 
 TR::Register *OMR::X86::TreeEvaluator::ifscmpleEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compare2BytesForOrder(node, cg);
-   generateConditionalJumpInstruction(JLE4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JLE4, node, cg);
    return NULL;
    }
 
 TR::Register *OMR::X86::TreeEvaluator::ifsucmpltEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compare2BytesForOrder(node, cg);
-   generateConditionalJumpInstruction(JB4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JB4, node, cg);
    return NULL;
    }
 
 TR::Register *OMR::X86::TreeEvaluator::ifsucmpgeEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compare2BytesForOrder(node, cg);
-   generateConditionalJumpInstruction(JAE4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JAE4, node, cg);
    return NULL;
    }
 
 TR::Register *OMR::X86::TreeEvaluator::ifsucmpgtEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compare2BytesForOrder(node, cg);
-   generateConditionalJumpInstruction(JA4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JA4, node, cg);
    return NULL;
    }
 
 TR::Register *OMR::X86::TreeEvaluator::ifsucmpleEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compare2BytesForOrder(node, cg);
-   generateConditionalJumpInstruction(JBE4, node, cg, true);
+   generateConditionalJumpInstruction(TR::InstOpCode::JBE4, node, cg);
    return NULL;
    }
 
-TR::Register *OMR::X86::TreeEvaluator::integerEqualityHelper(TR::Node *node, TR_X86OpCodes setOp, TR::CodeGenerator *cg)
+TR::Register *OMR::X86::TreeEvaluator::integerEqualityHelper(TR::Node *node, TR::InstOpCode::Mnemonic setOp, TR::CodeGenerator *cg)
    {
    TR::TreeEvaluator::compareIntegersForEquality(node, cg);
    TR::Register *targetRegister = cg->allocateRegister();
    generateRegInstruction(setOp, node, targetRegister, cg);
 
-   generateRegRegInstruction(MOVZXReg4Reg1, node, targetRegister, targetRegister, cg);
+   generateRegRegInstruction(TR::InstOpCode::MOVZXReg4Reg1, node, targetRegister, targetRegister, cg);
 
    if (cg->enableRegisterInterferences())
       cg->getLiveRegisters(TR_GPR)->setByteRegisterAssociation(targetRegister);
@@ -1975,17 +1964,17 @@ TR::Register *OMR::X86::TreeEvaluator::integerEqualityHelper(TR::Node *node, TR_
 
 TR::Register *OMR::X86::TreeEvaluator::integerCmpeqEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::integerEqualityHelper(node, SETE1Reg, cg);
+   return TR::TreeEvaluator::integerEqualityHelper(node, TR::InstOpCode::SETE1Reg, cg);
    }
 
 TR::Register *OMR::X86::TreeEvaluator::integerCmpneEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::integerEqualityHelper(node, SETNE1Reg, cg);
+   return TR::TreeEvaluator::integerEqualityHelper(node, TR::InstOpCode::SETNE1Reg, cg);
    }
 
 
 TR::Register *OMR::X86::TreeEvaluator::integerOrderHelper(TR::Node          *node,
-                                                     TR_X86OpCodes    setOp,
+                                                     TR::InstOpCode::Mnemonic    setOp,
                                                      TR::CodeGenerator *cg)
    {
    TR::Register  *targetRegister = cg->allocateRegister();
@@ -1993,7 +1982,7 @@ TR::Register *OMR::X86::TreeEvaluator::integerOrderHelper(TR::Node          *nod
    TR::TreeEvaluator::compareIntegersForOrder(node, cg);
    generateRegInstruction(setOp, node, targetRegister, cg);
 
-   generateRegRegInstruction(MOVZXReg4Reg1, node, targetRegister, targetRegister, cg);
+   generateRegRegInstruction(TR::InstOpCode::MOVZXReg4Reg1, node, targetRegister, targetRegister, cg);
 
    if (cg->enableRegisterInterferences())
       cg->getLiveRegisters(TR_GPR)->setByteRegisterAssociation(targetRegister);
@@ -2003,43 +1992,43 @@ TR::Register *OMR::X86::TreeEvaluator::integerOrderHelper(TR::Node          *nod
 
 TR::Register *OMR::X86::TreeEvaluator::integerCmpltEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::integerOrderHelper(node, SETL1Reg, cg);
+   return TR::TreeEvaluator::integerOrderHelper(node, TR::InstOpCode::SETL1Reg, cg);
    }
 
 TR::Register *OMR::X86::TreeEvaluator::integerCmpgeEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::integerOrderHelper(node, SETGE1Reg, cg);
+   return TR::TreeEvaluator::integerOrderHelper(node, TR::InstOpCode::SETGE1Reg, cg);
    }
 
 TR::Register *OMR::X86::TreeEvaluator::integerCmpgtEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::integerOrderHelper(node, SETG1Reg, cg);
+   return TR::TreeEvaluator::integerOrderHelper(node, TR::InstOpCode::SETG1Reg, cg);
    }
 
 TR::Register *OMR::X86::TreeEvaluator::integerCmpleEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::integerOrderHelper(node, SETLE1Reg, cg);
+   return TR::TreeEvaluator::integerOrderHelper(node, TR::InstOpCode::SETLE1Reg, cg);
    }
 
 
 TR::Register *OMR::X86::TreeEvaluator::unsignedIntegerCmpltEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::integerOrderHelper(node, SETB1Reg, cg);
+   return TR::TreeEvaluator::integerOrderHelper(node, TR::InstOpCode::SETB1Reg, cg);
    }
 
 TR::Register *OMR::X86::TreeEvaluator::unsignedIntegerCmpgeEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::integerOrderHelper(node, SETAE1Reg, cg);
+   return TR::TreeEvaluator::integerOrderHelper(node, TR::InstOpCode::SETAE1Reg, cg);
    }
 
 TR::Register *OMR::X86::TreeEvaluator::unsignedIntegerCmpgtEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::integerOrderHelper(node, SETA1Reg, cg);
+   return TR::TreeEvaluator::integerOrderHelper(node, TR::InstOpCode::SETA1Reg, cg);
    }
 
 TR::Register *OMR::X86::TreeEvaluator::unsignedIntegerCmpleEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::integerOrderHelper(node, SETBE1Reg, cg);
+   return TR::TreeEvaluator::integerOrderHelper(node, TR::InstOpCode::SETBE1Reg, cg);
    }
 
 
@@ -2061,11 +2050,11 @@ TR::Register *OMR::X86::TreeEvaluator::bcmpeqEvaluator(TR::Node *node, TR::CodeG
       TR::Register *testRegister     = cg->evaluate(firstChild);
       if (value == 0)
          {
-         generateRegRegInstruction(TEST1RegReg, node, testRegister, testRegister, cg);
+         generateRegRegInstruction(TR::InstOpCode::TEST1RegReg, node, testRegister, testRegister, cg);
          }
       else
          {
-         generateRegImmInstruction(CMP1RegImm1, node, testRegister, value, cg);
+         generateRegImmInstruction(TR::InstOpCode::CMP1RegImm1, node, testRegister, value, cg);
          }
       cg->decReferenceCount(firstChild);
       cg->decReferenceCount(secondChild);
@@ -2073,12 +2062,12 @@ TR::Register *OMR::X86::TreeEvaluator::bcmpeqEvaluator(TR::Node *node, TR::CodeG
    else
       {
       TR_X86CompareAnalyser  temp(cg);
-      temp.integerCompareAnalyser(node, CMP1RegReg, CMP1RegMem, CMP1MemReg);
+      temp.integerCompareAnalyser(node, TR::InstOpCode::CMP1RegReg, TR::InstOpCode::CMP1RegMem, TR::InstOpCode::CMP1MemReg);
       }
    bool isEq = node->getOpCodeValue() == TR::bcmpeq;
-   generateRegInstruction(isEq ? SETE1Reg : SETNE1Reg,
+   generateRegInstruction(isEq ? TR::InstOpCode::SETE1Reg : TR::InstOpCode::SETNE1Reg,
                           node, targetRegister, cg);
-   generateRegRegInstruction(MOVZXReg4Reg1, node, targetRegister, targetRegister, cg);
+   generateRegRegInstruction(TR::InstOpCode::MOVZXReg4Reg1, node, targetRegister, targetRegister, cg);
    node->setRegister(targetRegister);
    return targetRegister;
    }
@@ -2086,14 +2075,14 @@ TR::Register *OMR::X86::TreeEvaluator::bcmpeqEvaluator(TR::Node *node, TR::CodeG
 // bcmpneEvaluator handled by bcmpeqEvaluator
 
 TR::Register *OMR::X86::TreeEvaluator::bcmpEvaluator(TR::Node        *node,
-                                                 TR_X86OpCodes  setOp,
+                                                 TR::InstOpCode::Mnemonic  setOp,
                                                  TR::CodeGenerator *cg)
    {
    TR::Register  *targetRegister = cg->allocateRegister();
    TR::TreeEvaluator::compareBytesForOrder(node, cg);
    node->setRegister(targetRegister);
    generateRegInstruction(setOp, node, targetRegister, cg);
-   generateRegRegInstruction(MOVZXReg4Reg1, node, targetRegister, targetRegister, cg);
+   generateRegRegInstruction(TR::InstOpCode::MOVZXReg4Reg1, node, targetRegister, targetRegister, cg);
 
    if (cg->enableRegisterInterferences())
       cg->getLiveRegisters(TR_GPR)->setByteRegisterAssociation(targetRegister);
@@ -2103,22 +2092,22 @@ TR::Register *OMR::X86::TreeEvaluator::bcmpEvaluator(TR::Node        *node,
 
 TR::Register *OMR::X86::TreeEvaluator::bcmpltEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::bcmpEvaluator(node, SETL1Reg, cg);
+   return TR::TreeEvaluator::bcmpEvaluator(node, TR::InstOpCode::SETL1Reg, cg);
    }
 
 TR::Register *OMR::X86::TreeEvaluator::bcmpgeEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::bcmpEvaluator(node, SETGE1Reg, cg);
+   return TR::TreeEvaluator::bcmpEvaluator(node, TR::InstOpCode::SETGE1Reg, cg);
    }
 
 TR::Register *OMR::X86::TreeEvaluator::bcmpgtEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::bcmpEvaluator(node, SETG1Reg, cg);
+   return TR::TreeEvaluator::bcmpEvaluator(node, TR::InstOpCode::SETG1Reg, cg);
    }
 
 TR::Register *OMR::X86::TreeEvaluator::bcmpleEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::bcmpEvaluator(node, SETLE1Reg, cg);
+   return TR::TreeEvaluator::bcmpEvaluator(node, TR::InstOpCode::SETLE1Reg, cg);
    }
 
 // also handles scmpne
@@ -2137,16 +2126,16 @@ TR::Register *OMR::X86::TreeEvaluator::scmpeqEvaluator(TR::Node *node, TR::CodeG
          {
          if (value == 0)
             {
-            generateRegRegInstruction(TEST2RegReg, node, testRegister, testRegister, cg);
+            generateRegRegInstruction(TR::InstOpCode::TEST2RegReg, node, testRegister, testRegister, cg);
             }
          else
             {
-            generateRegImmInstruction(CMP2RegImms, node, testRegister, value, cg);
+            generateRegImmInstruction(TR::InstOpCode::CMP2RegImms, node, testRegister, value, cg);
             }
          }
       else
          {
-         ///generateRegImmInstruction(CMP2RegImm2, node, testRegister, value, cg);
+         ///generateRegImmInstruction(TR::InstOpCode::CMP2RegImm2, node, testRegister, value, cg);
          generateWiderCompare(node, testRegister, value, cg);
          }
       cg->decReferenceCount(firstChild);
@@ -2155,29 +2144,29 @@ TR::Register *OMR::X86::TreeEvaluator::scmpeqEvaluator(TR::Node *node, TR::CodeG
    else
       {
       TR_X86CompareAnalyser  temp(cg);
-      temp.integerCompareAnalyser(node, CMP2RegReg, CMP2RegMem, CMP2MemReg);
+      temp.integerCompareAnalyser(node, TR::InstOpCode::CMP2RegReg, TR::InstOpCode::CMP2RegMem, TR::InstOpCode::CMP2MemReg);
       }
    node->setRegister(targetRegister);
 
    if (cg->enableRegisterInterferences())
       cg->getLiveRegisters(TR_GPR)->setByteRegisterAssociation(targetRegister);
 
-   generateRegInstruction(node->getOpCodeValue() == TR::scmpeq ? SETE1Reg : SETNE1Reg,
+   generateRegInstruction(node->getOpCodeValue() == TR::scmpeq ? TR::InstOpCode::SETE1Reg : TR::InstOpCode::SETNE1Reg,
                           node, targetRegister, cg);
-   generateRegRegInstruction(MOVZXReg4Reg1, node, targetRegister, targetRegister, cg);
+   generateRegRegInstruction(TR::InstOpCode::MOVZXReg4Reg1, node, targetRegister, targetRegister, cg);
    return targetRegister;
    }
 
 // scmpneEvaluator handled by scmpeqEvaluator
 
 TR::Register *OMR::X86::TreeEvaluator::cmp2BytesEvaluator(TR::Node        *node,
-                                                      TR_X86OpCodes  setOp,
+                                                      TR::InstOpCode::Mnemonic  setOp,
                                                       TR::CodeGenerator *cg)
    {
    TR::Register *targetRegister = cg->allocateRegister();
    TR::TreeEvaluator::compare2BytesForOrder(node, cg);
    generateRegInstruction(setOp, node, targetRegister, cg);
-   generateRegRegInstruction(MOVZXReg4Reg1, node, targetRegister, targetRegister, cg);
+   generateRegRegInstruction(TR::InstOpCode::MOVZXReg4Reg1, node, targetRegister, targetRegister, cg);
 
    if (cg->enableRegisterInterferences())
       cg->getLiveRegisters(TR_GPR)->setByteRegisterAssociation(targetRegister);
@@ -2187,42 +2176,42 @@ TR::Register *OMR::X86::TreeEvaluator::cmp2BytesEvaluator(TR::Node        *node,
 
 TR::Register *OMR::X86::TreeEvaluator::scmpltEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::cmp2BytesEvaluator(node, SETL1Reg, cg);
+   return TR::TreeEvaluator::cmp2BytesEvaluator(node, TR::InstOpCode::SETL1Reg, cg);
    }
 
 TR::Register *OMR::X86::TreeEvaluator::scmpgeEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::cmp2BytesEvaluator(node, SETGE1Reg, cg);
+   return TR::TreeEvaluator::cmp2BytesEvaluator(node, TR::InstOpCode::SETGE1Reg, cg);
    }
 
 TR::Register *OMR::X86::TreeEvaluator::scmpgtEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::cmp2BytesEvaluator(node, SETG1Reg, cg);
+   return TR::TreeEvaluator::cmp2BytesEvaluator(node, TR::InstOpCode::SETG1Reg, cg);
    }
 
 TR::Register *OMR::X86::TreeEvaluator::scmpleEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::cmp2BytesEvaluator(node, SETLE1Reg, cg);
+   return TR::TreeEvaluator::cmp2BytesEvaluator(node, TR::InstOpCode::SETLE1Reg, cg);
    }
 
 TR::Register *OMR::X86::TreeEvaluator::sucmpltEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::cmp2BytesEvaluator(node, SETB1Reg, cg);
+   return TR::TreeEvaluator::cmp2BytesEvaluator(node, TR::InstOpCode::SETB1Reg, cg);
    }
 
 TR::Register *OMR::X86::TreeEvaluator::sucmpgeEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::cmp2BytesEvaluator(node, SETAE1Reg, cg);
+   return TR::TreeEvaluator::cmp2BytesEvaluator(node, TR::InstOpCode::SETAE1Reg, cg);
    }
 
 TR::Register *OMR::X86::TreeEvaluator::sucmpgtEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::cmp2BytesEvaluator(node, SETA1Reg, cg);
+   return TR::TreeEvaluator::cmp2BytesEvaluator(node, TR::InstOpCode::SETA1Reg, cg);
    }
 
 TR::Register *OMR::X86::TreeEvaluator::sucmpleEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::cmp2BytesEvaluator(node, SETBE1Reg, cg);
+   return TR::TreeEvaluator::cmp2BytesEvaluator(node, TR::InstOpCode::SETBE1Reg, cg);
    }
 
 static bool virtualGuardHelper(TR::Node *node, TR::CodeGenerator *cg)
@@ -2275,13 +2264,12 @@ static bool virtualGuardHelper(TR::Node *node, TR::CodeGenerator *cg)
       site = comp->addSideEffectNOPSite();
       }
 
-   List<TR::Register> popRegisters(cg->trMemory());
    TR::RegisterDependencyConditions  *deps = 0;
    if (node->getNumChildren() == 3)
       {
       TR::Node *third = node->getChild(2);
       cg->evaluate(third);
-      deps = generateRegisterDependencyConditions(third, cg, 1, &popRegisters);
+      deps = generateRegisterDependencyConditions(third, cg, 1);
       deps->stopAddingConditions();
       }
 
@@ -2312,21 +2300,6 @@ static bool virtualGuardHelper(TR::Node *node, TR::CodeGenerator *cg)
 
    cg->recursivelyDecReferenceCount(node->getFirstChild());
    cg->recursivelyDecReferenceCount(node->getSecondChild());
-
-   if (deps)
-      {
-      deps->setMayNeedToPopFPRegisters(true);
-      }
-
-   if (!popRegisters.isEmpty())
-      {
-      ListIterator<TR::Register> popRegsIt(&popRegisters);
-      for (TR::Register *popRegister = popRegsIt.getFirst(); popRegister != NULL; popRegister = popRegsIt.getNext())
-         {
-         generateFPSTiST0RegRegInstruction(FSTRegReg, node, popRegister, popRegister, cg);
-         cg->stopUsingRegister(popRegister);
-         }
-      }
 
    return true;
 #else

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -19,6 +19,7 @@
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
+#if defined(J9ZOS390)
 //On zOS XLC linker can't handle files with same name at link time
 //This workaround with pragma is needed. What this does is essentially
 //give a different name to the codesection (csect) for this file. So it
@@ -27,7 +28,7 @@
 #pragma csect(CODE,"OMRCGPhase#C")
 #pragma csect(STATIC,"OMRCGPhase#S")
 #pragma csect(TEST,"OMRCGPhase#T")
-
+#endif
 
 #include "codegen/CodeGenPhase.hpp"
 
@@ -53,6 +54,7 @@
 #include "env/IO.hpp"
 #include "env/PersistentInfo.hpp"
 #include "env/RegionProfiler.hpp"
+#include "env/StackMemoryRegion.hpp"
 #include "env/TRMemory.hpp"
 #include "il/Block.hpp"
 #include "il/Node.hpp"
@@ -125,13 +127,14 @@ OMR::CodeGenPhase::_phaseToFunctionTable[] =
 void
 OMR::CodeGenPhase::performAll()
    {
-   int i = 0;
-
-   for(; i < TR::CodeGenPhase::getListSize(); i++)
+   for(int32_t i = 0; i < TR::CodeGenPhase::getListSize(); i++)
       {
       PhaseValue phaseToDo = PhaseList[i];
+
+      TR::StackMemoryRegion stackMemoryRegion(*_cg->trMemory());
       TR::RegionProfiler rp(_cg->comp()->trMemory()->heapMemoryRegion(), *_cg->comp(), "codegen/%s/%s",
          _cg->comp()->getHotnessName(_cg->comp()->getMethodHotness()), self()->getName(phaseToDo));
+
       _phaseToFunctionTable[phaseToDo](_cg, self());
       }
    }
@@ -170,7 +173,7 @@ OMR::CodeGenPhase::performProcessRelocationsPhase(TR::CodeGenerator * cg, TR::Co
    cg->trimCodeMemoryToActualSize();
    cg->registerAssumptions();
 
-   cg->syncCode(cg->getBinaryBufferStart(), cg->getBinaryBufferCursor() - cg->getBinaryBufferStart());
+   cg->syncCode(cg->getBinaryBufferStart(), static_cast<uint32_t>(cg->getBinaryBufferCursor() - cg->getBinaryBufferStart()));
 
    if (comp->getOption(TR_EnableOSR))
      {

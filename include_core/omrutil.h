@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -330,9 +330,9 @@ getPageTypeStringWithLeadingSpace(uintptr_t pageFlags);
 /**
 * @brief
 * @param void
-* @return uintptr_t
+* @return uint32_t
 */
-uintptr_t getCacheLineSize(void);
+uint32_t getCacheLineSize(void);
 
 
 /**
@@ -352,6 +352,14 @@ void OMRZeroMemory(void *ptr, uintptr_t length);
 * @return void
 */
 void j9memset(void *dest, intptr_t value, uintptr_t size);
+
+#if defined(J9ZOS39064)
+/**
+* @brief get maximum heap size allowed for zOS compressedrefs mode
+* @return the heap size allowed
+*/
+U_64 zosGetMaxHeapSizeForCR(void);
+#endif /* defined(J9ZOS39064) */
 
 /* ---------------- wildcard.c ---------------- */
 

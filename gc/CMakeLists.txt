@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2022 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -66,6 +66,11 @@ target_compile_definitions(omrgc_tracegen
 		$<TARGET_PROPERTY:omr_base,INTERFACE_COMPILE_DEFINITIONS>
 )
 
+target_compile_options(omrgc_tracegen
+	PUBLIC
+		$<TARGET_PROPERTY:omr_base,INTERFACE_COMPILE_OPTIONS>
+)
+
 set(omrgc_sources
 	base/AddressOrderedListPopulator.cpp
 	base/AllocationContext.cpp
@@ -92,7 +97,7 @@ set(omrgc_sources
 	base/HeapRegionManagerTarok.cpp
 	base/HeapVirtualMemory.cpp
 	base/LightweightNonReentrantLock.cpp
-	base/LightweightNonReentrantReaderWriterLock.cpp
+	base/LightweightNonReentrantRWLock.cpp
 	base/MarkedObjectPopulator.cpp
 	base/MarkingScheme.cpp
 	base/MarkMap.cpp
@@ -141,6 +146,8 @@ set(omrgc_sources
 	base/ReferenceChainWalkerMarkMap.cpp
 	base/RegionPool.cpp
 	base/RegionPoolGeneric.cpp
+	base/SparseAddressOrderedFixedSizeDataPool.cpp
+	base/SparseVirtualMemory.cpp
 	base/StartupManager.cpp
 	base/SweepHeapSectioning.cpp
 	base/SweepPoolManager.cpp

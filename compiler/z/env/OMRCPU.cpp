@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2020 IBM Corp. and others
+ * Copyright (c) 2019, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -73,6 +73,11 @@ OMR::Z::CPU::detect(OMRPortLibrary * const omrPortLib)
       omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_MISCELLANEOUS_INSTRUCTION_EXTENSION_3, FALSE);
       omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_VECTOR_FACILITY_ENHANCEMENT_2, FALSE);
       omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_VECTOR_PACKED_DECIMAL_ENHANCEMENT_FACILITY, FALSE);
+      }
+
+   if (processorDescription.processor < OMR_PROCESSOR_S390_ZNEXT)
+      {
+      omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_VECTOR_PACKED_DECIMAL_ENHANCEMENT_FACILITY_2, FALSE);
       }
 
    return TR::CPU(processorDescription);
@@ -190,6 +195,9 @@ OMR::Z::CPU::supportsFeatureOldAPI(uint32_t feature)
       case OMR_FEATURE_S390_VECTOR_FACILITY_ENHANCEMENT_1:
          supported = self()->getSupportsVectorFacilityEnhancement1();
          break;
+      case OMR_FEATURE_S390_VECTOR_PACKED_DECIMAL_ENHANCEMENT_FACILITY_2:
+         supported = self()->getSupportsVectorPackedDecimalEnhancementFacility2();
+         break;
       default:
          TR_ASSERT_FATAL(false, "Unknown processor feature: %d!\n", feature);
       }
@@ -197,58 +205,11 @@ OMR::Z::CPU::supportsFeatureOldAPI(uint32_t feature)
    }
 
 const char*
-OMR::Z::CPU::getProcessorName(Architecture arch)
-   {
-   const char* result = "";
-   switch (arch)
-      {
-      case Unknown:
-         result = "Unknown";
-         break;
-      case z900:
-         result = "z900";
-         break;
-      case z990:
-         result = "z990";
-         break;
-      case z9:
-         result = "z9";
-         break;
-      case z10:
-         result = "z10";
-         break;
-      case z196:
-         result = "z196";
-         break;
-      case zEC12:
-         result = "zEC12";
-         break;
-      case z13:
-         result = "z13";
-         break;
-      case z14:
-         result = "z14";
-         break;
-      case z15:
-         result = "z15";
-         break;
-      case zNext:
-         result = "zNext";
-         break;
-      default:
-         TR_ASSERT(false, "Invalid Archiecture Type: %d", arch);
-         result = "Invalid Architecture type!";
-         break;
-      }
-   return result;
-   }
-
-const char*
-OMR::Z::CPU::getProcessorName(OMRProcessorArchitecture arch)
+OMR::Z::CPU::getProcessorName()
    {
    const char* result = "";
 
-   switch(arch)
+   switch(_processorDescription.processor)
       {
       case OMR_PROCESSOR_S390_UNKNOWN:
          result = "Unknown";
@@ -284,89 +245,9 @@ OMR::Z::CPU::getProcessorName(OMRProcessorArchitecture arch)
          result = "zNext";
          break;
       default:
-         TR_ASSERT(false, "Invalid Archiecture Type: %d", arch);
          result = "Invalid Architecture type!";
          break;
       }
-   return result;
-   }
-
-const char*
-OMR::Z::CPU::getProcessorName(int32_t machineId)
-   {
-   const char* result = "";
-
-   switch (machineId)
-      {
-      case 1090:
-      case 1091:
-         result = "zPDT";
-      break;
-
-      case 2066:
-         result = "z800";
-      break;
-
-      case 2084:
-         result = "z990";
-      break;
-
-      case 2086:
-         result = "z890";
-      break;
-
-      case 2064:
-         result = "z900";
-      break;
-
-      case 2094:
-      case 2096:
-         result = "z9";
-      break;
-
-      case 2097:
-      case 2098:
-         result = "z10";
-      break;
-
-      case 2817:
-         result = "z196";
-      break;
-      
-      case 2818:
-         result = "z114";
-      break;
-
-      case 2827:
-      case 2828:
-         result = "zEC12";
-      break;
-
-      case 2964:
-      case 2965:
-         result = "z13";
-      break;
-
-      case 3906:
-      case 3907:
-         result = "z14";
-      break;
-
-      case 8561:
-      case 8562:
-         result = "z15";
-      break;
-
-      case 9998:
-      case 9999:
-         result = "zNext";
-      break;
-
-      default:
-         result = "Unknown";
-      break;
-      }
-
    return result;
    }
 
@@ -586,6 +467,8 @@ OMR::Z::CPU::setSupportsMiscellaneousInstructionExtensions2Facility(bool value)
       {
       _flags.reset(S390SupportsMIE2);
       }
+
+   return value;
    }
 
 bool
@@ -677,5 +560,25 @@ OMR::Z::CPU::isTargetWithinBranchRelativeRILRange(intptr_t targetAddress, intptr
    {
    return (targetAddress == sourceAddress + ((intptr_t)((int32_t)((targetAddress - sourceAddress) / 2))) * 2) &&
             (targetAddress % 2 == 0);
+   }
+
+bool
+OMR::Z::CPU::getSupportsVectorPackedDecimalEnhancementFacility2()
+   {
+   return _flags.testAny(S390SupportsVectorPDEnhancementFacility2);
+   }
+
+bool
+OMR::Z::CPU::setSupportsVectorPackedDecimalEnhancementFacility2(bool value)
+   {
+   if (value)
+      {
+      _flags.set(S390SupportsVectorPDEnhancementFacility2);
+      }
+   else
+      {
+      _flags.reset(S390SupportsVectorPDEnhancementFacility2);
+      }
+   return value;
    }
 

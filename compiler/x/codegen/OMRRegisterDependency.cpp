@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -48,7 +48,7 @@
 #include "ras/Debug.hpp"
 #include "ras/DebugCounter.hpp"
 #include "x/codegen/X86Instruction.hpp"
-#include "x/codegen/X86Ops.hpp"
+#include "codegen/InstOpCode.hpp"
 #include "x/codegen/X86Register.hpp"
 
 ////////////////////////
@@ -74,51 +74,48 @@ static void generateRegcopyDebugCounter(TR::CodeGenerator *cg, const char *categ
    cg->generateDebugCounter(cursor, fullName, 1, TR::DebugCounter::Undetermined);
    }
 
+OMR::X86::RegisterDependencyConditions::RegisterDependencyConditions(uint16_t numPreConds, uint16_t numPostConds, TR_Memory * m)
+   : _preConditions(new (numPreConds, m) TR::RegisterDependencyGroup),
+      _postConditions(new (numPostConds, m) TR::RegisterDependencyGroup),
+      _numPreConditions(numPreConds),
+      _addCursorForPre(0),
+      _numPostConditions(numPostConds),
+      _addCursorForPost(0)
+   {}
+
 OMR::X86::RegisterDependencyConditions::RegisterDependencyConditions(
       TR::Node *node,
       TR::CodeGenerator *cg,
-      TR_X86RegisterDependencyIndex additionalRegDeps,
-      List<TR::Register> *popRegisters)
+      uint16_t additionalRegDeps)
    :_numPreConditions(-1),_numPostConditions(-1),
     _addCursorForPre(0),_addCursorForPost(0)
    {
    TR::Register      *copyReg = NULL;
    TR::Register      *highCopyReg = NULL;
    List<TR::Register> registers(cg->trMemory());
-   TR_X86RegisterDependencyIndex          numFPGlobalRegs = 0,
-                     totalNumFPGlobalRegs = 0;
-   int32_t           i;
    TR::Machine *machine = cg->machine();
    TR::Compilation *comp = cg->comp();
 
    int32_t numLongs = 0;
 
-   // Pre-compute how many x87 FP stack slots we need to accommodate all the FP global registers.
-   //
-   for (i = 0; i < node->getNumChildren(); ++i)
+   for (int32_t i = 0; i < node->getNumChildren(); ++i)
       {
-      TR::Node     *child = node->getChild(i);
-      TR::Register *reg   = child->getRegister();
+      TR::Node *child = node->getChild(i);
 
-      if (reg->getKind() == TR_GPR)
+      if (child->getRegister()->getKind() == TR_GPR && child->getHighGlobalRegisterNumber() > -1)
          {
-         if (child->getHighGlobalRegisterNumber() > -1)
-            numLongs++;
-         }
-      else if (reg->getKind() == TR_X87)
-         {
-         totalNumFPGlobalRegs++;
+         numLongs++;
          }
       }
 
-   _preConditions = TR_X86RegisterDependencyGroup::create(node->getNumChildren() + additionalRegDeps + numLongs, cg->trMemory());
-   _postConditions = TR_X86RegisterDependencyGroup::create(node->getNumChildren() + additionalRegDeps + numLongs, cg->trMemory());
+   _preConditions = new (node->getNumChildren() + additionalRegDeps + numLongs, cg->trMemory()) TR::RegisterDependencyGroup;
+   _postConditions = new (node->getNumChildren() + additionalRegDeps + numLongs, cg->trMemory()) TR::RegisterDependencyGroup;
    _numPreConditions = node->getNumChildren() + additionalRegDeps + numLongs;
    _numPostConditions = node->getNumChildren() + additionalRegDeps + numLongs;
 
    int32_t numLongsAdded = 0;
 
-   for (i = node->getNumChildren()-1; i >= 0; i--)
+   for (int32_t i = node->getNumChildren()-1; i >= 0; i--)
       {
       TR::Node                 *child        = node->getChild(i);
       TR::Register             *globalReg    = child->getRegister();
@@ -152,21 +149,7 @@ OMR::X86::RegisterDependencyConditions::RegisterDependencyConditions(
          }
       else
          {
-         TR_ASSERT(globalReg->getKind() == TR_X87, "invalid global register kind\n");
-
-         // Compute the real global register number based on the number of global FPRs allocated so far.
-         //
-         realRegNum = (TR::RealRegister::RegNum)
-                         (TR::RealRegister::FirstFPR + (totalNumFPGlobalRegs - numFPGlobalRegs - 1));
-
-         // Find the global register that has been allocated in this FP stack slot, if any.
-         //
-         int32_t fpStackSlot = child->getGlobalRegisterNumber() - machine->getNumGlobalGPRs();
-         TR::Register *fpGlobalReg = cg->machine()->getFPStackRegister(fpStackSlot);
-         if (fpGlobalReg)
-            globalReg = fpGlobalReg;
-
-         numFPGlobalRegs++;
+         TR_ASSERT_FATAL_WITH_NODE(node, false, "invalid global register kind %d, reg=%p", globalReg->getKind(), globalReg);
          }
 
       if (registers.find(globalReg))
@@ -208,7 +191,7 @@ OMR::X86::RegisterDependencyConditions::RegisterDependencyConditions(
                   }
                }
 
-            generateRegRegInstruction(placeToAdd, MOVRegReg(), copyReg, globalReg, cg);
+            generateRegRegInstruction(placeToAdd, TR::InstOpCode::MOVRegReg(), copyReg, globalReg, cg);
 
             if (highGlobalReg)
                {
@@ -226,7 +209,7 @@ OMR::X86::RegisterDependencyConditions::RegisterDependencyConditions(
                   highCopyReg->setPinningArrayPointer(highGlobalReg->getPinningArrayPointer());
                   }
 
-               generateRegRegInstruction(MOV4RegReg, node, highCopyReg, highGlobalReg, cg);
+               generateRegRegInstruction(TR::InstOpCode::MOV4RegReg, node, highCopyReg, highGlobalReg, cg);
                }
             else
                {
@@ -240,66 +223,21 @@ OMR::X86::RegisterDependencyConditions::RegisterDependencyConditions(
             if (globalReg->isSinglePrecision())
                {
                copyReg = cg->allocateSinglePrecisionRegister(TR_FPR);
-               generateRegRegInstruction(MOVAPSRegReg, node, copyReg, child->getRegister(), cg);
+               generateRegRegInstruction(TR::InstOpCode::MOVAPSRegReg, node, copyReg, child->getRegister(), cg);
                }
             else
                {
                copyReg = cg->allocateRegister(TR_FPR);
-               generateRegRegInstruction(MOVAPDRegReg, node, copyReg, child->getRegister(), cg);
+               generateRegRegInstruction(TR::InstOpCode::MOVAPDRegReg, node, copyReg, child->getRegister(), cg);
                }
             }
          else if (globalReg->getKind() == TR_VRF)
             {
             generateRegcopyDebugCounter(cg, "vrf");
             copyReg = cg->allocateRegister(TR_VRF);
-            generateRegRegInstruction(MOVDQURegReg, node, copyReg, child->getRegister(), cg);
-            }
-         else
-            {
-            generateRegcopyDebugCounter(cg, "x87");
-            if (globalReg->isSinglePrecision())
-               {
-               copyReg = cg->allocateSinglePrecisionRegister(TR_X87);
-               }
-            else
-               {
-               copyReg = cg->allocateRegister(TR_X87);
-               }
-
-            generateFPST0STiRegRegInstruction(FLDRegReg, node, copyReg, child->getRegister(), cg);
-
-            int32_t fpRegNum = child->getGlobalRegisterNumber() - machine->getNumGlobalGPRs();
-            //dumpOptDetails("FP reg num %d global reg num %d global reg %s\n", fpRegNum, child->getGlobalRegisterNumber(), getDebug()->getName(globalReg));
-            cg->machine()->setCopiedFPStackRegister(fpRegNum, toX86FPStackRegister(globalReg));
-            if (child->getOpCodeValue() == TR::PassThrough)
-               {
-               TR::Node *fpChild = child->getFirstChild();
-               cg->machine()->setFPStackRegisterNode(fpRegNum, fpChild);
-               }
-            else
-               cg->machine()->setFPStackRegisterNode(fpRegNum, child);
-
-            int32_t i;
-            for (i=0;i<TR_X86FPStackRegister::NumRegisters;i++)
-               {
-               TR::Register *reg = cg->machine()->getFPStackRegister(i);
-               if ((reg == globalReg) &&
-                   (i != fpRegNum))
-                  {
-                    //dumpOptDetails("FP reg num %d global reg num %d global reg %s\n", i, child->getGlobalRegisterNumber(), getDebug()->getName(copyReg));
-                  cg->machine()->setCopiedFPStackRegister(i, toX86FPStackRegister(copyReg));
-                  if (child->getOpCodeValue() == TR::PassThrough)
-                     {
-                     TR::Node *fpChild = child->getFirstChild();
-                     cg->machine()->setFPStackRegisterNode(i, fpChild);
-                     }
-                  else
-                     cg->machine()->setFPStackRegisterNode(i, child);
-
-                  break;
-                  }
-               }
-
+            TR::InstOpCode::Mnemonic op = cg->comp()->target().cpu.supportsAVX() ? InstOpCode::VMOVDQUYmmYmm : TR::InstOpCode::MOVDQURegReg;
+            op = cg->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_AVX512F) ? InstOpCode::VMOVDQUZmmZmm : op;
+            generateRegRegInstruction(op, node, copyReg, child->getRegister(), cg);
             }
 
          globalReg = copyReg;
@@ -307,32 +245,6 @@ OMR::X86::RegisterDependencyConditions::RegisterDependencyConditions(
          }
       else
          {
-         // Change the register of the floating-point child of a PassThrough,
-         // as we must have a register that is live as the global register
-         // corresponding to the child.
-         //
-         if (child->getOpCodeValue() == TR::PassThrough && globalReg->getKind() == TR_X87)
-            {
-            TR::Node *fpChild = child->getFirstChild();
-
-            if ((fpChild->getDataType() == TR::Float) || (fpChild->getDataType() == TR::Double))
-               {
-
-               // if the child's register is live on another stack slot, dont change the register.
-               TR::Register *fpGlobalReg = NULL;
-               for (int j = 0 ; j < TR_X86FPStackRegister::NumRegisters && fpGlobalReg != child->getRegister(); j++)
-                  {
-                  fpGlobalReg = cg->machine()->getFPStackRegister(j);
-                  }
-
-               if (fpGlobalReg != child->getRegister())
-                  {
-                  fpChild->setRegister(globalReg);
-                  machine->setFPStackRegister(child->getGlobalRegisterNumber() - machine->getNumGlobalGPRs(), toX86FPStackRegister(globalReg));
-                  }
-               }
-            }
-
          registers.add(globalReg);
          TR::RegisterPair *globalRegPair = globalReg->getRegisterPair();
          if (globalRegPair)
@@ -361,13 +273,6 @@ OMR::X86::RegisterDependencyConditions::RegisterDependencyConditions(
          addPostCondition(globalReg, realRegNum, cg);
          cg->machine()->setXMMGlobalRegister(realRegNum - TR::RealRegister::FirstXMMR, globalReg);
          }
-      else if (globalReg->getKind() == TR_X87)
-         {
-         addPreCondition(globalReg, realRegNum, cg, UsesGlobalDependentFPRegister);
-         addPostCondition(globalReg, realRegNum, cg, UsesGlobalDependentFPRegister);
-         int32_t fpRegNum = child->getGlobalRegisterNumber() - machine->getNumGlobalGPRs();
-         cg->machine()->setFPStackRegister(fpRegNum, toX86FPStackRegister(globalReg));
-         }
 
       // If the register dependency isn't actually used
       // (dead store elimination probably removed it)
@@ -378,14 +283,7 @@ OMR::X86::RegisterDependencyConditions::RegisterDependencyConditions(
          child = child->getFirstChild();
          }
 
-      if (popRegisters &&
-          globalReg->getKind() == TR_X87 &&
-          child->getReferenceCount() == 0 &&
-          (child->getDataType() == TR::Float || child->getDataType() == TR::Double))
-         {
-         popRegisters->add(globalReg);
-         }
-      else if (copyReg)
+      if (copyReg)
          {
          cg->stopUsingRegister(copyReg);
          if (highCopyReg)
@@ -398,9 +296,9 @@ OMR::X86::RegisterDependencyConditions::RegisterDependencyConditions(
    }
 
 
-TR_X86RegisterDependencyIndex OMR::X86::RegisterDependencyConditions::unionDependencies(
-   TR_X86RegisterDependencyGroup *deps,
-   TR_X86RegisterDependencyIndex  cursor,
+uint32_t OMR::X86::RegisterDependencyConditions::unionDependencies(
+   TR::RegisterDependencyGroup *deps,
+   uint32_t  cursor,
    TR::Register                  *vr,
    TR::RealRegister::RegNum       rr,
    TR::CodeGenerator             *cg,
@@ -433,7 +331,7 @@ TR_X86RegisterDependencyIndex OMR::X86::RegisterDependencyConditions::unionDepen
          return cursor;
          }
 
-      for (TR_X86RegisterDependencyIndex candidate = 0; candidate < cursor; candidate++)
+      for (uint32_t candidate = 0; candidate < cursor; candidate++)
          {
          TR::RegisterDependency  *dep = deps->getRegisterDependency(candidate);
          if (dep->getRegister() == vr)
@@ -480,9 +378,9 @@ void OMR::X86::RegisterDependencyConditions::unionNoRegPostCondition(TR::Registe
    }
 
 
-TR_X86RegisterDependencyIndex OMR::X86::RegisterDependencyConditions::unionRealDependencies(
-   TR_X86RegisterDependencyGroup *deps,
-   TR_X86RegisterDependencyIndex  cursor,
+uint32_t OMR::X86::RegisterDependencyConditions::unionRealDependencies(
+   TR::RegisterDependencyGroup *deps,
+   uint32_t  cursor,
    TR::Register                  *vr,
    TR::RealRegister::RegNum       rr,
    TR::CodeGenerator             *cg,
@@ -495,7 +393,7 @@ TR_X86RegisterDependencyIndex OMR::X86::RegisterDependencyConditions::unionRealD
    static TR::RealRegister::RegNum vmThreadRealRegisterIndex = TR::RealRegister::ebp;
    if (rr == vmThreadRealRegisterIndex)
       {
-      depsize_t candidate;
+      uint16_t candidate;
       TR::Register *vmThreadRegister = cg->getVMThreadRegister();
       for (candidate = 0; candidate < cursor; candidate++)
          {
@@ -529,20 +427,18 @@ TR_X86RegisterDependencyIndex OMR::X86::RegisterDependencyConditions::unionRealD
    }
 
 
-TR::RegisterDependencyConditions  *OMR::X86::RegisterDependencyConditions::clone(TR::CodeGenerator *cg, TR_X86RegisterDependencyIndex additionalRegDeps)
+TR::RegisterDependencyConditions  *OMR::X86::RegisterDependencyConditions::clone(TR::CodeGenerator *cg, uint32_t additionalRegDeps)
    {
    TR::RegisterDependencyConditions  *other =
       new (cg->trHeapMemory()) TR::RegisterDependencyConditions(_numPreConditions  + additionalRegDeps,
                                               _numPostConditions + additionalRegDeps, cg->trMemory());
-   int32_t i;
-
-   for (i = _numPreConditions-1; i >= 0; --i)
+   for (int32_t i = _numPreConditions-1; i >= 0; --i)
       {
       TR::RegisterDependency  *dep = getPreConditions()->getRegisterDependency(i);
       other->getPreConditions()->setDependencyInfo(i, dep->getRegister(), dep->getRealRegister(), cg, dep->getFlags());
       }
 
-   for (i = _numPostConditions-1; i >= 0; --i)
+   for (int32_t i = _numPostConditions-1; i >= 0; --i)
       {
       TR::RegisterDependency  *dep = getPostConditions()->getRegisterDependency(i);
       other->getPostConditions()->setDependencyInfo(i, dep->getRegister(), dep->getRealRegister(), cg, dep->getFlags());
@@ -553,6 +449,117 @@ TR::RegisterDependencyConditions  *OMR::X86::RegisterDependencyConditions::clone
    return other;
    }
 
+uint32_t OMR::X86::RegisterDependencyConditions::setNumPreConditions(uint32_t n, TR_Memory * m)
+   {
+   if (_preConditions == NULL)
+      {
+      _preConditions = new (n, m) TR::RegisterDependencyGroup;
+      }
+   return (_numPreConditions = n);
+   }
+
+uint32_t OMR::X86::RegisterDependencyConditions::setNumPostConditions(uint32_t n, TR_Memory * m)
+   {
+   if (_postConditions == NULL)
+      {
+      _postConditions = new (n, m) TR::RegisterDependencyGroup;
+      }
+   return (_numPostConditions = n);
+   }
+
+TR::RegisterDependency *OMR::X86::RegisterDependencyConditions::findPreCondition (TR::Register *vr)
+   {
+   return _preConditions ->findDependency(vr, _addCursorForPre );
+   }
+
+TR::RegisterDependency *OMR::X86::RegisterDependencyConditions::findPostCondition(TR::Register *vr)
+   {
+   return _postConditions->findDependency(vr, _addCursorForPost);
+   }
+
+TR::RegisterDependency *OMR::X86::RegisterDependencyConditions::findPreCondition (TR::RealRegister::RegNum rr)
+   {
+   return _preConditions ->findDependency(rr, _addCursorForPre );
+   }
+
+TR::RegisterDependency *OMR::X86::RegisterDependencyConditions::findPostCondition(TR::RealRegister::RegNum rr)
+   {
+   return _postConditions->findDependency(rr, _addCursorForPost);
+   }
+
+void OMR::X86::RegisterDependencyConditions::assignPreConditionRegisters(TR::Instruction *currentInstruction, TR_RegisterKinds kindsToBeAssigned, TR::CodeGenerator *cg)
+   {
+   if (_preConditions != NULL)
+      {
+      if ((kindsToBeAssigned & TR_X87_Mask))
+         {
+         _preConditions->assignFPRegisters(currentInstruction, kindsToBeAssigned, _numPreConditions, cg);
+         }
+      else
+         {
+         cg->clearRegisterAssignmentFlags();
+         cg->setRegisterAssignmentFlag(TR_PreDependencyCoercion);
+         _preConditions->assignRegisters(currentInstruction, kindsToBeAssigned, _numPreConditions, cg);
+         }
+      }
+   }
+
+void OMR::X86::RegisterDependencyConditions::assignPostConditionRegisters(TR::Instruction *currentInstruction, TR_RegisterKinds kindsToBeAssigned, TR::CodeGenerator *cg)
+   {
+   if (_postConditions != NULL)
+      {
+      if ((kindsToBeAssigned & TR_X87_Mask))
+         {
+         _postConditions->assignFPRegisters(currentInstruction, kindsToBeAssigned, _numPostConditions, cg);
+         }
+      else
+         {
+         cg->clearRegisterAssignmentFlags();
+         cg->setRegisterAssignmentFlag(TR_PostDependencyCoercion);
+         _postConditions->assignRegisters(currentInstruction, kindsToBeAssigned, _numPostConditions, cg);
+         }
+      }
+   }
+
+void OMR::X86::RegisterDependencyConditions::blockPreConditionRegisters()
+   {
+   _preConditions->blockRegisters(_numPreConditions);
+   }
+
+void OMR::X86::RegisterDependencyConditions::unblockPreConditionRegisters()
+   {
+   _preConditions->unblockRegisters(_numPreConditions);
+   }
+
+void OMR::X86::RegisterDependencyConditions::blockPostConditionRegisters()
+   {
+   _postConditions->blockRegisters(_numPostConditions);
+   }
+
+void OMR::X86::RegisterDependencyConditions::unblockPostConditionRegisters()
+   {
+   _postConditions->unblockRegisters(_numPostConditions);
+   }
+
+void OMR::X86::RegisterDependencyConditions::blockPostConditionRealDependencyRegisters(TR::CodeGenerator *cg)
+   {
+   _postConditions->blockRealDependencyRegisters(_numPostConditions, cg);
+   }
+
+void OMR::X86::RegisterDependencyConditions::unblockPostConditionRealDependencyRegisters(TR::CodeGenerator *cg)
+   {
+   _postConditions->unblockRealDependencyRegisters(_numPostConditions, cg);
+   }
+
+void OMR::X86::RegisterDependencyConditions::blockPreConditionRealDependencyRegisters(TR::CodeGenerator *cg)
+   {
+   _preConditions->blockRealDependencyRegisters(_numPreConditions, cg);
+   }
+
+void OMR::X86::RegisterDependencyConditions::unblockPreConditionRealDependencyRegisters(TR::CodeGenerator *cg)
+   {
+   _preConditions->unblockRealDependencyRegisters(_numPreConditions, cg);
+   }
 
 bool OMR::X86::RegisterDependencyConditions::refsRegister(TR::Register *r)
    {
@@ -652,10 +659,10 @@ void OMR::X86::RegisterDependencyConditions::useRegisters(TR::Instruction *instr
    }
 
 
-void TR_X86RegisterDependencyGroup::blockRealDependencyRegisters(TR_X86RegisterDependencyIndex numberOfRegisters, TR::CodeGenerator *cg)
+void OMR::X86::RegisterDependencyGroup::blockRealDependencyRegisters(uint32_t numberOfRegisters, TR::CodeGenerator *cg)
    {
    TR::Machine *machine = cg->machine();
-   for (TR_X86RegisterDependencyIndex i = 0; i < numberOfRegisters; i++)
+   for (uint32_t i = 0; i < numberOfRegisters; i++)
       {
       if (!_dependencies[i].isNoReg())
          {
@@ -665,10 +672,10 @@ void TR_X86RegisterDependencyGroup::blockRealDependencyRegisters(TR_X86RegisterD
    }
 
 
-void TR_X86RegisterDependencyGroup::unblockRealDependencyRegisters(TR_X86RegisterDependencyIndex numberOfRegisters, TR::CodeGenerator *cg)
+void OMR::X86::RegisterDependencyGroup::unblockRealDependencyRegisters(uint32_t numberOfRegisters, TR::CodeGenerator *cg)
    {
    TR::Machine *machine = cg->machine();
-   for (TR_X86RegisterDependencyIndex i = 0; i < numberOfRegisters; i++)
+   for (uint32_t i = 0; i < numberOfRegisters; i++)
       {
       if (!_dependencies[i].isNoReg())
          {
@@ -678,9 +685,9 @@ void TR_X86RegisterDependencyGroup::unblockRealDependencyRegisters(TR_X86Registe
    }
 
 
-void TR_X86RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentInstruction,
+void OMR::X86::RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentInstruction,
                                                     TR_RegisterKinds  kindsToBeAssigned,
-                                                    TR_X86RegisterDependencyIndex          numberOfRegisters,
+                                                    uint32_t          numberOfRegisters,
                                                     TR::CodeGenerator *cg)
    {
    TR::Register             *virtReg              = NULL;
@@ -690,11 +697,11 @@ void TR_X86RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentIn
    TR::RealRegister         *bestFreeRealReg      = NULL;
    TR::RealRegister::RegNum  bestFreeRealRegIndex = TR::RealRegister::NoReg;
    bool                      changed;
-   int                       i, j;
+
    TR::Compilation *comp = cg->comp();
 
    TR::Machine *machine = cg->machine();
-   blockRegisters(numberOfRegisters);
+   self()->blockRegisters(numberOfRegisters);
 
    // Build a work list of assignable register dependencies so the test does not
    // have to be repeated on each pass.  Also, order the list so that real
@@ -713,7 +720,7 @@ void TR_X86RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentIn
    int32_t firstNoRegAssoc = 0, lastNoRegAssoc = 0;
    int32_t bestFreeRegAssoc = 0;
 
-   for (i=0; i<numberOfRegisters; i++)
+   for (auto i = 0U; i<numberOfRegisters; i++)
       {
       TR::RegisterDependency &regDep = _dependencies[i];
       virtReg = regDep.getRegister();
@@ -724,7 +731,7 @@ void TR_X86RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentIn
           && !regDep.isSpilledReg()
           && !regDep.isBestFreeReg())
          {
-         dependencies[numDependencyRegisters++] = getRegisterDependency(i);
+         dependencies[numDependencyRegisters++] = self()->getRegisterDependency(i);
          }
       else if (regDep.isNoReg())
          hasNoRegDeps = true;
@@ -746,18 +753,19 @@ void TR_X86RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentIn
 
                TR::MemoryReference *tempMR = generateX86MemoryReference(virtReg->getBackingStorage()->getSymbolReference(), cg);
 
-               TR_X86OpCodes op;
+               TR::InstOpCode::Mnemonic op;
                if (assignedReg->getKind() == TR_FPR)
                   {
-                  op = (assignedReg->isSinglePrecision()) ? MOVSSRegMem : (cg->getXMMDoubleLoadOpCode());
+                  op = (assignedReg->isSinglePrecision()) ? TR::InstOpCode::MOVSSRegMem : (cg->getXMMDoubleLoadOpCode());
                   }
                else if (assignedReg->getKind() == TR_VRF)
                   {
-                  op = MOVDQURegMem;
+                  op = cg->comp()->target().cpu.supportsAVX() ? InstOpCode::VMOVDQUYmmMem : TR::InstOpCode::MOVDQURegMem;
+                  op = cg->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_AVX512F) ? InstOpCode::VMOVDQUZmmMem : op;
                   }
                else
                   {
-                  op = LRegMem();
+                  op = TR::InstOpCode::LRegMem();
                   }
 
                TR::X86RegMemInstruction *inst =
@@ -787,13 +795,13 @@ void TR_X86RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentIn
    if (hasByteDeps)
       {
       firstByteRegAssoc = numDependencyRegisters;
-      for (i=0; i<numberOfRegisters; i++)
+      for (auto i = 0U; i < numberOfRegisters; i++)
          {
          virtReg = _dependencies[i].getRegister();
          if (virtReg && (kindsToBeAssigned & virtReg->getKindAsMask()) &&
              _dependencies[i].isByteReg())
             {
-            dependencies[numDependencyRegisters++] = getRegisterDependency(i);
+            dependencies[numDependencyRegisters++] = self()->getRegisterDependency(i);
             }
          }
 
@@ -803,13 +811,13 @@ void TR_X86RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentIn
    if (hasNoRegDeps)
       {
       firstNoRegAssoc = numDependencyRegisters;
-      for (i=0; i<numberOfRegisters; i++)
+      for (auto i = 0U; i < numberOfRegisters; i++)
          {
          virtReg = _dependencies[i].getRegister();
          if (virtReg && (kindsToBeAssigned & virtReg->getKindAsMask()) &&
              _dependencies[i].isNoReg())
             {
-            dependencies[numDependencyRegisters++] = getRegisterDependency(i);
+            dependencies[numDependencyRegisters++] = self()->getRegisterDependency(i);
             }
          }
 
@@ -819,13 +827,13 @@ void TR_X86RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentIn
    if (hasBestFreeRegDeps)
       {
       bestFreeRegAssoc = numDependencyRegisters;
-      for (i=0; i<numberOfRegisters; i++)
+      for (auto i = 0U; i < numberOfRegisters; i++)
          {
          virtReg = _dependencies[i].getRegister();
          if (virtReg && (kindsToBeAssigned & virtReg->getKindAsMask()) &&
              _dependencies[i].isBestFreeReg())
             {
-            dependencies[numDependencyRegisters++] = getRegisterDependency(i);
+            dependencies[numDependencyRegisters++] = self()->getRegisterDependency(i);
             }
          }
 
@@ -837,7 +845,7 @@ void TR_X86RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentIn
    //
    if (numRealAssocRegisters > 1)
       {
-      for (i = 0; i < numRealAssocRegisters - 1; i++)
+      for (auto i = 0; i < numRealAssocRegisters - 1; i++)
          {
          virtReg = dependencies[i]->getRegister();
 
@@ -858,7 +866,7 @@ void TR_X86RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentIn
             if (dependentRealReg->getState() == TR::RealRegister::Blocked &&
                 dependentRegNum != assignedRegNum)
                {
-               for (j = i+1; j < numRealAssocRegisters; j++)
+               for (auto j = i + 1; j < numRealAssocRegisters; j++)
                   {
                   TR::Register             *virtReg2         = dependencies[j]->getRegister();
                   TR::RealRegister::RegNum  dependentRegNum2 = dependencies[j]->getRealRegister();
@@ -890,7 +898,7 @@ void TR_X86RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentIn
    do
       {
       changed = false;
-      for (i = 0; i < numRealAssocRegisters; i++)
+      for (auto i = 0; i < numRealAssocRegisters; i++)
          {
          virtReg = dependencies[i]->getRegister();
          dependentRegNum = dependencies[i]->getRealRegister();
@@ -915,7 +923,7 @@ void TR_X86RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentIn
    do
       {
       changed = false;
-      for (i = 0; i < numRealAssocRegisters; i++)
+      for (auto i = 0; i < numRealAssocRegisters; i++)
          {
          virtReg = dependencies[i]->getRegister();
          assignedReg = toRealRegister(virtReg->getAssignedRealRegister());
@@ -945,14 +953,14 @@ void TR_X86RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentIn
       {
       if (hasNoRegDeps)
          {
-         for (i=firstNoRegAssoc; i<=lastNoRegAssoc; i++)
+         for (auto i = firstNoRegAssoc; i <= lastNoRegAssoc; i++)
             dependencies[i]->getRegister()->unblock();
          }
 
       do
          {
          changed = false;
-         for (i = firstByteRegAssoc; i <= lastByteRegAssoc; i++)
+         for (auto i = firstByteRegAssoc; i <= lastByteRegAssoc; i++)
             {
             virtReg = dependencies[i]->getRegister();
             if (toRealRegister(virtReg->getAssignedRealRegister()) == NULL)
@@ -966,7 +974,7 @@ void TR_X86RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentIn
 
       if (hasNoRegDeps)
          {
-         for (i=firstNoRegAssoc; i<=lastNoRegAssoc; i++)
+         for (auto i = firstNoRegAssoc; i <= lastNoRegAssoc; i++)
             dependencies[i]->getRegister()->block();
          }
       }
@@ -978,7 +986,7 @@ void TR_X86RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentIn
       do
          {
          changed = false;
-         for (i = firstNoRegAssoc; i<=lastNoRegAssoc; i++)
+         for (auto i = firstNoRegAssoc; i<=lastNoRegAssoc; i++)
             {
             virtReg = dependencies[i]->getRegister();
             if (toRealRegister(virtReg->getAssignedRealRegister()) == NULL)
@@ -1003,9 +1011,9 @@ void TR_X86RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentIn
       bestFreeRealRegIndex = bestFreeRealReg ? bestFreeRealReg->getRegisterNumber() : TR::RealRegister::NoReg;
       }
 
-   unblockRegisters(numberOfRegisters);
+   self()->unblockRegisters(numberOfRegisters);
 
-   for (i = 0; i < numDependencyRegisters; i++)
+   for (auto i = 0; i < numDependencyRegisters; i++)
       {
       TR::Register *virtRegister = dependencies[i]->getRegister();
       assignedReg = toRealRegister(virtRegister->getAssignedRealRegister());
@@ -1035,7 +1043,7 @@ void TR_X86RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentIn
 
    if (cg->getUseNonLinearRegisterAssigner())
       {
-      for (i=0; i<numberOfRegisters; i++)
+      for (auto i = 0U; i < numberOfRegisters; i++)
          {
          virtReg = _dependencies[i].getRegister();
 
@@ -1051,8 +1059,8 @@ void TR_X86RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentIn
    }
 
 
-void TR_X86RegisterDependencyGroup::setDependencyInfo(
-   TR_X86RegisterDependencyIndex  index,
+void OMR::X86::RegisterDependencyGroup::setDependencyInfo(
+   uint32_t  index,
    TR::Register                  *vr,
    TR::RealRegister::RegNum       rr,
    TR::CodeGenerator             *cg,
@@ -1091,8 +1099,8 @@ void OMR::X86::RegisterDependencyConditions::createRegisterAssociationDirective(
    // dependent register instruction onto the machine.
    // Only the registers that this instruction interferes with are modified.
    //
-   TR_X86RegisterDependencyGroup *depGroup = getPreConditions();
-   for (int j = 0; j < getNumPreConditions(); j++)
+   TR::RegisterDependencyGroup *depGroup = getPreConditions();
+   for (auto j = 0U; j < getNumPreConditions(); j++)
       {
       TR::RegisterDependency  *dependency = depGroup->getRegisterDependency(j);
       if (dependency->getRegister())
@@ -1100,7 +1108,7 @@ void OMR::X86::RegisterDependencyConditions::createRegisterAssociationDirective(
       }
 
    depGroup = getPostConditions();
-   for (int k = 0; k < getNumPostConditions(); k++)
+   for (auto k = 0U; k < getNumPostConditions(); k++)
       {
       TR::RegisterDependency  *dependency = depGroup->getRegisterDependency(k);
       if (dependency->getRegister())
@@ -1113,8 +1121,8 @@ TR::RealRegister *OMR::X86::RegisterDependencyConditions::getRealRegisterFromVir
    {
    TR::Machine *machine = cg->machine();
 
-   TR_X86RegisterDependencyGroup *depGroup = getPostConditions();
-   for (int j = 0; j < getNumPostConditions(); j++)
+   TR::RegisterDependencyGroup *depGroup = getPostConditions();
+   for (auto j = 0U; j < getNumPostConditions(); j++)
       {
       TR::RegisterDependency  *dependency = depGroup->getRegisterDependency(j);
 
@@ -1125,7 +1133,7 @@ TR::RealRegister *OMR::X86::RegisterDependencyConditions::getRealRegisterFromVir
       }
 
    depGroup = getPreConditions();
-   for (int k = 0; k < getNumPreConditions(); k++)
+   for (auto k = 0U; k < getNumPreConditions(); k++)
       {
       TR::RegisterDependency  *dependency = depGroup->getRegisterDependency(k);
 
@@ -1140,9 +1148,9 @@ TR::RealRegister *OMR::X86::RegisterDependencyConditions::getRealRegisterFromVir
    }
 
 
-void TR_X86RegisterDependencyGroup::assignFPRegisters(TR::Instruction   *prevInstruction,
+void OMR::X86::RegisterDependencyGroup::assignFPRegisters(TR::Instruction   *prevInstruction,
                                                        TR_RegisterKinds  kindsToBeAssigned,
-                                                       TR_X86RegisterDependencyIndex          numberOfRegisters,
+                                                       uint32_t          numberOfRegisters,
                                                        TR::CodeGenerator *cg)
    {
 
@@ -1151,56 +1159,7 @@ void TR_X86RegisterDependencyGroup::assignFPRegisters(TR::Instruction   *prevIns
 
    if (numberOfRegisters > 0)
       {
-      TR::Register *reqdTopVirtReg = NULL;
-
-      int32_t i;
-
-#ifdef DEBUG
-      int32_t numberOfFPRegisters = 0;
-      for (i = 0; i < numberOfRegisters; i++)
-         {
-         TR::Register *virtReg = _dependencies[i].getRegister();
-         if (virtReg && kindsToBeAssigned & virtReg->getKindAsMask())
-            {
-            if (_dependencies[i].getGlobalFPRegister())
-               numberOfFPRegisters++;
-            }
-         }
-#endif
-
-      TR::X86LabelInstruction  *labelInstruction = NULL;
-
-      if (prevInstruction->getNext())
-         labelInstruction = prevInstruction->getNext()->getX86LabelInstruction();
-
-      if (labelInstruction &&
-          labelInstruction->getNeedToClearFPStack())
-         {
-         // Push the correct number of FP values in global registers
-         // onto the stack; this would enable the stack height to be
-         // correct at this point (start of extended basic block).
-         //
-         for (i = 0; i < numberOfRegisters; i++)
-            {
-            TR::Register *virtReg = _dependencies[i].getRegister();
-            if (virtReg && kindsToBeAssigned & virtReg->getKindAsMask())
-               {
-               if (_dependencies[i].getGlobalFPRegister())
-                  {
-                  if ((virtReg->getFutureUseCount() == 0) ||
-                      (virtReg->getTotalUseCount() == virtReg->getFutureUseCount()))
-                     {
-                     machine->fpStackPush(virtReg);
-                     }
-                  }
-               }
-            }
-         }
-
-      // Reverse all FP spills so that FP stack height
-      // equals number of global registers as this point
-      //
-      for (i = 0; i < numberOfRegisters; i++)
+      for (auto i = 0U; i < numberOfRegisters; i++)
          {
          TR::Register *virtReg = _dependencies[i].getRegister();
          if (virtReg && kindsToBeAssigned & virtReg->getKindAsMask())
@@ -1214,54 +1173,32 @@ void TR_X86RegisterDependencyGroup::assignFPRegisters(TR::Instruction   *prevIns
             }
          }
 
-      // Call the routine that places the global registers in correct order;
-      // this routine tries to order them in as few exchanges as possible. This
-      // routine could be improved slightly in the future.
-      //
-      List<TR::Register> popRegisters(cg->trMemory());
-      orderGlobalRegsOnFPStack(cursor, kindsToBeAssigned, numberOfRegisters, &popRegisters, cg);
-
-      for (i = 0; i < numberOfRegisters; i++)
+      for (auto i = 0U; i < numberOfRegisters; i++)
          {
          TR::Register *virtReg = _dependencies[i].getRegister();
          if (virtReg && kindsToBeAssigned & virtReg->getKindAsMask())
             {
             if (virtReg->getTotalUseCount() != virtReg->getFutureUseCount())
                {
-               // Original code that handles non global FP regs
-               //
-               if (!_dependencies[i].getGlobalFPRegister())
+               if (!machine->isFPRTopOfStack(virtReg))
                   {
-                  if (!machine->isFPRTopOfStack(virtReg))
-                     {
-                     cursor = machine->fpStackFXCH(cursor, virtReg);
-                     }
+                  cursor = machine->fpStackFXCH(cursor, virtReg);
+                  }
 
-                  if (virtReg->decFutureUseCount() == 0)
-                     {
-                     machine->fpStackPop();
-                     }
+               if (virtReg->decFutureUseCount() == 0)
+                  {
+                  machine->fpStackPop();
                   }
                }
             else
                {
                // If this is the first reference of a register, then this must be the caller
-               // side return value.  Assume it already exists on the FP stack if not a global
-               // FP register; else coerce it to the right stack location. The required stack
-               // must be available at this point.
+               // side return value.  Assume it already exists on the FP stack.  The required
+               // stack must be available at this point.
                //
-               if (_dependencies[i].getGlobalFPRegister())
+               if (virtReg->decFutureUseCount() != 0)
                   {
-                  int32_t reqdStackHeight = _dependencies[i].getRealRegister() - TR::RealRegister::FirstFPR;
-                  machine->fpStackCoerce(virtReg, (machine->getFPTopOfStack() - reqdStackHeight));
-                  virtReg->decFutureUseCount();
-                  }
-               else
-                  {
-                  if (virtReg->decFutureUseCount() != 0)
-                     {
-                     machine->fpStackPush(virtReg);
-                     }
+                  machine->fpStackPush(virtReg);
                   }
                }
             }
@@ -1272,208 +1209,6 @@ void TR_X86RegisterDependencyGroup::assignFPRegisters(TR::Instruction   *prevIns
             cursor = machine->fpSpillStack(cursor);
             }
          }
-
-      if (reqdTopVirtReg)
-         {
-         if (!machine->isFPRTopOfStack(reqdTopVirtReg))
-            {
-            cursor = machine->fpStackFXCH(cursor, reqdTopVirtReg);
-            }
-         }
-
-#ifdef DEBUG
-      bool onlyGlobalFPRA = true;
-      bool onlySpillAllFP = true;
-      bool globalFPRA = false;
-      for (i = 0; i < numberOfRegisters; i++)
-         {
-         TR::Register *virtReg = _dependencies[i].getRegister();
-         if (virtReg && kindsToBeAssigned & virtReg->getKindAsMask())
-            {
-            if (_dependencies[i].getGlobalFPRegister())
-               {
-               globalFPRA = true;
-               onlySpillAllFP = false;
-               TR_X86FPStackRegister *assignedRegister = toX86FPStackRegister(virtReg->getAssignedRealRegister());
-               if (assignedRegister)
-                  {
-                  int32_t reqdStackHeight    = _dependencies[i].getRealRegister() - TR::RealRegister::FirstFPR;
-                  int32_t currentStackHeight = machine->getFPTopOfStack() - assignedRegister->getFPStackRegisterNumber();
-
-                  TR_ASSERT(reqdStackHeight == currentStackHeight,
-                         "Stack height for global FP register is NOT correct\n");
-                  }
-               }
-            }
-         else
-            {
-            if (_dependencies[i].isAllFPRegisters())
-               {
-               // Spill the entire FP stack to memory.
-               //
-               cursor = machine->fpSpillStack(cursor);
-               onlyGlobalFPRA = false;
-               }
-            }
-
-         TR_ASSERT((!globalFPRA || ((machine->getFPTopOfStack()+1) == numberOfFPRegisters)),
-                "Stack height is NOT correct\n");
-
-         TR_ASSERT(onlyGlobalFPRA || onlySpillAllFP, "Illegal dependency\n");
-         }
-#endif
-
-      // We may need to pop registers off the FP stack at this late stage in certain cases;
-      // in particular if there are 2 global registers having the same value (same child C
-      // in the GLRegDeps on a branch) and one of them is never used in the extended block after
-      // the branch; then only one value will be popped off the stack when the last reference
-      // to child C is seen in the extended basic block. This case cannot be detected during
-      // instruction selection as the reference count on the child C is non-zero at the dependency
-      // but in fact one of the registers must be popped off (late) in this case.
-      //
-      if (getMayNeedToPopFPRegisters() &&
-          !popRegisters.isEmpty())
-         {
-         ListIterator<TR::Register> popRegsIt(&popRegisters);
-         for (TR::Register *popRegister = popRegsIt.getFirst(); popRegister != NULL; popRegister = popRegsIt.getNext())
-            {
-            if (!machine->isFPRTopOfStack(popRegister))
-               {
-               cursor = machine->fpStackFXCH(cursor, popRegister);
-               }
-
-            TR::RealRegister *popRealRegister = machine->fpMapToStackRelativeRegister(popRegister);
-            cursor = new (cg->trHeapMemory()) TR::X86FPRegInstruction(cursor, FSTPReg, popRealRegister, cg);
-            machine->fpStackPop();
-            }
-         }
-      }
-   }
-
-
-// Tries to coerce global FP registers into their required stack positions
-// in fewest exchanges possible. Can be still improved; current worst case
-// is 3N/2 exchanges where N is number of incorrect stack locations (this could happen
-// if there are N/2 pairwise incorrect global registers. This could possibly be done in
-// N+1 approx maybe (?)
-//
-void TR_X86RegisterDependencyGroup::orderGlobalRegsOnFPStack(TR::Instruction    *cursor,
-                                                              TR_RegisterKinds   kindsToBeAssigned,
-                                                              TR_X86RegisterDependencyIndex          numberOfRegisters,
-                                                              List<TR::Register> *poppedRegisters,
-                                                              TR::CodeGenerator  *cg)
-   {
-
-   //
-   TR::Machine *machine = cg->machine();
-   int32_t *stackShape = machine->getFPStackShape();
-   memset(stackShape, 0xff, TR_X86FPStackRegister::NumRegisters*sizeof(int32_t));
-
-   // The data structure stackShape holds the required stack position j for each
-   // value on the stack at a particular location i. This will be used in the
-   // algorithm later.
-   //
-   int32_t topOfStack = machine->getFPTopOfStack();
-   int32_t i;
-   for (i = 0; i < numberOfRegisters; i++)
-      {
-      TR::Register *virtReg = _dependencies[i].getRegister();
-      if (virtReg && kindsToBeAssigned & virtReg->getKindAsMask())
-         {
-         if (virtReg->getTotalUseCount() != virtReg->getFutureUseCount())
-            {
-            TR_X86FPStackRegister *assignedRegister = toX86FPStackRegister(virtReg->getAssignedRealRegister());
-            TR_ASSERT(assignedRegister != NULL, "All spilled registers should have been reloaded by now\n");
-
-            if (_dependencies[i].getGlobalFPRegister())
-               {
-               int32_t reqdStackHeight    = _dependencies[i].getRealRegister() - TR::RealRegister::FirstFPR;
-               int32_t currentStackHeight = topOfStack - assignedRegister->getFPStackRegisterNumber();
-               stackShape[currentStackHeight] = reqdStackHeight;
-               }
-            }
-         }
-      }
-
-   TR::Register *reqdTopVirtReg = NULL;
-   for (i = 0; i < numberOfRegisters; i++)
-      {
-      TR::Register *virtReg = _dependencies[i].getRegister();
-      if (virtReg && kindsToBeAssigned & virtReg->getKindAsMask())
-         {
-         if (virtReg->getTotalUseCount() != virtReg->getFutureUseCount())
-            {
-            // If this is not the first reference of a register, then coerce it to the
-            // top of stack.
-            //
-            if (_dependencies[i].getGlobalFPRegister())
-               {
-               int32_t reqdStackHeight = _dependencies[i].getRealRegister() - TR::RealRegister::FirstFPR;
-               TR_X86FPStackRegister *assignedRegister = toX86FPStackRegister(virtReg->getAssignedRealRegister());
-               int32_t currentStackHeight =  topOfStack - assignedRegister->getFPStackRegisterNumber();
-
-               if (reqdStackHeight == 0)
-                  {
-                  reqdTopVirtReg = virtReg;
-                  }
-
-               TR::Register *origRegister = virtReg;
-               while ((reqdStackHeight != currentStackHeight) &&
-                      (reqdStackHeight >= 0))
-                  {
-                  if (!machine->isFPRTopOfStack(virtReg))
-                     {
-                     cursor = machine->fpStackFXCH(cursor, virtReg);
-                     }
-
-                  assignedRegister = toX86FPStackRegister(virtReg->getAssignedRealRegister());
-                  int32_t tempCurrentStackHeight =  topOfStack - assignedRegister->getFPStackRegisterNumber();
-                  if (reqdStackHeight != tempCurrentStackHeight)
-                     {
-                     cursor = machine->fpStackFXCH(cursor, reqdStackHeight);
-                     }
-
-#if DEBUG
-                  if ((currentStackHeight < 0) ||
-                      (currentStackHeight >= TR_X86FPStackRegister::NumRegisters))
-                     TR_ASSERT(0, "Array out of bounds exception in array stackShape\n");
-                  if ((reqdStackHeight < 0) ||
-                      (reqdStackHeight >= TR_X86FPStackRegister::NumRegisters))
-                     TR_ASSERT(0, "Array out of bounds exception in array stackShape\n");
-#endif
-
-                  // This is the new stack shape now after the exchanges done above
-                  //
-                  stackShape[currentStackHeight] = stackShape[0];
-                  stackShape[0] = stackShape[reqdStackHeight];
-                  stackShape[reqdStackHeight] = reqdStackHeight;
-
-                  // Drive this loop by the value on top of the stack
-                  //
-                  reqdStackHeight = stackShape[0];
-                  currentStackHeight = 0;
-                  virtReg = machine->getFPStackLocationPtr(topOfStack)->getAssignedRegister();
-                  }
-
-               if (origRegister->decFutureUseCount() == 0)
-                  {
-                  // It is possible for a global register to go dead at a dependency;
-                  // add it to the list of registers to be popped in this case (discussed
-                  // in more detail above)
-                  //
-                  poppedRegisters->add(origRegister);
-                  }
-               }
-            }
-         }
-      }
-
-   if (reqdTopVirtReg)
-      {
-      if (!machine->isFPRTopOfStack(reqdTopVirtReg))
-         {
-         cursor = machine->fpStackFXCH(cursor, reqdTopVirtReg);
-         }
       }
    }
 
@@ -1482,10 +1217,10 @@ void TR_X86RegisterDependencyGroup::orderGlobalRegsOnFPStack(TR::Instruction    
 uint32_t OMR::X86::RegisterDependencyConditions::numReferencedFPRegisters(TR::CodeGenerator * cg)
    {
    TR::Machine *machine = cg->machine();
-   uint32_t i, total = 0;
+   uint32_t total = 0;
    TR::Register *reg;
 
-   for (i=0; i<_numPreConditions; i++)
+   for (int32_t i=0; i<_numPreConditions; i++)
       {
       reg = _preConditions->getRegisterDependency(i)->getRegister();
       if ((reg && reg->getKind() == TR_X87) ||
@@ -1495,7 +1230,7 @@ uint32_t OMR::X86::RegisterDependencyConditions::numReferencedFPRegisters(TR::Co
          }
       }
 
-   for (i=0; i<_numPostConditions; i++)
+   for (int32_t i=0; i<_numPostConditions; i++)
       {
       reg = _postConditions->getRegisterDependency(i)->getRegister();
       if ((reg && reg->getKind() == TR_X87) ||
@@ -1510,10 +1245,10 @@ uint32_t OMR::X86::RegisterDependencyConditions::numReferencedFPRegisters(TR::Co
 
 uint32_t OMR::X86::RegisterDependencyConditions::numReferencedGPRegisters(TR::CodeGenerator * cg)
    {
-   uint32_t i, total = 0;
+   uint32_t total = 0;
    TR::Register *reg;
 
-   for (i=0; i<_numPreConditions; i++)
+   for (int32_t i=0; i<_numPreConditions; i++)
       {
       reg = _preConditions->getRegisterDependency(i)->getRegister();
       if (reg && (reg->getKind() == TR_GPR || reg->getKind() == TR_FPR || reg->getKind() == TR_VRF))
@@ -1522,7 +1257,7 @@ uint32_t OMR::X86::RegisterDependencyConditions::numReferencedGPRegisters(TR::Co
          }
       }
 
-   for (i=0; i<_numPostConditions; i++)
+   for (int32_t i=0; i<_numPostConditions; i++)
       {
       reg = _postConditions->getRegisterDependency(i)->getRegister();
       if (reg && (reg->getKind() == TR_GPR || reg->getKind() == TR_FPR || reg->getKind() == TR_VRF))
@@ -1542,8 +1277,8 @@ uint32_t OMR::X86::RegisterDependencyConditions::numReferencedGPRegisters(TR::Co
 ////////////////////////////////////////////////////////////////////////////////
 
 TR::RegisterDependencyConditions  *
-generateRegisterDependencyConditions(TR_X86RegisterDependencyIndex numPreConds,
-                                     TR_X86RegisterDependencyIndex numPostConds,
+generateRegisterDependencyConditions(uint32_t numPreConds,
+                                     uint32_t numPostConds,
                                      TR::CodeGenerator * cg)
    {
    return new (cg->trHeapMemory()) TR::RegisterDependencyConditions(numPreConds, numPostConds, cg->trMemory());
@@ -1552,8 +1287,8 @@ generateRegisterDependencyConditions(TR_X86RegisterDependencyIndex numPreConds,
 TR::RegisterDependencyConditions  *
 generateRegisterDependencyConditions(TR::Node           *node,
                                      TR::CodeGenerator  *cg,
-                                     TR_X86RegisterDependencyIndex           additionalRegDeps,
+                                     uint32_t           additionalRegDeps,
                                      List<TR::Register> *popRegisters)
    {
-   return new (cg->trHeapMemory()) TR::RegisterDependencyConditions(node, cg, additionalRegDeps, popRegisters);
+   return new (cg->trHeapMemory()) TR::RegisterDependencyConditions(node, cg, additionalRegDeps);
    }

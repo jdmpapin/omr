@@ -270,7 +270,7 @@ SimpleRegex::Simple *SimpleRegex::processSimple(char *&s, TR_YesNoMaybe allowAlt
                i = (int32_t)strlen(m->remainder->component->data.str);
                break;
             case wildcards:
-               i = m->remainder->component->data.counts >> 1;
+               i = static_cast<int32_t>(m->remainder->component->data.counts >> 1);
                break;
             case char_alternatives:
                i = 1;
@@ -373,7 +373,7 @@ bool SimpleRegex::Simple::match(const char *s, bool isCaseSensitive, bool useLoc
 
 bool SimpleRegex::Regex::match(const char *s, bool isCaseSensitive, bool useLocale)
    {
-   int32_t rc = false;
+   bool rc = false;
    for (Regex *p = this; p && !rc; p = p->remainder)
       {
       rc = p->simple->match(s, isCaseSensitive, useLocale);
@@ -393,13 +393,12 @@ bool SimpleRegex::match(const char *s, bool isCaseSensitive, bool useLocale)
 
 void SimpleRegex::print(bool negate)
    {
-   TR_VerboseLog::vlogAcquire();
+   TR_VerboseLog::CriticalSection vlogLock;
    TR_VerboseLog::write("{");
    if (negate ^ _negate)
       TR_VerboseLog::write("^");
    _regex->print();
    TR_VerboseLog::write("}");
-   TR_VerboseLog::vlogRelease();
    }
 
 
@@ -409,9 +408,8 @@ void SimpleRegex::Regex::print()
       simple->print();
    if (remainder)
       {
-      TR_VerboseLog::vlogAcquire();
+      TR_VerboseLog::CriticalSection vlogLock;
       TR_VerboseLog::write("|");
-      TR_VerboseLog::vlogRelease();
       remainder->print();
       }
    }
@@ -419,7 +417,7 @@ void SimpleRegex::Regex::print()
 
 void SimpleRegex::Simple::print()
    {
-   TR_VerboseLog::vlogAcquire();
+   TR_VerboseLog::CriticalSection vlogLock;
    int32_t i;
    switch (component->type)
       {
@@ -458,7 +456,6 @@ void SimpleRegex::Simple::print()
       }
    if (remainder)
       remainder->print();
-   TR_VerboseLog::vlogRelease();
    }
 
 

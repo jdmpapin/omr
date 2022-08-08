@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -32,16 +32,18 @@ list(APPEND OMR_PLATFORM_DEFINITIONS
 	-DZOS
 )
 
-list(APPEND OMR_PLATFORM_INCLUDE_DIRECTORIES
-	${CMAKE_SOURCE_DIR}/util/a2e/headers
-	/usr/lpp/cbclib/include
-	/usr/include
-)
+# CMake ignores any include directories which appear in IMPLICIT_INCLUDE_DIRECTORIES.
+# This causes an issue with a2e since we need to re-specify them after clearing default search path.
+list(REMOVE_ITEM CMAKE_C_IMPLICIT_INCLUDE_DIRECTORIES /usr/include)
+list(REMOVE_ITEM CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES /usr/include)
+
+# Make sure that cmake can find libelf/libdwarf headers.
+list(APPEND CMAKE_INCLUDE_PATH "/usr/lpp/cbclib/include")
 
 # Create helper targets for specifying ascii/ebcdic options
 add_library(omr_ascii INTERFACE)
 target_compile_definitions(omr_ascii INTERFACE -DIBM_ATOE)
-target_compile_options(omr_ascii INTERFACE "-Wc,convlit(ISO8859-1)")
+target_compile_options(omr_ascii INTERFACE "-Wc,convlit(ISO8859-1),nose,se(${CMAKE_CURRENT_LIST_DIR}/../../../../util/a2e/headers)")
 target_link_libraries(omr_ascii INTERFACE j9a2e)
 
 add_library(omr_ebcdic INTERFACE)
@@ -52,11 +54,6 @@ install(TARGETS omr_ascii omr_ebcdic
 )
 
 macro(omr_os_global_setup)
-	# TODO: Move this out and after platform config.
-	enable_language(ASM-ZOS)
-
-	omr_append_flags(CMAKE_ASM-ZOS_FLAGS ${OMR_PLATFORM_COMPILE_OPTIONS})
-
 	# TODO below is a chunk of the original makefile which still needs to be ported
 	# # This is the first option applied to the C++ linking command.
 	# # It is not applied to the C linking command.

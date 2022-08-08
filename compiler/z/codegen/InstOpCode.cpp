@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -59,12 +59,12 @@ OMR::Z::InstOpCode::hasBypass()
 uint32_t
 OMR::Z::InstOpCode::isAdmin()
    {
-   return (_mnemonic == RET ||
-           _mnemonic == ASSOCREGS ||
+   return (_mnemonic == retn ||
+           _mnemonic == assocreg ||
            _mnemonic == DEPEND ||
-           _mnemonic == FENCE ||
-           _mnemonic == PROC ||
-           _mnemonic == DC ||
+           _mnemonic == fence ||
+           _mnemonic == proc ||
+           _mnemonic == dd ||
            _mnemonic == DC2 ||
            _mnemonic == DCB);
    }
@@ -138,6 +138,7 @@ OMR::Z::InstOpCode::copyBinaryToBufferWithoutClear(uint8_t *cursor, TR::InstOpCo
         case VRRg_FORMAT:
         case VRRh_FORMAT:
         case VRRi_FORMAT:
+        case VRRk_FORMAT:
         case VRSa_FORMAT:
         case VRSb_FORMAT:
         case VRSc_FORMAT:
@@ -296,7 +297,7 @@ OMR::Z::InstOpCode::getEquivalentLongDisplacementMnemonic(TR::InstOpCode::Mnemon
       case TR::InstOpCode::CDS:
          return TR::InstOpCode::CDSY;
       default:
-         return TR::InstOpCode::BAD;
+         return TR::InstOpCode::bad;
       }
    }
 
@@ -380,6 +381,9 @@ OMR::Z::InstOpCode::getAddLogicalThreeRegOpCode() { return TR::comp()->target().
 
 TR::InstOpCode::Mnemonic
 OMR::Z::InstOpCode::getAddLogicalImmOpCode() { return TR::comp()->target().is64Bit() ? TR::InstOpCode::ALGFI : TR::InstOpCode::ALFI; }
+
+TR::InstOpCode::Mnemonic
+OMR::Z::InstOpCode::getAddImmOpCode() { return TR::comp()->target().is64Bit() ? TR::InstOpCode::AGFI : TR::InstOpCode::AFI; }
 
 TR::InstOpCode::Mnemonic
 OMR::Z::InstOpCode::getAddLogicalRegRegImmediateOpCode() { return TR::comp()->target().is64Bit() ? TR::InstOpCode::ALGHSIK : TR::InstOpCode::ALHSIK; }
@@ -564,7 +568,7 @@ OMR::Z::InstOpCode::getLoadRegOpCodeFromNode(TR::CodeGenerator *cg, TR::Node *no
 TR::InstOpCode::Mnemonic
 OMR::Z::InstOpCode::getMoveHalfWordImmOpCodeFromStoreOpCode(TR::InstOpCode::Mnemonic storeOpCode)
    {
-   TR::InstOpCode::Mnemonic mvhiOpCode = TR::InstOpCode::BAD;
+   TR::InstOpCode::Mnemonic mvhiOpCode = TR::InstOpCode::bad;
    if (storeOpCode == TR::InstOpCode::ST)
       mvhiOpCode = TR::InstOpCode::MVHI;
    else if (storeOpCode == TR::InstOpCode::STG)

@@ -26,6 +26,7 @@
 #include "gcutils.h"
 
 #include "ConcurrentGCStats.hpp"
+#include "ConcurrentMarkPhaseStats.hpp"
 #include "CycleState.hpp"
 #include "EnvironmentBase.hpp"
 #include "GCExtensionsBase.hpp"
@@ -243,6 +244,25 @@ MM_VerboseHandlerOutputStandard::getCycleType(uintptr_t type)
 	return cycleType;
 }
 
+const char *
+MM_VerboseHandlerOutputStandard::getConcurrentTypeString(uintptr_t type)
+{
+	const char* cycleType = NULL;
+	switch (type) {
+	case OMR_GC_CYCLE_TYPE_GLOBAL:
+		cycleType = "global mark";
+		break;
+	case OMR_GC_CYCLE_TYPE_SCAVENGE:
+		cycleType = "scavenge";
+		break;
+	default:
+		cycleType = "unknown";
+		break;
+	}
+
+	return cycleType;
+}
+
 void
 MM_VerboseHandlerOutputStandard::handleGCOPStanza(MM_EnvironmentBase* env, const char *type, uintptr_t contextID, uint64_t duration, bool deltaTimeSuccess)
 {
@@ -258,30 +278,6 @@ MM_VerboseHandlerOutputStandard::handleGCOPStanza(MM_EnvironmentBase* env, const
 	getTagTemplate(tagTemplate, sizeof(tagTemplate), manager->getIdAndIncrement(), type ,contextID, duration, omrtime_current_time_millis());
 	writer->formatAndOutput(env, 0, "<gc-op %s />", tagTemplate);
 	writer->flush(env);
-}
-
-void
-MM_VerboseHandlerOutputStandard::handleGCOPOuterStanzaStart(MM_EnvironmentBase* env, const char *type, uintptr_t contextID, uint64_t duration, bool deltaTimeSuccess)
-{
-	MM_VerboseManager* manager = getManager();
-	MM_VerboseWriterChain* writer = manager->getWriterChain();
-	OMRPORT_ACCESS_FROM_OMRPORT(env->getPortLibrary());
-
-	if (!deltaTimeSuccess) {
-		writer->formatAndOutput(env, 0, "<warning details=\"clock error detected, following timing may be inaccurate\" />");
-	}
-
-	char tagTemplate[200];
-	getTagTemplate(tagTemplate, sizeof(tagTemplate), manager->getIdAndIncrement(), type ,contextID, duration, omrtime_current_time_millis());
-	writer->formatAndOutput(env, 0, "<gc-op %s>", tagTemplate);
-}
-
-void
-MM_VerboseHandlerOutputStandard::handleGCOPOuterStanzaEnd(MM_EnvironmentBase* env)
-{
-	MM_VerboseManager* manager = getManager();
-	MM_VerboseWriterChain* writer = manager->getWriterChain();
-	writer->formatAndOutput(env, 0, "</gc-op>");
 }
 
 void
@@ -409,7 +405,7 @@ MM_VerboseHandlerOutputStandard::handleScavengeEndNoLock(J9HookInterface** hook,
 	MM_ScavengerStats *cycleScavengerStats = &extensions->scavengerStats;
 	OMRPORT_ACCESS_FROM_OMRPORT(env->getPortLibrary());
 	uint64_t duration = 0;
-	bool deltaTimeSuccess = getTimeDeltaInMicroSeconds(&duration, scavengerStats->_startTime, scavengerStats->_endTime);
+	bool deltaTimeSuccess = getTimeDeltaInMicroSeconds(&duration, event->incrementStartTime, event->incrementEndTime);
 
 	handleGCOPOuterStanzaStart(env, "scavenge", env->_cycleState->_verboseContextID, duration, deltaTimeSuccess);
 
@@ -468,19 +464,25 @@ MM_VerboseHandlerOutputStandard::handleScavengeEnd(J9HookInterface** hook, uintp
 }
 
 void
-MM_VerboseHandlerOutputStandard::handleConcurrentGCOpEnd(J9HookInterface** hook, uintptr_t eventNum, void* eventData)
+MM_VerboseHandlerOutputStandard::handleConcurrentEndInternal(J9HookInterface** hook, uintptr_t eventNum, void* eventData)
 {
-	/* convert event from concurrent-end to scavenge-end */
-	MM_ScavengeEndEvent scavengeEndEvent;
 	MM_ConcurrentPhaseEndEvent *event = (MM_ConcurrentPhaseEndEvent *)eventData;
+	MM_ConcurrentPhaseStatsBase *stats = (MM_ConcurrentPhaseStatsBase *)event->concurrentStats;
+	if (OMR_GC_CYCLE_TYPE_GLOBAL == stats->_concurrentCycleType) {
+		handleConcurrentMarkEnd(hook, J9HOOK_MM_PRIVATE_CONCURRENT_PHASE_END, eventData);
+	} else if (OMR_GC_CYCLE_TYPE_SCAVENGE == stats->_concurrentCycleType) {
+		/* convert event from concurrent-end to scavenge-end */
+		MM_ScavengeEndEvent scavengeEndEvent;
+		scavengeEndEvent.currentThread = event->currentThread;
+		scavengeEndEvent.timestamp = event->timestamp;
+		scavengeEndEvent.eventid = event->eventid;
+		scavengeEndEvent.subSpace = NULL; //unknown info
+		scavengeEndEvent.cycleEnd = false;
+		scavengeEndEvent.incrementStartTime = stats->_startTime;
+		scavengeEndEvent.incrementEndTime = stats->_endTime;
 
-	scavengeEndEvent.currentThread = event->currentThread;
-	scavengeEndEvent.timestamp = event->timestamp;
-	scavengeEndEvent.eventid = event->eventid;
-	scavengeEndEvent.subSpace = NULL; //unknown info
-	scavengeEndEvent.cycleEnd = false;
-
-	handleScavengeEndNoLock(hook, J9HOOK_MM_PRIVATE_SCAVENGE_END, &scavengeEndEvent);
+		handleScavengeEndNoLock(hook, J9HOOK_MM_PRIVATE_SCAVENGE_END, &scavengeEndEvent);
+	}
 }
 
 
@@ -519,6 +521,32 @@ MM_VerboseHandlerOutputStandard::handleScavengePercolateInternal(MM_EnvironmentB
 
 #if defined(OMR_GC_MODRON_CONCURRENT_MARK)
 void
+MM_VerboseHandlerOutputStandard::handleConcurrentMarkEnd(J9HookInterface** hook, uintptr_t eventNum, void* eventData)
+{
+	MM_ConcurrentPhaseEndEvent *event = (MM_ConcurrentPhaseEndEvent *)eventData;
+	MM_ConcurrentMarkPhaseStats *stats = (MM_ConcurrentMarkPhaseStats *)event->concurrentStats;
+	MM_ConcurrentGCStats *collectionStats = stats->_collectionStats;
+	MM_EnvironmentBase* env = MM_EnvironmentBase::getEnvironment(event->currentThread);
+	MM_VerboseWriterChain* writer = _manager->getWriterChain();
+
+	uint64_t duration = 0;
+	bool deltaTimeSuccess = getTimeDeltaInMicroSeconds(&duration, stats->_startTime, stats->_endTime);
+
+	handleGCOPOuterStanzaStart(env, "trace", stats->_cycleID, duration, deltaTimeSuccess);
+	writer->formatAndOutput(env, 1, "<trace bytesTraced=\"%zu\" workStackOverflowCount=\"%zu\" />", (collectionStats->getConHelperTraceSizeCount() + collectionStats->getTraceSizeCount()), collectionStats->getConcurrentWorkStackOverflowCount());
+	if (NULL != stats->_cardTableStats) {
+		if (0 == stats->_cardTableStats->getConcurrentCleanedCards()) {
+			writer->formatAndOutput(env, 1, "<card-cleaning bytesTraced=\"%zu\" cardsCleaned=\"%zu\" />", (collectionStats->getConHelperCardCleanCount() + collectionStats->getCardCleanCount()), stats->_cardTableStats->getConcurrentCleanedCards());
+		} else {
+			const char* cardCleaningReasonString = getCardCleaningReasonString(collectionStats->getCardCleaningReason());
+			writer->formatAndOutput(env, 1, "<card-cleaning reason=\"%s\" bytesTraced=\"%zu\" cardsCleaned=\"%zu\" />", cardCleaningReasonString, (collectionStats->getConHelperCardCleanCount() + collectionStats->getCardCleanCount()), stats->_cardTableStats->getConcurrentCleanedCards());
+		}
+	}
+	handleGCOPOuterStanzaEnd(env);
+	writer->flush(env);
+}
+
+void
 MM_VerboseHandlerOutputStandard::handleConcurrentRememberedSetScanEnd(J9HookInterface** hook, uintptr_t eventNum, void* eventData)
 {
 	MM_ConcurrentRememberedSetScanEndEvent* event = (MM_ConcurrentRememberedSetScanEndEvent*)eventData;
@@ -546,6 +574,25 @@ void
 MM_VerboseHandlerOutputStandard::handleConcurrentRememberedSetScanEndInternal(MM_EnvironmentBase *env, void *eventData)
 {
 	/* Empty stub */
+}
+
+const char *
+MM_VerboseHandlerOutputStandard::getCardCleaningReasonString(uintptr_t type)
+{
+	const char* cardCleaningReasonString = NULL;
+	switch (type) {
+	case TRACING_COMPLETED:
+		cardCleaningReasonString = "tracing completed";
+		break;
+	case CARD_CLEANING_THRESHOLD_REACHED:
+		cardCleaningReasonString = "card cleaning threshold reached";
+		break;
+	default:
+		cardCleaningReasonString = "unknown";
+		break;
+	}
+
+	return cardCleaningReasonString;
 }
 
 void
@@ -692,7 +739,12 @@ MM_VerboseHandlerOutputStandard::handleConcurrentHalted(J9HookInterface** hook, 
 			event->traceTarget, event->tracedTotal,
 			event->tracedByMutators, event->tracedByHelpers,
 			event->traceTarget == 0 ? 0 : (uintptr_t)(((uint64_t)event->tracedTotal * 100) / (uint64_t)event->traceTarget));
-	writer->formatAndOutput(env, 1, "<cards cleaned=\"%zu\" thresholdBytes=\"%zu\" />", event->cardsCleaned, event->cardCleaningThreshold);
+
+	/* Temp check while SATB and incremental share Verbose Handler */
+	if (UDATA_MAX != event->cardsCleaned) {
+		writer->formatAndOutput(env, 1, "<cards cleaned=\"%zu\" thresholdBytes=\"%zu\" />", event->cardsCleaned, event->cardCleaningThreshold);
+	}
+
 	writer->formatAndOutput(env, 0, "</concurrent-halted>");
 	writer->flush(env);
 
@@ -732,29 +784,16 @@ MM_VerboseHandlerOutputStandard::handleConcurrentCollectionStart(J9HookInterface
 		previousTime = manager->getInitializedTime();
 	}
 	uint64_t deltaTime = omrtime_hires_delta(previousTime, currentTime, OMRPORT_TIME_DELTA_IN_MICROSECONDS);
-	const char* cardCleaningReasonString = "unknown";
-
-	switch (event->cardCleaningReason) {
-	case TRACING_COMPLETED:
-		cardCleaningReasonString = "tracing completed";
-		break;
-	case CARD_CLEANING_THRESHOLD_REACHED:
-		cardCleaningReasonString = "card cleaning threshold reached";
-		break;
-	}
 
 	char tagTemplate[200];
 	enterAtomicReportingBlock();
 	getTagTemplate(tagTemplate, sizeof(tagTemplate), manager->getIdAndIncrement(), event->contextid, omrtime_current_time_millis());
 	writer->formatAndOutput(env, 0, "<concurrent-global-final %s intervalms=\"%llu.%03llu\" >",
 		tagTemplate, deltaTime / 1000, deltaTime % 1000);
-	writer->formatAndOutput(env, 1, "<concurrent-trace-info reason=\"%s\" tracedByMutators=\"%zu\" tracedByHelpers=\"%zu\" cardsCleaned=\"%zu\" workStackOverflowCount=\"%zu\" />",
-		cardCleaningReasonString, event->tracedByMutators, event->tracedByHelpers, event->cardsCleaned, event->workStackOverflowCount);
+	handleConcurrentCollectionStartInternal(env, eventData);
   	writer->formatAndOutput(env, 0, "</concurrent-global-final>");
 
 	writer->flush(env);
-
-	handleConcurrentCollectionStartInternal(env, eventData);
 
 	exitAtomicReportingBlock();
 }
@@ -762,7 +801,19 @@ MM_VerboseHandlerOutputStandard::handleConcurrentCollectionStart(J9HookInterface
 void
 MM_VerboseHandlerOutputStandard::handleConcurrentCollectionStartInternal(MM_EnvironmentBase *env, void* eventData)
 {
-	/* Empty stub */
+	MM_ConcurrentCollectionStartEvent* event = (MM_ConcurrentCollectionStartEvent*)eventData;
+	MM_VerboseWriterChain* writer = getManager()->getWriterChain();
+
+	/* Temp check while SATB and incremental share Verbose Handler */
+	if (UDATA_MAX != event->cardsCleaned) {
+		const char* cardCleaningReasonString = getCardCleaningReasonString(event->cardCleaningReason);
+
+		writer->formatAndOutput(env, 1, "<concurrent-trace-info reason=\"%s\" tracedByMutators=\"%zu\" tracedByHelpers=\"%zu\" cardsCleaned=\"%zu\" workStackOverflowCount=\"%zu\" />",
+			cardCleaningReasonString, event->tracedByMutators, event->tracedByHelpers, event->cardsCleaned, event->workStackOverflowCount);
+	} else {
+		writer->formatAndOutput(env, 1, "<concurrent-trace-info tracedByMutators=\"%zu\" tracedByHelpers=\"%zu\" workStackOverflowCount=\"%zu\" />",
+					 event->tracedByMutators, event->tracedByHelpers, event->workStackOverflowCount);
+	}
 }
 
 void

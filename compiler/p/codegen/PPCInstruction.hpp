@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -320,7 +320,7 @@ class PPCLabelInstruction : public TR::Instruction
       }
 
    virtual Kind getKind() { return IsLabel; }
-   virtual bool isPatchBarrier() { return getOpCodeValue() == TR::InstOpCode::label && _symbol && _symbol->isTargeted() != TR_no; }
+   virtual bool isPatchBarrier(TR::CodeGenerator *cg) { return getOpCodeValue() == TR::InstOpCode::label && _symbol && _symbol->isTargeted(cg) != TR_no; }
 
    TR::LabelSymbol *getLabelSymbol() {return _symbol;}
    TR::LabelSymbol *setLabelSymbol(TR::LabelSymbol *sym)
@@ -589,8 +589,6 @@ class PPCAdminInstruction : public TR::Instruction
 
    virtual TR::Instruction *expandInstruction();
    virtual int32_t estimateBinaryLength(int32_t currentEstimate);
-
-   bool isDebugFence()      {return (_fenceNode!=NULL && _fenceNode->getOpCodeValue() == TR::dbgFence); }
 
    TR::Node * getFenceNode() { return _fenceNode; }
 
@@ -1464,7 +1462,7 @@ class PPCVirtualGuardNOPInstruction : public PPCDepLabelInstruction
                                     TR::RegisterDependencyConditions *cond,
                                     TR::LabelSymbol                  *label,
                                     TR::CodeGenerator               *codeGen)
-      : PPCDepLabelInstruction(TR::InstOpCode::vgdnop, node, label, cond, codeGen), _site(site) {}
+      : PPCDepLabelInstruction(TR::InstOpCode::vgnop, node, label, cond, codeGen), _site(site) {}
 
    PPCVirtualGuardNOPInstruction(TR::Node                        *node,
                                     TR_VirtualGuardSite     *site,
@@ -1472,7 +1470,7 @@ class PPCVirtualGuardNOPInstruction : public PPCDepLabelInstruction
                                     TR::LabelSymbol                  *label,
                                     TR::Instruction                 *precedingInstruction,
                                     TR::CodeGenerator               *codeGen)
-      : PPCDepLabelInstruction(TR::InstOpCode::vgdnop, node, label, cond, precedingInstruction, codeGen), _site(site) {}
+      : PPCDepLabelInstruction(TR::InstOpCode::vgnop, node, label, cond, precedingInstruction, codeGen), _site(site) {}
 
    virtual Kind getKind() { return IsVirtualGuardNOP; }
 

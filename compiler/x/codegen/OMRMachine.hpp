@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -39,7 +39,7 @@ namespace OMR { typedef OMR::X86::Machine MachineConnector; }
 #include "env/TRMemory.hpp"
 #include "il/DataTypes.hpp"
 #include "infra/Assert.hpp"
-#include "x/codegen/X86Ops.hpp"
+#include "codegen/InstOpCode.hpp"
 #include "x/codegen/X86Register.hpp"
 #include "infra/TRlist.hpp"
 class TR_BackingStore;
@@ -119,7 +119,7 @@ class OMR_EXTENSIBLE Machine : public OMR::Machine
 
    List<TR::Register>      *_spilledRegistersList;
 
-   TR::SymbolReference     *_dummyLocal[TR::NumTypes];
+   TR::SymbolReference     *_dummyLocal[TR::NumAllTypes];
 
    int32_t                 _fpStackShape[TR_X86FPStackRegister::NumRegisters];
    int32_t                 _fpTopOfStack;
@@ -142,6 +142,7 @@ class OMR_EXTENSIBLE Machine : public OMR::Machine
    void installRegisterFile(TR::RealRegister **registerFileCopy);
    TR::Register **captureRegisterAssociations();
    TR::list<TR::Register*> *captureSpilledRegistersList();
+   uint32_t maxAssignableRegisters();
 
    void purgeDeadRegistersFromRegisterFile();
    void adjustRegisterUseCountsUp(TR::list<OMR::RegisterUsage *> *rul, bool adjustFuture);
@@ -211,8 +212,8 @@ class OMR_EXTENSIBLE Machine : public OMR::Machine
    // Methods to support the IA32 floating point register stack.
    //
 
-   TR_X86OpCodes fpDeterminePopOpCode(TR_X86OpCodes op);
-   TR_X86OpCodes fpDetermineReverseOpCode(TR_X86OpCodes op);
+   TR::InstOpCode::Mnemonic fpDeterminePopOpCode(TR::InstOpCode::Mnemonic op);
+   TR::InstOpCode::Mnemonic fpDetermineReverseOpCode(TR::InstOpCode::Mnemonic op);
 
    TR::MemoryReference  *getDummyLocalMR(TR::DataType dt);
 
@@ -253,7 +254,6 @@ class OMR_EXTENSIBLE Machine : public OMR::Machine
    void fpStackPush(TR::Register *virtReg);
    void fpStackCoerce(TR::Register *virtReg, int32_t location);
    TR::Register *fpStackPop();
-   void popEntireStack();
 
    TR::Instruction  *fpStackFXCH(TR::Instruction *currentInstruction,
                                    TR::Register    *virtReg,
@@ -300,8 +300,9 @@ class OMR_EXTENSIBLE Machine : public OMR::Machine
    TR_GlobalRegisterNumber getLastGlobalFPRRegisterNumber()
       {return _numGlobalGPRs + _numGlobalFPRs - 1;}
 
+
    TR::RegisterDependencyConditions  *createDepCondForLiveGPRs();
-   TR::RegisterDependencyConditions  *createCondForLiveAndSpilledGPRs(bool cleanRegState, TR::list<TR::Register*> *spilledRegisterList = NULL);
+   TR::RegisterDependencyConditions  *createCondForLiveAndSpilledGPRs(TR::list<TR::Register*> *spilledRegisterList = NULL);
 
 #if defined(DEBUG)
    void printGPRegisterStatus(TR_FrontEnd *, TR::RealRegister **registerFile, TR::FILE *pOutFile);

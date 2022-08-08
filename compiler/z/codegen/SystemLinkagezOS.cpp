@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2020 IBM Corp. and others
+ * Copyright (c) 2019, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -199,7 +199,7 @@ TR::S390zOSSystemLinkage::createEpilogue(TR::Instruction * cursor)
 
    TR::Node* node = cursor->getNext()->getNode();
 
-   cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::LABEL, node, generateLabelSymbol(cg()), cursor);
+   cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::label, node, generateLabelSymbol(cg()), cursor);
 
    cursor = fillFPRsInEpilogue(node, cursor);
    cursor = fillGPRsInEpilogue(node, cursor);
@@ -258,18 +258,18 @@ void TR::S390zOSSystemLinkage::createPrologue(TR::Instruction* cursor)
 
    // Emit the Entry Point Marker
    _entryPointMarkerLabel = generateLabelSymbol(cg);
-   cursor = generateS390LabelInstruction(cg, InstOpCode::LABEL, node, _entryPointMarkerLabel, cursor);
+   cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, _entryPointMarkerLabel, cursor);
 
    // "C.E.E.1."
-   cursor = generateDataConstantInstruction(cg, TR::InstOpCode::DC, node, 0x00C300C5, cursor);
-   cursor = generateDataConstantInstruction(cg, TR::InstOpCode::DC, node, 0x00C500F1, cursor);
-   cursor = generateDataConstantInstruction(cg, TR::InstOpCode::DC, node, 0x00000000, cursor);
+   cursor = generateDataConstantInstruction(cg, TR::InstOpCode::dd, node, 0x00C300C5, cursor);
+   cursor = generateDataConstantInstruction(cg, TR::InstOpCode::dd, node, 0x00C500F1, cursor);
+   cursor = generateDataConstantInstruction(cg, TR::InstOpCode::dd, node, 0x00000000, cursor);
 
    cg->addRelocation(new (cg->trHeapMemory()) InstructionLabelRelative32BitRelocation(cursor, -8, _ppa1Snippet->getSnippetLabel(), 1));
 
    // DSA size is the frame size aligned to 32-bytes which means it's least significant 5 bits are zero and are used to
    // represent the flags which are always 0 for OMR as we do not support leaf frames or direct calls to alloca()
-   cursor = generateDataConstantInstruction(cg, TR::InstOpCode::DC, node, stackFrameSize, cursor);
+   cursor = generateDataConstantInstruction(cg, TR::InstOpCode::dd, node, stackFrameSize, cursor);
 
    cursor = cursor->getNext();
 
@@ -329,7 +329,7 @@ TR::S390zOSSystemLinkage::setParameterLinkageRegisterIndex(TR::ResolvedMethodSym
                {
                lri = numFPRArgs;
                }
-            
+
             // On 64-bit XPLINK floating point arguments leave "holes" in the GPR linkage registers, but not vice versa
             numGPRArgs++;
             numFPRArgs++;
@@ -342,25 +342,26 @@ TR::S390zOSSystemLinkage::setParameterLinkageRegisterIndex(TR::ResolvedMethodSym
             break;
             }
 
-         case TR::VectorInt8:
-         case TR::VectorInt16:
-         case TR::VectorInt32:
-         case TR::VectorInt64:
-         case TR::VectorDouble:
-            {
-            if (numVRFArgs < getNumVectorArgumentRegisters())
-               {
-               lri = numVRFArgs;
-               }
-            
-            // On 64-bit XPLINK floating point arguments leave "holes" in the GPR linkage registers, but not vice versa
-            numGPRArgs++;
-            numVRFArgs++;
-            break;
-            }
-
          default:
             {
+            if (paramCursor->getDataType().isVector())
+               {
+               TR::DataType elementType = paramCursor->getDataType().getVectorElementType();
+               if (elementType == TR::Int8 || elementType == TR::Int16 ||
+                   elementType == TR::Int32 || elementType == TR::Int64 || elementType == TR::Double)
+                  {
+                  if (numVRFArgs < getNumVectorArgumentRegisters())
+                     {
+                     lri = numVRFArgs;
+                     }
+
+                  // On 64-bit XPLINK floating point arguments leave "holes" in the GPR linkage registers, but not vice versa
+                  numGPRArgs++;
+                  numVRFArgs++;
+                  break;
+                  }
+               }
+
             TR_ASSERT_FATAL(false, "Unknown data type %s", paramCursor->getDataType().toString());
             break;
             }
@@ -455,24 +456,9 @@ TR::S390zOSSystemLinkage::callNativeFunction(TR::Node * callNode, TR::RegisterDe
       case TR::dcalli:
       case TR::fcall:
       case TR::dcall:
-#if defined(SUPPORT_DFP) && defined(J9_PROJECT_SPECIFIC)
-      case TR::dfcalli:
-      case TR::ddcalli:
-      case TR::dfcall:
-      case TR::ddcall:
-#endif
          retReg = deps->searchPostConditionRegister(getFloatReturnRegister());
          returnRegister = retReg;
          break;
-#if defined(SUPPORT_DFP) && defined(J9_PROJECT_SPECIFIC)
-      case TR::decall:
-      case TR::decalli:
-         highReg = deps->searchPostConditionRegister(getLongDoubleReturnRegister0());
-         lowReg = deps->searchPostConditionRegister(getLongDoubleReturnRegister2());
-         retReg = codeGen->allocateFPRegisterPair(lowReg, highReg);
-         returnRegister = retReg;
-         break;
-#endif
       case TR::calli:
       case TR::call:
          retReg = NULL;
@@ -550,7 +536,7 @@ TR::S390zOSSystemLinkage::generateInstructionsForCall(TR::Node * callNode, TR::R
     //             a) disp is an offset in the environment (aka ADA) containing the
     //                function descriptor body (i.e. not pointer to function descriptor)
     TR_XPLinkCallTypes callType;
-    
+
     TR::Register* aeReg = deps->searchPostConditionRegister(getENVPointerRegister());
     TR::Register* epReg = deps->searchPostConditionRegister(getEntryPointRegister());
     TR::Register* raReg = deps->searchPostConditionRegister(getReturnAddressRegister());
@@ -598,13 +584,13 @@ TR::S390zOSSystemLinkage::generateInstructionsForCall(TR::Node * callNode, TR::R
        callType = TR_XPLinkCallType_BRASL7;
        }
 
-    auto cursor = generateS390LabelInstruction(cg(), InstOpCode::LABEL, callNode, returnFromJNICallLabel);
+    auto cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::label, callNode, returnFromJNICallLabel);
 
     genCallNOPAndDescriptor(cursor, callNode, callNode, callType);
 
     // Append post-dependencies after NOP
     TR::LabelSymbol* depsLabel = generateLabelSymbol(cg());
-    generateS390LabelInstruction(cg(), InstOpCode::LABEL, callNode, depsLabel, postDeps);
+    generateS390LabelInstruction(cg(), TR::InstOpCode::label, callNode, depsLabel, postDeps);
 }
 TR::LabelSymbol*
 TR::S390zOSSystemLinkage::getEntryPointMarkerLabel() const
@@ -636,15 +622,15 @@ TR::S390zOSSystemLinkage::genCallNOPAndDescriptor(TR::Instruction* cursor, TR::N
    if (comp()->target().is32Bit())
       {
       // The XPLINK Call Descriptor is created only on 31-bit targets when:
-      // 
+      //
       // 1. The call site is so far removed from the Entry Point Marker of the function that its offset cannot be contained
       // in the space available in the call NOP descriptor following the call site.
-      // 
+      //
       // 2. The call contains a return value or parameters that are passed in registers or in ways incompatible with non-
       // XPLINK code.
-      // 
+      //
       // The XPLINK Call Descriptor has the following format:
-      // 
+      //
       //                                        0x01                               0x02                               0x03
       // 0x00 +----------------------------------+----------------------------------+----------------------------------+----------------------------------+
       //      | Signed offset, in bytes, to Entry Point Marker (if it exists)                                                                             |
@@ -660,18 +646,18 @@ TR::S390zOSSystemLinkage::genCallNOPAndDescriptor(TR::Instruction* cursor, TR::N
       TR::LabelSymbol* xplinkCallDescriptorEndLabel = generateLabelSymbol(cg());
 
       uint32_t nopDescriptor = 0x47000000 | (static_cast<uint32_t>(callType) << 16);
-      cursor = generateDataConstantInstruction(cg(), TR::InstOpCode::DC, node, nopDescriptor, cursor);
+      cursor = generateDataConstantInstruction(cg(), TR::InstOpCode::dd, node, nopDescriptor, cursor);
 
       cg()->addRelocation(new (cg()->trHeapMemory()) XPLINKCallDescriptorRelocation(cursor, xplinkCallDescriptorBeginLabel));
 
       cursor = generateS390BranchInstruction(cg(), InstOpCode::BRC, InstOpCode::COND_BRC, node, xplinkCallDescriptorEndLabel, cursor);
       cursor = generateAlignmentNopInstruction(cg(), node, 8, cursor);
-      cursor = generateS390LabelInstruction(cg(), InstOpCode::LABEL, node, xplinkCallDescriptorBeginLabel, cursor);
-      cursor = generateDataConstantInstruction(cg(), TR::InstOpCode::DC, node, 0x00000000, cursor);
+      cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::label, node, xplinkCallDescriptorBeginLabel, cursor);
+      cursor = generateDataConstantInstruction(cg(), TR::InstOpCode::dd, node, 0x00000000, cursor);
 
       uint32_t callDescriptorValue = generateCallDescriptorValue(callNode);
-      cursor = generateDataConstantInstruction(cg(), TR::InstOpCode::DC, node, callDescriptorValue, cursor);
-      cursor = generateS390LabelInstruction(cg(), InstOpCode::LABEL, node, xplinkCallDescriptorEndLabel, cursor);
+      cursor = generateDataConstantInstruction(cg(), TR::InstOpCode::dd, node, callDescriptorValue, cursor);
+      cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::label, node, xplinkCallDescriptorEndLabel, cursor);
       }
    else
       {
@@ -810,16 +796,8 @@ TR::S390zOSSystemLinkage::generateCallDescriptorValue(TR::Node* callNode)
             {
             case TR::Float:
             case TR::Double:
-#ifdef J9_PROJECT_SPECIFIC
-            case TR::DecimalFloat:
-            case TR::DecimalDouble:
-#endif
                numFPRsNeeded = 1;
                break;
-#ifdef J9_PROJECT_SPECIFIC
-            case TR::DecimalLongDouble:
-               break;
-#endif
             }
 
          if (numFPRsNeeded != 0)
@@ -1091,7 +1069,7 @@ TR::S390zOSSystemLinkage::spillGPRsInPrologue(TR::Node* node, TR::Instruction* c
                   getRealRegister(REGNUM(lastSaved + TR::RealRegister::FirstGPR)), rsa, cursor);
 
           _stackPointerUpdateLabel = generateLabelSymbol(cg());
-          cursor = generateS390LabelInstruction(cg(), InstOpCode::LABEL, node, _stackPointerUpdateLabel, cursor);
+          cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::label, node, _stackPointerUpdateLabel, cursor);
 
           // AHI R4,-stackFrameSize
           cursor = addImmediateToRealRegister(spReg, (stackFrameSize) * -1, NULL, node, cursor);
@@ -1118,7 +1096,7 @@ TR::S390zOSSystemLinkage::spillGPRsInPrologue(TR::Node* node, TR::Instruction* c
                 }
 
              _stackPointerUpdateLabel = generateLabelSymbol(cg());
-             cursor = generateS390LabelInstruction(cg(), InstOpCode::LABEL, node, _stackPointerUpdateLabel, cursor);
+             cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::label, node, _stackPointerUpdateLabel, cursor);
 
              cursor = addImmediateToRealRegister(spReg, (stackFrameSize) * -1, gpr3Real, node, cursor);  // R4 <- R4 - stack size
 
@@ -1140,7 +1118,7 @@ TR::S390zOSSystemLinkage::spillGPRsInPrologue(TR::Node* node, TR::Instruction* c
                 cursor = generateRRInstruction(cg(), TR::InstOpCode::getLoadRegOpCode(), node, gpr0Real, spReg, cursor);
 
              _stackPointerUpdateLabel = generateLabelSymbol(cg());
-             cursor = generateS390LabelInstruction(cg(), InstOpCode::LABEL, node, _stackPointerUpdateLabel, cursor);
+             cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::label, node, _stackPointerUpdateLabel, cursor);
 
              cursor = addImmediateToRealRegister(spReg, (stackFrameSize) * -1, NULL, node, cursor);
              }
@@ -1251,7 +1229,7 @@ TR::S390zOSSystemLinkage::spillGPRsInPrologue(TR::Node* node, TR::Instruction* c
           //------------------------------
 
           // STM rx,ry,disp(R4)
-          cursor = generateS390LabelInstruction(cg(), InstOpCode::LABEL, node, stmLabel, cursor);
+          cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::label, node, stmLabel, cursor);
 
           rsaOffset =  offsetToRegSaveArea + offsetToFirstSavedReg;
           rsa = generateS390MemoryReference(spReg, rsaOffset, cg());

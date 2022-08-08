@@ -72,7 +72,9 @@ TR_FieldPrivatizer::TR_FieldPrivatizer(TR::OptimizationManager *manager)
      _privatizedFieldSymRefs(manager->trMemory(), stackAlloc),
      _privatizedRegCandidates(manager->trMemory()),
      _appendCalls(manager->trMemory()),
-     _privatizedFieldNodes(manager->trMemory())
+     _privatizedFieldNodes(manager->trMemory()),
+     _subtreeCheckedForSpecialConditions(manager->comp()),
+     _subtreeHasSpecialCondition(manager->comp())
    {
    }
 
@@ -163,7 +165,6 @@ int32_t TR_FieldPrivatizer::detectCanonicalizedPredictableLoops(TR_Structure *lo
          return 0;
 
    TR::Block * loopEntryBlock = regionStructure->getEntryBlock();
-   TR::CFGEdge * predecessor;
    for(auto predecessor = loopEntryBlock->getPredecessors().begin(); predecessor != loopEntryBlock->getPredecessors().end(); ++predecessor)
       {
         TR::Block * predBlock = toBlock((*predecessor)->getFrom());
@@ -413,6 +414,58 @@ int32_t TR_FieldPrivatizer::detectCanonicalizedPredictableLoops(TR_Structure *lo
 
 
 
+bool TR_FieldPrivatizer::subtreeHasSpecialCondition(TR::Node *node)
+   {
+   bool hasSpecialCondition = false;
+
+   if (_subtreeCheckedForSpecialConditions.contains(node))
+      {
+      hasSpecialCondition = _subtreeHasSpecialCondition.contains(node);
+      }
+   else
+      {
+      TR::ILOpCodes opCode = node->getOpCodeValue();
+
+      if (opCode == TR::instanceof)
+         {
+         hasSpecialCondition = true;
+         }
+      else if (opCode == TR::acmpeq || opCode == TR::acmpne || opCode == TR::ifacmpeq || opCode == TR::ifacmpne)
+         {
+         TR::Node *leftChild = node->getFirstChild();
+         TR::Node *rightChild = node->getSecondChild();
+
+         if ((leftChild->getOpCodeValue() == TR::aconst && leftChild->getAddress() == 0)
+             || (rightChild->getOpCodeValue() == TR::aconst && rightChild->getAddress() == 0))
+            {
+            hasSpecialCondition = true;
+            }
+         }
+      else
+         {
+         for (int i = 0; i < node->getNumChildren(); i++)
+            {
+            if (subtreeHasSpecialCondition(node->getChild(i)))
+               {
+               hasSpecialCondition = true;
+               }
+            }
+         }
+
+      _subtreeCheckedForSpecialConditions.add(node);
+
+      if (hasSpecialCondition)
+         {
+         _subtreeHasSpecialCondition.add(node);
+         }
+      }
+
+   return hasSpecialCondition;
+   }
+
+
+
+
 
 bool TR_FieldPrivatizer::containsEscapePoints(TR_Structure *structure, bool &containsStringPeephole)
    {
@@ -428,8 +481,30 @@ bool TR_FieldPrivatizer::containsEscapePoints(TR_Structure *structure, bool &con
          {
          TR::Node *currentNode = currentTree->getNode();
 
-         if (currentNode->exceptionsRaised())
+         // Check for situations that can be a problem for privatization:
+         //
+         //   (1) Exceptions that might be thrown
+         //   (2) Certain conditions that are being checked, as they might be
+         //       used to guard access of a field that might not be valid in any
+         //       particular execution of the loop.  The only conditions checked
+         //       for currently are inlined method guards, instanceof tests and
+         //       comparisons to null.
+         //
+         // N.B., checking for inline guards, instanceof and null comparisons
+         // helps to avoid some potential errors in privatization temporarily,
+         // but a more general, correct, solution needs to replace this -
+         // one that proves the type of the object whose fields might be
+         // privatized must be of the expected type in the loop, and that
+         // ensures any conditional access in the original loop is handled
+         // correctly.  This follow on work will be performed under OMR issue
+         // <https://github.com/eclipse/omr/issues/6199>
+         //
+         if (currentNode->exceptionsRaised()
+             || currentNode->isTheVirtualGuardForAGuardedInlinedCall()
+             || subtreeHasSpecialCondition(currentNode))
+            {
             result = true;
+            }
 
          // DISABLED for now, although an excellent general purpose opt,
          // this causes a regression, because the loop runs <= 1 times
@@ -687,6 +762,8 @@ void TR_FieldPrivatizer::privatizeFields(TR::Node *node, bool postDominatesEntry
          bool canPrivatizeBasedOnThisNode = performTransformation(comp(), "%s Field access %p using sym ref %d privatized ", optDetailString(), node, symRef->getReferenceNumber());
          if (canPrivatizeBasedOnThisNode)
             {
+            if (autoForField)
+               dumpOptDetails(comp(), "using auto %d\n", autoForField->getReferenceNumber());
             if (!autoForField)
                {
                // Create a new auto for this field
@@ -698,6 +775,7 @@ void TR_FieldPrivatizer::privatizeFields(TR::Node *node, bool postDominatesEntry
                _privatizedFieldSymRefs.add(symRef->getReferenceNumber(),index,autoForField);
                _privatizedRegCandidates.add(comp()->getGlobalRegisterCandidates()->findOrCreate(autoForField));
                _privatizedFieldNodes.add(node->duplicateTree());
+               dumpOptDetails(comp(), "using auto %d\n", autoForField->getReferenceNumber());
                }
             else if (!_privatizedFields->get(symRef->getReferenceNumber()))
                {
@@ -705,8 +783,25 @@ void TR_FieldPrivatizer::privatizeFields(TR::Node *node, bool postDominatesEntry
                //Even we are reusing temp, need to save this for initialization and store back
                _privatizedFieldNodes.add(node->duplicateTree());
                }
-
-            dumpOptDetails(comp(), "using auto %d\n", autoForField->getReferenceNumber());
+            else if (opCode.isWrtBar())
+               {
+               // Replace any aload/astore privatized field nodes with awrtbar nodes referencing the same symRef
+               // This will insure that the store back will generate write barriers.
+               //
+               ListElement<TR::Node> *currentNodeElem = _privatizedFieldNodes.getListHead();
+               while (currentNodeElem)
+                  {
+                  TR::Node *currentNode   = currentNodeElem->getData();
+                  if (!currentNode->getOpCode().isWrtBar() && currentNode->getSymbolReference()->getReferenceNumber() == symRef->getReferenceNumber())
+                     {
+                     dumpOptDetails(comp(), "\tReplacing privatized field list entry %p:%s with %p:%s for auto %d\n", currentNode, currentNode->getOpCode().getName(), node, opCode.getName(), currentNode->getSymbolReference()->getReferenceNumber() );
+                     _privatizedFieldNodes.addAfter(node->duplicateTree(), currentNodeElem);
+                     _privatizedFieldNodes.remove(currentNode);
+                     break;
+                     }
+                  currentNodeElem = currentNodeElem->getNextElement();
+                  }
+               }
 
             node->setSymbolReference(autoForField);
             TR::Node *newFirstChild = 0;
@@ -958,7 +1053,6 @@ void TR_FieldPrivatizer::placeStoresBackInExits(List<TR::Block> *exitBlocks, Lis
        {
        TR::Block *next;
        TR::Block *nnext;
-       TR::CFGEdge *edge;
        for (auto edge = exitBlock->getSuccessors().begin(); edge != exitBlock->getSuccessors().end();)
           {
           bool placeAtEnd = false;
@@ -1177,7 +1271,6 @@ bool TR_FieldPrivatizer::storesBackMustBePlacedInExitBlock(TR::Block *exitBlock,
       return true;
 
    TR::CFGNode *next;
-   TR::CFGEdge *edge;
    for (auto edge = toBlock->getPredecessors().begin(); edge != toBlock->getPredecessors().end(); ++edge)
       {
       next = (*edge)->getFrom();

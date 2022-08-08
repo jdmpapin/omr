@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2017, 2019 IBM Corp. and others
+# Copyright (c) 2017, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -21,15 +21,22 @@
 
 include(OmrUtility)
 
-set(OMR_WARNING_AS_ERROR_FLAG /WX)
+set(OMR_C_WARNINGS_AS_ERROR_FLAG /WX)
+set(OMR_CXX_WARNINGS_AS_ERROR_FLAG /WX)
+set(OMR_MASM_WARNINGS_AS_ERROR_FLAG /WX)
+set(OMR_NASM_WARNINGS_AS_ERROR_FLAG -Werror)
 
-set(OMR_ENHANCED_WARNING_FLAG /W3)
+set(OMR_C_ENHANCED_WARNINGS_FLAG /W3)
+set(OMR_CXX_ENHANCED_WARNINGS_FLAG /W3)
+set(OMR_MASM_ENHANCED_WARNINGS_FLAG /W3)
+set(OMR_NASM_ENHANCED_WARNINGS_FLAG -Wall)
 
 list(APPEND OMR_PLATFORM_COMPILE_OPTIONS
 	/GR-    # Disable RTTI
 	/Zm400  # Precompiled header memory allocation limit
 	/wd4577 # Disable warning: Specifying noexcept when exceptions are disabled
 	/wd4091 # Disable warning: Caused by broken windows SDK, see also https://connect.microsoft.com/VisualStudio/feedback/details/1302025/warning-c4091-in-sdk-7-1a-shlobj-h-1051-dbghelp-h-1054-3056
+	/wd4351 # Disable warning: Zero initialization of of arrays in initializer lists
 )
 
 if(OMR_ENV_DATA64)
@@ -61,7 +68,10 @@ if(OMR_ENV_DATA64)
 		# /NODEFAULTLIB:MSVCRTD
 	)
 elseif(OMR_ENV_DATA32)
-	list(APPEND OMR_PLATFORM_LINKER_OPTIONS
+	list(APPEND OMR_PLATFORM_EXE_LINKER_OPTIONS
+		/SAFESEH
+	)
+	list(APPEND OMR_PLATFORM_SHARED_LINKER_OPTIONS
 		/SAFESEH
 	)
 	list(APPEND OMR_PLATFORM_SHARED_LINKER_OPTIONS

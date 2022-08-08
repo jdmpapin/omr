@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -159,15 +159,11 @@ OMR::Z::TreeEvaluator::iabsEvaluator(TR::Node * node, TR::CodeGenerator * cg)
 
    TR::Register * sourceRegister = cg->evaluate(firstChild);
    TR::Register * targetRegister;
-   TR::InstOpCode::Mnemonic opCode  = TR::InstOpCode::BAD;
+   TR::InstOpCode::Mnemonic opCode  = TR::InstOpCode::bad;
    if (node->getOpCodeValue() == TR::fabs)
       opCode = TR::InstOpCode::LPEBR;
    else if (node->getOpCodeValue() == TR::dabs)
       opCode = TR::InstOpCode::LPDBR;
-#ifdef J9_PROJECT_SPECIFIC
-   else if (node->getOpCodeValue() == TR::dfabs || node->getOpCodeValue() == TR::ddabs || node->getOpCodeValue() == TR::deabs)
-      opCode = TR::InstOpCode::LPDFR;
-#endif
    else if (node->getOpCodeValue() == TR::iabs)
       opCode = TR::InstOpCode::getLoadPositiveRegWidenOpCode();
    else if (cg->comp()->target().is64Bit())
@@ -175,22 +171,8 @@ OMR::Z::TreeEvaluator::iabsEvaluator(TR::Node * node, TR::CodeGenerator * cg)
    else
       TR_ASSERT( 0,"labs for 32 bit not implemented yet");
 
-#ifdef J9_PROJECT_SPECIFIC
-   if (node->getOpCodeValue() == TR::deabs)
-      {
-      if (cg->canClobberNodesRegister(firstChild))
-         targetRegister = sourceRegister;
-      else
-         targetRegister = cg->allocateFPRegisterPair();
-      }
-   else
-#endif
         if (node->getOpCodeValue() == TR::fabs
-#ifdef J9_PROJECT_SPECIFIC
             || node->getOpCodeValue() == TR::dabs
-            || node->getOpCodeValue() == TR::dfabs
-            || node->getOpCodeValue() == TR::ddabs
-#endif
             )
       {
       if (cg->canClobberNodesRegister(firstChild))
@@ -206,18 +188,6 @@ OMR::Z::TreeEvaluator::iabsEvaluator(TR::Node * node, TR::CodeGenerator * cg)
          targetRegister = cg->allocateRegister();
       }
 
-#ifdef J9_PROJECT_SPECIFIC
-   if (node->getOpCodeValue() == TR::deabs)
-      {
-      generateRRInstruction(cg, opCode, node, targetRegister->getHighOrder(), sourceRegister->getHighOrder());
-
-      // If we aren't clobbering, also need to move the low half; otherwise, a load positive here is setting
-      // the highest bit in the high-order register, so the low half can remain unchanged
-      if (!cg->canClobberNodesRegister(firstChild))
-         generateRRInstruction(cg, TR::InstOpCode::LDR, node, targetRegister->getLowOrder(), sourceRegister->getLowOrder());
-      }
-   else
-#endif
       {
       generateRRInstruction(cg, opCode, node, targetRegister, sourceRegister);
       }
@@ -294,7 +264,9 @@ OMR::Z::TreeEvaluator::dsqrtEvaluator(TR::Node * node, TR::CodeGenerator * cg)
    TR::Node * firstChild = node->getFirstChild();
    TR::Register * targetRegister = cg->allocateRegister(TR_FPR);
 
-   if (firstChild->isSingleRefUnevaluated() && firstChild->getOpCodeValue() == TR::dloadi)
+   if (firstChild->getOpCodeValue() == TR::dloadi &&
+       firstChild->getReferenceCount() == 1 &&
+       firstChild->getRegister() == NULL)
       {
       generateRXEInstruction(cg, TR::InstOpCode::SQDB, node, targetRegister, TR::MemoryReference::create(cg, firstChild), 0);
       }
@@ -327,70 +299,5 @@ OMR::Z::TreeEvaluator::fsqrtEvaluator(TR::Node * node, TR::CodeGenerator * cg)
 
    node->setRegister(targetRegister);
    cg->decReferenceCount(firstChild);
-   return node->getRegister();
-   }
-
-TR::Register *
-OMR::Z::TreeEvaluator::dnintEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-   {
-   TR::Node *firstChild = node->getFirstChild();
-   TR::Register *targetRegister = NULL;
-   TR::Register *opRegister = cg->evaluate(firstChild);
-
-   if(cg->canClobberNodesRegister(firstChild))
-      {
-      targetRegister = opRegister;
-      }
-   else
-      {
-      targetRegister = cg->allocateRegister(TR_FPR);
-      }
-   generateRRInstruction(cg, TR::InstOpCode::FIDBR, node, targetRegister, opRegister);
-
-   node->setRegister(targetRegister);
-   cg->decReferenceCount(firstChild);
-   return node->getRegister();
-   }
-
-TR::Register *
-OMR::Z::TreeEvaluator::fnintEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-   {
-   TR::Node *firstChild = node->getFirstChild();
-   TR::Register *targetRegister = NULL;
-   TR::Register *opRegister = cg->evaluate(firstChild);
-
-   if(cg->canClobberNodesRegister(firstChild))
-      {
-      targetRegister = opRegister;
-      }
-   else
-      {
-      targetRegister = cg->allocateRegister(TR_FPR);
-      }
-   generateRRInstruction(cg, TR::InstOpCode::FIEBR, node, targetRegister, opRegister);
-
-   node->setRegister(targetRegister);
-   cg->decReferenceCount(firstChild);
-   return node->getRegister();
-   }
-
-TR::Register *
-OMR::Z::TreeEvaluator::getpmEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-   {
-   TR::Register *targetRegister = cg->allocateRegister();
-   generateRRInstruction(cg, TR::InstOpCode::IPM, node, targetRegister, targetRegister);
-
-   node->setRegister(targetRegister);
-   return node->getRegister();
-   }
-
-TR::Register *
-OMR::Z::TreeEvaluator::setpmEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-   {
-   TR::Register *opRegister = cg->evaluate(node->getFirstChild());
-   generateRRInstruction(cg, TR::InstOpCode::SPM, node, opRegister, opRegister);
-
-   node->setRegister(NULL);
-   cg->decReferenceCount(node->getFirstChild());
    return node->getRegister();
    }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -86,7 +86,7 @@ OMR::Z::Instruction::Instruction(TR::CodeGenerator* cg, TR::InstOpCode::Mnemonic
    OMR::Instruction(cg, op, node),
    CTOR_INITIALIZER_LIST
    {
-   TR_ASSERT_FATAL(cg->comp()->target().cpu.isAtLeast(_opcode.getMinimumALS()), "Processor detected does not support instruction %s\n", _opcode.getMnemonicName());
+   TR_ASSERT_FATAL(cg->comp()->target().cpu.isAtLeast(_opcode.getMinimumALS()), "Processor detected (%s) does not support instruction %s\n", cg->comp()->target().cpu.getProcessorName(), _opcode.getMnemonicName());
 
    self()->initialize();
    }
@@ -96,7 +96,7 @@ OMR::Z::Instruction::Instruction(TR::CodeGenerator*cg, TR::Instruction* precedin
    OMR::Instruction(cg, precedingInstruction, op, node),
    CTOR_INITIALIZER_LIST
    {
-   TR_ASSERT_FATAL(cg->comp()->target().cpu.isAtLeast(_opcode.getMinimumALS()), "Processor detected does not support instruction %s\n", _opcode.getMnemonicName());
+   TR_ASSERT_FATAL(cg->comp()->target().cpu.isAtLeast(_opcode.getMinimumALS()), "Processor detected (%s) does not support instruction %s\n", cg->comp()->target().cpu.getProcessorName(), _opcode.getMnemonicName());
 
    self()->initialize(precedingInstruction, true);
    }
@@ -166,14 +166,13 @@ OMR::Z::Instruction::initialize(TR::Instruction * precedingInstruction, bool ins
    self()->initialize(cond);
 
    TR::CodeGenerator * cg = OMR::Instruction::cg();
-   self()->setBlockIndex(cg->getCurrentBlockIndex());
 
    if (cond)
       {
-      // Don't want to increment total use counts for ASSOCREGS instructions
+      // Don't want to increment total use counts for assocreg instructions
       // because their register references will confuse the code that tries
       // to determine when the first use of a register takes place
-      if (condFlag || self()->getOpCodeValue() != TR::InstOpCode::ASSOCREGS)
+      if (condFlag || self()->getOpCodeValue() != TR::InstOpCode::assocreg)
          {
          cond->bookKeepingRegisterUses(self(), cg);
          if(cond->getPreConditions()) cond->getPreConditions()->incNumUses();
@@ -649,13 +648,126 @@ OMR::Z::Instruction::dependencyRefsRegister(TR::Register * reg)
    {
    return false;
    }
+bool isMatchingStoreRestore(TR::Instruction *cursorLoad, TR::Instruction *cursorStore, TR::CodeGenerator *cg)
+   {
+   return false;
+   }
+
+uint32_t getRegMaskFromRange(TR::Instruction * inst)
+   {
+   uint32_t regs = 0;
+
+   TR::Register *lowReg = toS390RSInstruction(inst)->getFirstRegister();
+   TR::Register *highReg = toS390RSInstruction(inst)->getSecondRegister();
+   if (inst->getRegisterOperand(1)->getRegisterPair())
+      highReg = inst->getRegisterOperand(1)->getRegisterPair()->getHighOrder();
+
+   uint32_t lowRegNum = ANYREGINDEX(toRealRegister(lowReg)->getRegisterNumber());
+   uint32_t highRegNum = ANYREGINDEX(toRealRegister(highReg)->getRegisterNumber());
+
+   TR_ASSERT(lowRegNum >= 0 && lowRegNum <= 15 && highRegNum >= 0 && highRegNum <= 15, "Unexpected register number");
+   for (uint32_t i = lowRegNum; ; i = ((i == 15) ? 0 : i+1))  // wrap around to 0 at 15
+      {
+      regs = regs | (0x1 << i);
+      if (i == highRegNum)
+         break;
+      }
+   return regs;
+   }
+   
+static void handleLoadWithRegRanges(TR::Instruction *inst, TR::CodeGenerator *cg)
+   {
+   TR::Compilation * comp = cg->comp();
+   TR::InstOpCode::Mnemonic opCodeToUse = inst->getOpCodeValue();
+   if (!(opCodeToUse == TR::InstOpCode::LM  || opCodeToUse == TR::InstOpCode::LMG || opCodeToUse == TR::InstOpCode::LMH ||
+         opCodeToUse == TR::InstOpCode::LMY || opCodeToUse == TR::InstOpCode::VLM))
+      return;
+
+   bool isVector = opCodeToUse == TR::InstOpCode::VLM ? true : false;
+   uint32_t numVRFs = TR::RealRegister::LastAssignableVRF - TR::RealRegister::FirstAssignableVRF;
+
+   TR::Register *lowReg  = isVector ? toS390VRSInstruction(inst)->getFirstRegister()  : toS390RSInstruction(inst)->getFirstRegister();
+   TR::Register *highReg = isVector ? toS390VRSInstruction(inst)->getSecondRegister() : toS390RSInstruction(inst)->getSecondRegister();
+
+   if (inst->getRegisterOperand(1)->getRegisterPair())
+      highReg = inst->getRegisterOperand(1)->getRegisterPair()->getHighOrder();
+   uint32_t lowRegNum = ANYREGINDEX(toRealRegister(lowReg)->getRegisterNumber());
+   uint32_t highRegNum = ANYREGINDEX(toRealRegister(highReg)->getRegisterNumber());
+
+   uint32_t regsInRange;
+   if (highRegNum >= lowRegNum)
+      regsInRange = (highRegNum - lowRegNum + 1);
+   else
+      regsInRange = ((isVector ? numVRFs : 16) - lowRegNum) + highRegNum + 1;
+
+   if (regsInRange <= 2)
+      return;   // registers on instruction, nothing more to do.
+
+   // visit all registers in range.  ignore first and last since RA will have taken care of already
+   lowRegNum = lowRegNum == (isVector ? numVRFs - 1 : 15) ? 0 : lowRegNum + 1;
+   // wrap around for loop terminal index to 0 at 15 or 31 for Vector Registers
+
+   uint32_t availForShuffle = cg->machine()->genBitMapOfAssignableGPRs() & ~(getRegMaskFromRange(inst));
+
+   for (uint32_t i  = lowRegNum  ;
+                 i != highRegNum ;
+                 i  = ((i == (isVector ? numVRFs - 1 : 15)) ? 0 : i+1))
+      {
+      TR::RealRegister *reg = cg->machine()->getRealRegister(i + TR::RealRegister::GPR0);
+
+      // Registers that are assigned need to be checked whether they have a matching STM--otherwise we spill.
+      // Since we are called post RA for the LM, we check if assigned registers are last used on the LM so we can
+      // avoid needlessly spilling them. (ex. LM(GPR00F,GPR14P,PSALCCAV->LCCAEMS0); ! PSALCCAV needs a reg and only needed on LM)
+      TR::Register *virtualReg = reg->getAssignedRegister();
+      if (reg->getState() == TR::RealRegister::Assigned && inst != virtualReg->getEndOfRange())
+         {
+         TR::Instruction *cursor = inst->getPrev();
+         bool found = false;
+         while (cursor)
+            {
+            if (cursor->getOpCodeValue() == TR::InstOpCode::fence && cursor->getNode()->getOpCodeValue() == TR::BBStart)
+               {
+               TR::Block *block = cursor->getNode()->getBlock();
+               if (!block->isExtensionOfPreviousBlock())
+                  break;
+               }
+            if (cursor->defsRegister(virtualReg))
+               break;
+
+            if (isMatchingStoreRestore(inst, cursor, cg))
+               {
+               cg->traceRegisterAssignment("Skip spilling %R--restored on load", virtualReg);
+               found = true;
+               break; // found matching store--do nothing since load will restore value
+               }
+            cursor = cursor->getPrev();
+            }
+
+         // register is defined before it was stored, spill or shuffle it to a free reg before load clobbers it
+         // start of range will be NULL in some cases, we are cautious and spill (def# 100246)
+         if (!found)
+            {
+            cg->traceRegisterAssignment("trying to free %R for killed reg %R by loadmultiple \n", virtualReg, reg);
+            TR::RealRegister *shuffle = cg->machine()->shuffleOrSpillRegister(inst, virtualReg, availForShuffle);
+            if (shuffle != NULL)
+               {
+               //if the LM instruction uses this reg we just shuffled, it will have the wrong real reg, need to fix this up
+               if (inst->usesRegister(reg))
+                  {
+                  inst->renameRegister(reg, shuffle);
+                  }
+               }
+            }
+         }
+      }
+   }
 
 void
 OMR::Z::Instruction::assignRegisters(TR_RegisterKinds kindToBeAssigned)
    {
    TR::Compilation *comp = self()->cg()->comp();
 
-   if (self()->getOpCodeValue() != TR::InstOpCode::ASSOCREGS)
+   if (self()->getOpCodeValue() != TR::InstOpCode::assocreg)
       {
       self()->assignRegistersAndDependencies(kindToBeAssigned);
       }
@@ -679,7 +791,7 @@ OMR::Z::Instruction::assignRegisters(TR_RegisterKinds kindToBeAssigned)
 
       // Step 2 : loop through and set up the new associations (both on the machine and by associating the virtual
       // registers with their real dependencies)
-         TR_S390RegisterDependencyGroup * depGroup = self()->getDependencyConditions()->getPostConditions();
+         TR::RegisterDependencyGroup * depGroup = self()->getDependencyConditions()->getPostConditions();
          for (int32_t j = 0; j < last; ++j)
             {
             TR::Register * virtReg = depGroup->getRegisterDependency(j)->getRegister();
@@ -699,7 +811,6 @@ OMR::Z::Instruction::assignRegisters(TR_RegisterKinds kindToBeAssigned)
 
       outOfLineEXInstr->setPrev(self()->getPrev()); // Temporarily set Prev() instruction of snippet to Prev() of EX just in case we insert LR_move on assignRegisters()
       self()->cg()->tracePreRAInstruction(outOfLineEXInstr);
-      self()->cg()->setCurrentBlockIndex(outOfLineEXInstr->getBlockIndex());
       outOfLineEXInstr->assignRegisters(kindToBeAssigned);
       TR::RegisterDependencyConditions *deps = outOfLineEXInstr->getDependencyConditions();
       if (deps) // merge the dependency into the EX deps
@@ -718,32 +829,7 @@ OMR::Z::Instruction::assignRegisters(TR_RegisterKinds kindToBeAssigned)
       //If the value is set here, the snippet can be handled in an identical fashion to a normal constantdataSnippet
       }
 
-   // Modify TBEGIN/TBEGINC's General Register Save Mask (GRSM) to only include
-   // live registers.
-   if (self()->getOpCodeValue() == TR::InstOpCode::TBEGIN || self()->getOpCodeValue() == TR::InstOpCode::TBEGINC)
-      {
-      uint8_t linkageBasedSaveMask = 0;
-
-      for (int32_t i = TR::RealRegister::GPR0; i != TR::RealRegister::GPR15 + 1; i++)
-         {
-         if (0 != self()->cg()->getS390Linkage()->getPreserved((TR::RealRegister::RegNum)i))
-            {
-            //linkageBasedSaveMask is 8 bit mask where each bit represents consecutive even/odd regpair to save.
-            linkageBasedSaveMask |= (1 << (7 - ((i - 1) >> 1))); // bit 0 = GPR0/1, GPR0=1, GPR15=16. 'Or' with bit [(i-1)>>1]
-            }
-         }
-
-      // General Register Save Mask (GRSM)
-      uint8_t grsm = (self()->cg()->machine()->genBitVectOfLiveGPRPairs() | linkageBasedSaveMask);
-
-      // GRSM occupies the top 8 bits of the immediate field.  Need to
-      // preserve the lower 8 bits, which has controls for AR, Floating
-      // Point and Program Interruption Filtering.
-      uint16_t originalGRSM = ((TR::S390SILInstruction*)self())->getSourceImmediate();
-      ((TR::S390SILInstruction*)self())->setSourceImmediate((grsm << 8) | (originalGRSM & 0xFF));
-      }
-
-
+   handleLoadWithRegRanges(self(), self()->cg());
    }
 
 uint32_t
@@ -1462,8 +1548,8 @@ OMR::Z::Instruction::renameRegister(TR::Register *from, TR::Register *to)
   TR::RegisterDependencyConditions *conds = self()->getDependencyConditions();
   if (conds)
     {
-    TR_S390RegisterDependencyGroup *preConds = conds->getPreConditions();
-    TR_S390RegisterDependencyGroup *postConds = conds->getPostConditions();
+    TR::RegisterDependencyGroup *preConds = conds->getPreConditions();
+    TR::RegisterDependencyGroup *postConds = conds->getPostConditions();
 
     n = conds->getNumPreConditions();
     for (i = 0; i < n; i++)
@@ -1818,8 +1904,8 @@ OMR::Z::Instruction::setUseDefRegisters(bool updateDependencies)
       TR::Register *tempRegister;
       if ((dependencies!=NULL) && ((self()->getOpCode().getOpCodeValue() == TR::InstOpCode::DEPEND)))
          {
-         TR_S390RegisterDependencyGroup *preConditions  = dependencies->getPreConditions();
-         TR_S390RegisterDependencyGroup *postConditions = dependencies->getPostConditions();
+         TR::RegisterDependencyGroup *preConditions  = dependencies->getPreConditions();
+         TR::RegisterDependencyGroup *postConditions = dependencies->getPostConditions();
          if (preConditions!=NULL)
             {
             for (i = 0; i < dependencies->getNumPreConditions(); i++)
@@ -2031,7 +2117,7 @@ OMR::Z::Instruction::is4ByteLoad()
 bool
 OMR::Z::Instruction::isRet()
    {
-   return self()->getOpCodeValue() == TR::InstOpCode::RET;
+   return self()->getOpCodeValue() == TR::InstOpCode::retn;
    }
 
 int8_t

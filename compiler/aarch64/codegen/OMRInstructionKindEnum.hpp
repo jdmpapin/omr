@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -40,14 +40,17 @@
    IsTrg1,
       IsTrg1Cond,
       IsTrg1Imm,
+         IsTrg1ImmShifted,
          IsTrg1ImmSym,
       IsTrg1ZeroSrc1,
+      IsTrg1ZeroImm,
       IsTrg1Src1,
          IsTrg1Src1Imm,
          IsTrg1Src2,
             IsCondTrg1Src2,
             IsTrg1Src2Shifted,
             IsTrg1Src2Extended,
+            IsTrg1Src2IndexedElement,
             IsTrg1Src2Zero,
             IsTrg1Src3,
       IsTrg1Mem,
@@ -55,6 +58,7 @@
    IsMem,
       IsMemSrc1,
          IsMemSrc2,
+      IsMemImm,
    IsSrc1,
       IsZeroSrc1Imm,
       IsSrc2,

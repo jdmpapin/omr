@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -31,6 +31,10 @@
 
 #if defined(OMRZTPF)
 #include <tpf/cmpswp.h>
+#endif
+
+#if defined(__xlC__) && defined(AIXPPC)
+#include <sys/atomic_op.h>
 #endif
 
 #include <stdlib.h>
@@ -74,6 +78,10 @@
 		inline void __yield() { _mm_pause(); }
 #elif defined(__GNUC__) && (defined(J9X86) || defined(J9HAMMER))
 		inline void __yield() { __asm volatile ("pause"); }
+#elif defined(J9ZOS390)
+#pragma convlit(suspend)
+		inline void __yield() { __asm__ volatile (" nop 0"); }
+#pragma convlit(resume)
 #else
 		inline void __yield() { __asm volatile ("# AtomicOperations::__yield"); }
 #endif /* __GNUC__ && (J9X86 || J9HAMMER) */
@@ -88,6 +96,10 @@
 		 * nop instruction requires operand https://bugzilla.redhat.com/show_bug.cgi?id=506417
 		 */
 		inline void __nop() { __asm__ volatile ("nop 0"); }
+#elif defined(J9ZOS390)
+#pragma convlit(suspend)
+		inline void __nop() { __asm__ volatile (" nop 0"); }
+#pragma convlit(resume)
 #else /* GCC && XL */
 		inline void __nop() { __asm__ volatile ("nop"); }
 #endif
@@ -405,7 +417,12 @@ public:
 		csg((csg_t *)&oldValue, (csg_t *)address, (csg_t)newValue);
 		return oldValue;
 #elif defined(__xlC__) /* defined(OMRZTPF) */
+#if defined(__64BIT__) || !defined(AIXPPC)
 		__compare_and_swaplp((volatile long*)address, (long*)&oldValue, (long)newValue);
+#else /* defined(__64BIT__) */
+		/* On AIX __compare_and_swaplp is valid only in 64-bit mode. */
+		compare_and_swaplp((atomic_l)address, (long*)&oldValue, (long)newValue);
+#endif /* defined(__64BIT__) */
 		return oldValue;
 #elif defined(__GNUC__) /* defined(__xlC__) */
 #if defined(__riscv)

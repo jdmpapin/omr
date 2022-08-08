@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2018, 2020 IBM Corp. and others
+# Copyright (c) 2018, 2022 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -31,6 +31,11 @@ include(ExternalProject)
 # Make sure we have performed platform detection
 include(OmrPlatform)
 
+# DDR is may supported when cross compiling, unless we are on Windows with CYGWIN in which case we do have support
+if(OMR_DDR AND OMR_CROSSCOMPILING)
+	message(FATAL_ERROR "DDR is not supported when cross-compiling. Use -DOMR_DDR=OFF to disable DDR.")
+endif()
+
 set(OMR_MODULES_DIR ${CMAKE_CURRENT_LIST_DIR})
 set(DDR_INFO_DIR "${CMAKE_BINARY_DIR}/ddr_info")
 
@@ -60,15 +65,23 @@ function(make_ddr_set set_name)
 		COMMAND "${CMAKE_COMMAND}" -E touch "${DDR_CONFIG_STAMP}"
 		WORKING_DIRECTORY "${DDR_BIN_DIR}"
 	)
+
+	# We need to set LIBPATH on z/OS so that ddrgen can find the a2e library
+	if(OMR_OS_ZOS)
+		set(DDRGEN_LIBPATH "env" "LIBPATH=$<TARGET_FILE_DIR:j9a2e>$\${LIBPATH:+:$$LIBPATH}")
+	else()
+		set(DDRGEN_LIBPATH)
+	endif()
+
 	if(CMAKE_GENERATOR MATCHES "Makefiles")
 		add_custom_target(${DDR_TARGET_NAME}
 			DEPENDS "${DDR_CONFIG_STAMP}"
-			COMMAND "$(MAKE)" -C "${DDR_BIN_DIR}"
+			COMMAND ${DDRGEN_LIBPATH} "$(MAKE)" -C "${DDR_BIN_DIR}"
 		)
 	else()
 		add_custom_target(${DDR_TARGET_NAME}
 			DEPENDS "${DDR_CONFIG_STAMP}"
-			COMMAND ${CMAKE_COMMAND} --build "${DDR_BIN_DIR}"
+			COMMAND ${DDRGEN_LIBPATH} ${CMAKE_COMMAND} --build "${DDR_BIN_DIR}"
 		)
 	endif()
 	set_property(TARGET "${DDR_TARGET_NAME}" PROPERTY DDR_BIN_DIR "${DDR_BIN_DIR}")

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -198,11 +198,6 @@ TR_RegisterCandidate::getRegisterKinds()
   TR::DataType dt = getDataType();
   if(dt == TR::Float
      || dt == TR::Double
-#ifdef J9_PROJECT_SPECIFIC
-     || dt == TR::DecimalFloat
-     || dt == TR::DecimalDouble
-     || dt == TR::DecimalLongDouble
-#endif
      )
     return TR_FPR;
   else if (dt.isVector())
@@ -702,9 +697,6 @@ bool TR_RegisterCandidate::rcNeeds2Regs(TR::Compilation *comp)
       }
    else
       return ((getType().isInt64() && comp->target().is32Bit() && !comp->cg()->use64BitRegsOn32Bit())
-#ifdef J9_PROJECT_SPECIFIC
-              || getType().isLongDouble()
-#endif
               );
    }
 
@@ -1052,7 +1044,7 @@ TR_RegisterCandidate::processLiveOnEntryBlocks(TR::Block * * blocks, int32_t *bl
                                     TR::Block *liveBlock = startOfExtendedBBForBB[nextBlock->getNumber()];
                                     if (_liveOnEntry.get(liveBlock->getNumber()))
                                        {
-                                       if ((_blocks.getNumberOfLoadsAndStores(blockNumber) == 0) &&
+                                       if ((_blocks.getNumberOfLoadsAndStores(liveBlock->getNumber()) != 0) &&
                                             (!dontAssignInColdBlocks(comp) || !nextBlock->isCold()))
                                           {
                                           referencedInNearestLoop = true;
@@ -1839,11 +1831,6 @@ TR_RegisterCandidates::reprioritizeCandidates(
       bool isFPCandidate = false;
       if (rc->getDataType() == TR::Float
           || rc->getDataType() == TR::Double
-#ifdef J9_PROJECT_SPECIFIC
-          || rc->getDataType() == TR::DecimalFloat
-          || rc->getDataType() == TR::DecimalDouble
-          || rc->getDataType() == TR::DecimalLongDouble
-#endif
           )
         isFPCandidate = true;
 
@@ -2320,11 +2307,6 @@ TR_RegisterCandidates::assign(TR::Block ** cfgBlocks, int32_t numberOfBlocks, in
                        rc->getWeight());
       bool isFloat = (rc->getDataType() == TR::Float
                       || rc->getDataType() == TR::Double
-#ifdef J9_PROJECT_SPECIFIC
-                      || rc->getDataType() == TR::DecimalFloat
-                      || rc->getDataType() == TR::DecimalDouble
-                      || rc->getDataType() == TR::DecimalLongDouble
-#endif
                       );
       bool isVector = rc->getDataType().isVector();
       bool needs2Regs = false;
@@ -2511,7 +2493,7 @@ TR_RegisterCandidates::assign(TR::Block ** cfgBlocks, int32_t numberOfBlocks, in
 
          numAssigns++;
 
-         if ((rc->getWeight() < weightThreshold) && (((float) numAssigns) > (float) (numCandsThresholdFactor * (float) numCands)))
+         if ((rc->getWeight() < unsigned(weightThreshold)) && (((float) numAssigns) > (float) (numCandsThresholdFactor * (float) numCands)))
             {
             if(trace)
                traceMsg(comp(),"Leaving candidate because the compile time cost is not worth it\n");
@@ -2599,11 +2581,6 @@ TR_RegisterCandidates::assign(TR::Block ** cfgBlocks, int32_t numberOfBlocks, in
 
       bool isFloat = (dt == TR::Float
                       || dt == TR::Double
-#ifdef J9_PROJECT_SPECIFIC
-                      || dt == TR::DecimalFloat
-                      || dt == TR::DecimalDouble
-                      || dt == TR::DecimalLongDouble
-#endif
                       );
       bool isVector = dt.isVector();
       int32_t firstRegister, lastRegister;
@@ -2611,9 +2588,6 @@ TR_RegisterCandidates::assign(TR::Block ** cfgBlocks, int32_t numberOfBlocks, in
       if (isFloat)
          {
          if (cg->getDisableFloatingPointGRA()
-#ifdef J9_PROJECT_SPECIFIC
-             || (dt == TR::DecimalLongDouble)
-#endif
             )
             {
             continue;
@@ -2666,7 +2640,6 @@ TR_RegisterCandidates::assign(TR::Block ** cfgBlocks, int32_t numberOfBlocks, in
                   bool hasMultiWayBranch = false;
 
                   TR::TreeTop *exitTree = blocks[blockNum]->getExit(); //Entry()->getExtendedBlockExitTreeTop();
-                  TR::TreeTop *cursorExit;
                   TR::Block *cursorBlock = blocks[blockNum];
                   TR::Node * cursorNode = cursorBlock->getLastRealTreeTop()->getNode();
                   if(cursorNode->getOpCodeValue() == TR::treetop)
@@ -2715,7 +2688,6 @@ TR_RegisterCandidates::assign(TR::Block ** cfgBlocks, int32_t numberOfBlocks, in
                   bool hasMultiWayBranch = false;
 
                   TR::TreeTop *exitTree = blocks[blockNum]->getExit();
-                  TR::TreeTop *cursorExit;
                   TR::Block *cursorBlock = blocks[blockNum];
                   TR::Node * cursorNode = cursorBlock->getLastRealTreeTop()->getNode();
                   if (cursorNode->getOpCodeValue() == TR::treetop)
@@ -2757,7 +2729,6 @@ TR_RegisterCandidates::assign(TR::Block ** cfgBlocks, int32_t numberOfBlocks, in
                   bool hasMultiWayBranch = false;
 
                   TR::TreeTop *exitTree = blocks[blockNum]->getExit(); //Entry()->getExtendedBlockExitTreeTop();
-                  TR::TreeTop *cursorExit;
                   TR::Block *cursorBlock = blocks[blockNum];
                   TR::Node * cursorNode = cursorBlock->getLastRealTreeTop()->getNode();
                   if (cursorNode->getOpCodeValue() == TR::treetop)
@@ -3635,7 +3606,6 @@ TR_RegisterCandidates::computeAvailableRegisters(TR_RegisterCandidate *rc, int32
             {
             overlaps = overlapLookup->second;
             }
-         CS2::HashIndex hi1, hi2;
 
          TR_RegisterCandidate *rc1 = b->getGlobalRegisters(comp())[i].getRegisterCandidateOnEntry();
          if (rc1)

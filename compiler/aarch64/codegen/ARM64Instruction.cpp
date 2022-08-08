@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -30,7 +30,7 @@ void TR::ARM64LabelInstruction::assignRegistersForOutOfLineCodeSection(TR_Regist
    TR::Compilation *comp = cg()->comp();
 
    bool isLabel = getOpCodeValue() == TR::InstOpCode::label;
-   bool isBranch = (getOpCodeValue() == TR::InstOpCode::b) || (getKind() == IsConditionalBranch) || (getKind() == IsCompareBranch) || (getKind() == IsTestBitBranch);
+   bool isBranch = (getOpCodeValue() == TR::InstOpCode::b) || (getKind() == IsConditionalBranch) || (getKind() == IsCompareBranch) || (getKind() == IsTestBitBranch) || (getKind() == IsVirtualGuardNOP);
 
    cg()->freeUnlatchedRegisters();
    // this is the return label from OOL
@@ -47,7 +47,7 @@ void TR::ARM64LabelInstruction::assignRegistersForOutOfLineCodeSection(TR_Regist
       // Switch to the outlined instruction stream and assign registers.
       //
       TR_ARM64OutOfLineCodeSection *oi = cg()->findARM64OutOfLineCodeSectionFromLabel(getLabelSymbol());
-      TR_ASSERT(oi, "Could not find ARM64OutOfLineCodeSection stream from label.  instr=%p, label=%p\n", this, getLabelSymbol());
+      TR_ASSERT(oi, "Could not find ARM64OutOfLineCodeSection stream from label.  instr=%p, label=%p", this, getLabelSymbol());
       if (!oi->hasBeenRegisterAssigned())
          oi->assignRegisters(kindToBeAssigned);
       }
@@ -65,7 +65,7 @@ void TR::ARM64LabelInstruction::assignRegistersForOutOfLineCodeSection(TR_Regist
          // in the OOL section can jump to the end of section and then only one branch (the
          // last instruction of an OOL section) jumps to the merge-point. In other words, OOL
          // section must contain exactly one exit point.
-         TR_ASSERT(cg()->getAppendInstruction() == this, "OOL section must have only one branch to the merge point\n");
+         TR_ASSERT(cg()->getAppendInstruction() == this, "OOL section must have only one branch to the merge point");
          // Start RA for OOL cold path, restore register state from snap shot
          TR::Machine *machine = cg()->machine();
          if (comp->getOption(TR_TraceRA))
@@ -358,12 +358,12 @@ void TR::ARM64Trg1Src3Instruction::assignRegisters(TR_RegisterKinds kindToBeAssi
 
 bool TR::ARM64MemSrc1Instruction::refsRegister(TR::Register *reg)
    {
-   return (getMemoryReference()->refsRegister(reg) || reg == getSource1Register());
+   return (TR::ARM64MemInstruction::refsRegister(reg) || reg == getSource1Register());
    }
 
 bool TR::ARM64MemSrc1Instruction::usesRegister(TR::Register *reg)
    {
-   return (getMemoryReference()->refsRegister(reg) || reg == getSource1Register());
+   return (TR::ARM64MemInstruction::usesRegister(reg) || reg == getSource1Register());
    }
 
 bool TR::ARM64MemSrc1Instruction::defsRegister(TR::Register *reg)
@@ -457,7 +457,8 @@ TR::ARM64Trg1MemInstruction::ARM64Trg1MemInstruction(TR::InstOpCode::Mnemonic op
                            TR::Node *node,
                            TR::Register *treg,
                            TR::MemoryReference *mr, TR::CodeGenerator *cg)
-   : ARM64Trg1Instruction(op, node, treg, cg), _memoryReference(mr)
+   /* Choose a correct variant of the opcode for this memory reference. */
+   : ARM64Trg1Instruction(mr->mapOpCode(op), node, treg, cg), _memoryReference(mr)
    {
    mr->bookKeepingRegisterUses(self(), cg);
    TR::InstructionDelegate::setupImplicitNullPointerException(cg, this);
@@ -468,7 +469,8 @@ TR::ARM64Trg1MemInstruction::ARM64Trg1MemInstruction(TR::InstOpCode::Mnemonic op
                            TR::Register *treg,
                            TR::MemoryReference *mr,
                            TR::Instruction *precedingInstruction, TR::CodeGenerator *cg)
-   : ARM64Trg1Instruction(op, node, treg, precedingInstruction, cg), _memoryReference(mr)
+   /* Choose a correct variant of the opcode for this memory reference. */
+   : ARM64Trg1Instruction(mr->mapOpCode(op), node, treg, precedingInstruction, cg), _memoryReference(mr)
    {
    mr->bookKeepingRegisterUses(self(), cg);
    TR::InstructionDelegate::setupImplicitNullPointerException(cg, this);
@@ -520,7 +522,8 @@ void TR::ARM64Trg1MemInstruction::assignRegisters(TR_RegisterKinds kindToBeAssig
 TR::ARM64MemInstruction::ARM64MemInstruction(TR::InstOpCode::Mnemonic op,
                      TR::Node *node,
                      TR::MemoryReference *mr, TR::CodeGenerator *cg)
-   : TR::Instruction(op, node, cg), _memoryReference(mr)
+   /* Choose a correct variant of the opcode for this memory reference. */
+   : TR::Instruction(mr->mapOpCode(op), node, cg), _memoryReference(mr)
    {
    mr->bookKeepingRegisterUses(self(), cg);
    TR::InstructionDelegate::setupImplicitNullPointerException(cg, this);
@@ -530,10 +533,45 @@ TR::ARM64MemInstruction::ARM64MemInstruction(TR::InstOpCode::Mnemonic op,
                      TR::Node *node,
                      TR::MemoryReference *mr,
                      TR::Instruction *precedingInstruction, TR::CodeGenerator *cg)
-   : TR::Instruction(op, node, precedingInstruction, cg), _memoryReference(mr)
+   /* Choose a correct variant of the opcode for this memory reference. */
+   : TR::Instruction(mr->mapOpCode(op), node, precedingInstruction, cg), _memoryReference(mr)
    {
    mr->bookKeepingRegisterUses(self(), cg);
    TR::InstructionDelegate::setupImplicitNullPointerException(cg, this);
+   }
+
+bool TR::ARM64MemInstruction::refsRegister(TR::Register *reg)
+   {
+   return getMemoryReference()->refsRegister(reg);
+   }
+
+bool TR::ARM64MemInstruction::usesRegister(TR::Register *reg)
+   {
+   return getMemoryReference()->refsRegister(reg);
+   }
+
+bool TR::ARM64MemInstruction::defsRegister(TR::Register *reg)
+   {
+   return false;
+   }
+
+bool TR::ARM64MemInstruction::defsRealRegister(TR::Register *reg)
+   {
+   return false;
+   }
+
+void TR::ARM64MemInstruction::assignRegisters(TR_RegisterKinds kindToBeAssigned)
+   {
+   TR::Machine *machine = cg()->machine();
+   TR::MemoryReference *mref = getMemoryReference();
+
+   if (getDependencyConditions())
+      getDependencyConditions()->assignPostConditionRegisters(this, kindToBeAssigned, cg());
+
+   mref->assignRegisters(this, cg());
+
+   if (getDependencyConditions())
+      getDependencyConditions()->assignPreConditionRegisters(this->getPrev(), kindToBeAssigned, cg());
    }
 
 // TR::ARM64Trg1MemSrc1Instruction:: member functions
@@ -702,12 +740,22 @@ void TR::ARM64CompareBranchInstruction::assignRegisters(TR_RegisterKinds kindToB
    TR::Register *source1Virtual = getSource1Register();
 
    if (getDependencyConditions())
+      {
+      uint32_t numPreConditions = getDependencyConditions()->getAddCursorForPre();
       getDependencyConditions()->assignPostConditionRegisters(this, kindToBeAssigned, cg());
+
+      getDependencyConditions()->getPreConditions()->blockRegisters(numPreConditions);
+      }
 
    TR::RealRegister *assignedSource1Register = machine->assignOneRegister(this, source1Virtual);
 
    if (getDependencyConditions())
+      {
+      uint32_t numPreConditions = getDependencyConditions()->getAddCursorForPre();
+      getDependencyConditions()->getPreConditions()->unblockRegisters(numPreConditions);
+
       getDependencyConditions()->assignPreConditionRegisters(this->getPrev(), kindToBeAssigned, cg());
+      }
 
    setSource1Register(assignedSource1Register);
 
@@ -742,12 +790,22 @@ void TR::ARM64TestBitBranchInstruction::assignRegisters(TR_RegisterKinds kindToB
    TR::Register *source1Virtual = getSource1Register();
 
    if (getDependencyConditions())
+      {
+      uint32_t numPreConditions = getDependencyConditions()->getAddCursorForPre();
       getDependencyConditions()->assignPostConditionRegisters(this, kindToBeAssigned, cg());
+
+      getDependencyConditions()->getPreConditions()->blockRegisters(numPreConditions);
+      }
 
    TR::RealRegister *assignedSource1Register = machine->assignOneRegister(this, source1Virtual);
 
    if (getDependencyConditions())
+      {
+      uint32_t numPreConditions = getDependencyConditions()->getAddCursorForPre();
+      getDependencyConditions()->getPreConditions()->unblockRegisters(numPreConditions);
+
       getDependencyConditions()->assignPreConditionRegisters(this->getPrev(), kindToBeAssigned, cg());
+      }
 
    setSource1Register(assignedSource1Register);
 
@@ -782,12 +840,22 @@ void TR::ARM64RegBranchInstruction::assignRegisters(TR_RegisterKinds kindToBeAss
    TR::Register *targetVirtual = getTargetRegister();
 
    if (getDependencyConditions())
+      {
+      uint32_t numPreConditions = getDependencyConditions()->getAddCursorForPre();
       getDependencyConditions()->assignPostConditionRegisters(this, kindToBeAssigned, cg());
+
+      getDependencyConditions()->getPreConditions()->blockRegisters(numPreConditions);
+      }
 
    TR::RealRegister *assignedTargetRegister = machine->assignOneRegister(this, targetVirtual);
 
    if (getDependencyConditions())
+      {
+      uint32_t numPreConditions = getDependencyConditions()->getAddCursorForPre();
+      getDependencyConditions()->getPreConditions()->unblockRegisters(numPreConditions);
+
       getDependencyConditions()->assignPreConditionRegisters(this->getPrev(), kindToBeAssigned, cg());
+      }
 
    setTargetRegister(assignedTargetRegister);
    }

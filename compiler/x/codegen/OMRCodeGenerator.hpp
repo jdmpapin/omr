@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -47,7 +47,7 @@ namespace OMR { typedef OMR::X86::CodeGenerator CodeGeneratorConnector; }
 #include "infra/BitVector.hpp"
 #include "infra/TRlist.hpp"
 #include "infra/Assert.hpp"
-#include "x/codegen/X86Ops.hpp"
+#include "codegen/InstOpCode.hpp"
 #include "x/codegen/X86Register.hpp"
 #include "env/CompilerEnv.hpp"
 
@@ -144,7 +144,6 @@ struct TR_X86ProcessorInfo
    bool supportsPageGlobalFlag()           {return testFeatureFlags(TR_PageGlobalFlag);}
    bool hasMachineCheckArchitecture()      {return testFeatureFlags(TR_MachineCheckArchitecture);}
    bool supportsCMOVInstructions()         {return testFeatureFlags(TR_CMOVInstructions);}
-   bool supportsFCOMIInstructions()        {return testFeatureFlags(TR_BuiltInFPU | TR_CMOVInstructions);}
    bool hasPageAttributeTable()            {return testFeatureFlags(TR_PageAttributeTable);}
    bool has36BitPageSizeExtension()        {return testFeatureFlags(TR_36BitPageSizeExtension);}
    bool hasProcessorSerialNumber()         {return testFeatureFlags(TR_ProcessorSerialNumber);}
@@ -161,6 +160,10 @@ struct TR_X86ProcessorInfo
    bool supportsSSE4_2()                   {return testFeatureFlags2(TR_SSE4_2);}
    bool supportsAVX()                      {return testFeatureFlags2(TR_AVX) && enabledXSAVE();}
    bool supportsAVX2()                     {return testFeatureFlags8(TR_AVX2) && enabledXSAVE();}
+   bool supportsAVX512F()                  {return testFeatureFlags8(TR_AVX512F) && enabledXSAVE();}
+   bool supportsAVX512BW()                 {return testFeatureFlags8(TR_AVX512BW) && enabledXSAVE();}
+   bool supportsAVX512DQ()                 {return testFeatureFlags8(TR_AVX512DQ) && enabledXSAVE();}
+   bool supportsAVX512VL()                 {return testFeatureFlags8(TR_AVX512VL) && enabledXSAVE();}
    bool supportsBMI1()                     {return testFeatureFlags8(TR_BMI1) && enabledXSAVE();}
    bool supportsBMI2()                     {return testFeatureFlags8(TR_BMI2) && enabledXSAVE();}
    bool supportsFMA()                      {return testFeatureFlags2(TR_FMA) && enabledXSAVE();}
@@ -208,7 +211,7 @@ struct TR_X86ProcessorInfo
    bool isGenuineIntel() {return _vendorFlags.testAny(TR_GenuineIntel);}
    bool isAuthenticAMD() {return _vendorFlags.testAny(TR_AuthenticAMD);}
 
-   bool requiresLFENCE() { return false; /* Dummy for now, we may need LFENCE in future processors*/}
+   bool requiresLFENCE() { return false; /* Dummy for now, we may need TR::InstOpCode::LFENCE in future processors*/}
 
    int32_t getX86Architecture() { return (_processorDescription & 0x000000ff);}
 
@@ -223,7 +226,7 @@ private:
 
    friend class OMR::X86::CodeGenerator;
 
-   void initialize(TR::CodeGenerator *cg);
+   void initialize();
 
    /**
     * @brief testFlag Ensures that the feature being tested for exists in the mask
@@ -343,6 +346,7 @@ class OMR_EXTENSIBLE CodeGenerator : public OMR::CodeGenerator
 
 
    static TR_X86ProcessorInfo &getX86ProcessorInfo() {return _targetProcessorInfo;}
+   static void initializeX86TargetProcessorInfo() { _targetProcessorInfo.initialize(); }
 
    typedef enum
       {
@@ -358,13 +362,17 @@ class OMR_EXTENSIBLE CodeGenerator : public OMR::CodeGenerator
    bool hasComplexAddressingMode() { return true; }
    bool getSupportsBitOpCodes() { return true; }
 
-   bool getSupportsOpCodeForAutoSIMD(TR::ILOpCode, TR::DataType);
+   static bool getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::ILOpCode opcode);
+   bool getSupportsOpCodeForAutoSIMD(TR::ILOpCode opcode);
+
    bool getSupportsEncodeUtf16LittleWithSurrogateTest();
    bool getSupportsEncodeUtf16BigWithSurrogateTest();
 
    virtual bool getSupportsBitPermute();
 
    bool supportsNonHelper(TR::SymbolReferenceTable::CommonNonhelperSymbol symbol);
+
+   static bool isILOpCodeSupported(TR::ILOpCodes);
 
    bool hasTMEvaluator()                       {return true;}
 
@@ -404,7 +412,16 @@ class OMR_EXTENSIBLE CodeGenerator : public OMR::CodeGenerator
 
    TR::SymbolReference *getNanoTimeTemp();
 
-   int32_t branchDisplacementToHelperOrTrampoline(uint8_t *nextInstructionAddress, TR::SymbolReference *helper);
+   /**
+    * @brief Computes the 32-bit displacement between the given direct branch instruction
+    *        and either the target helper or a trampoline to reach the target helper
+    *
+    * @param[in] branchInstructionAddress : buffer address of the branch instruction
+    * @param[in] helper : \c TR::SymbolReference of the target helper
+    *
+    * @return The 32-bit displacement for the branch instruction
+    */
+   int32_t branchDisplacementToHelperOrTrampoline(uint8_t *branchInstructionAddress, TR::SymbolReference *helper);
 
    /**
     * \brief Reserve space in the code cache for a specified number of trampolines.
@@ -638,7 +655,7 @@ class OMR_EXTENSIBLE CodeGenerator : public OMR::CodeGenerator
    // The core "clobberEvaluate" logic for single registers (not register
    // pairs), parameterized by the opcode used to move the desired value into a
    // clobberable register if necessary
-   TR::Register *gprClobberEvaluate(TR::Node *node, TR_X86OpCodes movRegRegOpCode);
+   TR::Register *gprClobberEvaluate(TR::Node *node, TR::InstOpCode::Mnemonic movRegRegOpCode);
 
    TR_OutlinedInstructions *findOutlinedInstructionsFromLabel(TR::LabelSymbol *label);
    TR_OutlinedInstructions *findOutlinedInstructionsFromMergeLabel(TR::LabelSymbol *label);
@@ -700,15 +717,15 @@ protected:
    TR::X86ImmInstruction *_returnTypeInfoInstruction;
    const TR::X86LinkageProperties  *_linkageProperties;
 
+   TR_VFPState                     _vfpState;
+   TR::X86VFPSaveInstruction       *_vfpResetInstruction;
+
    private:
 
    bool nodeIsFoldableMemOperand(TR::Node *node, TR::Node *parent, TR_RegisterPressureState *state);
 
    TR::RealRegister             *_frameRegister;
 
-   TR::SymbolReference             *_wordConversionTemp;
-   TR::SymbolReference             *_doubleWordConversionTemp;
-   TR::SymbolReference             *_currentTimeMillisTemp;
    TR::SymbolReference             *_nanoTimeTemp;
 
    TR::Instruction                 *_lastCatchAppendInstruction;
@@ -728,14 +745,11 @@ protected:
    int32_t                         _PicSlotCount;
    int32_t                         _lowestCommonCodePatchingAlignmentBoundary;
 
-   TR_VFPState                     _vfpState;
-   TR::X86VFPSaveInstruction       *_vfpResetInstruction;
-
    TR_X86PaddingTable             *_paddingTable;
 
    TR::LabelSymbol                  *_switchToInterpreterLabel;
 
-   TR_X86OpCodes                   _xmmDoubleLoadOpCode;
+   TR::InstOpCode::Mnemonic                   _xmmDoubleLoadOpCode;
 
    int32_t _numReservedIPICTrampolines; ///< number of reserved IPIC trampolines
 
@@ -747,8 +761,8 @@ protected:
       EnableSinglePrecisionMethods             = 0x00000008, ///< support changing FPCW to single precision for individual methods
       EnableRegisterInterferences              = 0x00000010, ///< consider register interferences during register assignment
       EnableRegisterWeights                    = 0x00000020, ///< use register weights in choosing a best register candidate
-      UseSSEForSinglePrecision                 = 0x00000040, ///< use SSE extensions for single precision
-      UseSSEForDoublePrecision                 = 0x00000080, ///< use SSE extensions for double precision
+      // Available                             = 0x00000040,
+      // Available                             = 0x00000080,
       EnableImplicitDivideCheck                = 0x00000100, ///< platform can catch hardware exceptions for divide overflow and divide by zero
       GenerateMasmListingSyntax                = 0x00000200, ///< generate Masm-style syntax in the debug listings
       MapAutosTo8ByteSlots                     = 0x00000400, ///< don't round up sizes of autos to an 8-byte slot size when the stack is mapped
@@ -803,25 +817,6 @@ protected:
       }
    void setEnableRegisterAssociations() {_flags.set(EnableRegisterAssociations);}
 
-   bool useSSEForSinglePrecision()
-      {
-      return _flags.testAny(UseSSEForSinglePrecision);
-      }
-   void setUseSSEForSinglePrecision() {_flags.set(UseSSEForSinglePrecision);}
-
-   bool useSSEForDoublePrecision()
-      {
-      return _flags.testAny(UseSSEForDoublePrecision);
-      }
-   void setUseSSEForDoublePrecision() {_flags.set(UseSSEForDoublePrecision);}
-
-   bool useSSEForSingleAndDoublePrecision()
-      {
-      return _flags.testAll(UseSSEForSinglePrecision | UseSSEForDoublePrecision);
-      }
-
-   bool useSSEFor(TR::DataType type);
-
    bool targetSupportsSoftwarePrefetches()
       {
       return _flags.testAny(TargetSupportsSoftwarePrefetches);
@@ -833,8 +828,6 @@ protected:
       return _flags.testAny(EnableTLHPrefetching);
       }
    void setEnableTLHPrefetching() {_flags.set(EnableTLHPrefetching);}
-
-   bool needToAvoidCommoningInGRA();
 
    bool generateMasmListingSyntax()    {return _flags.testAny(GenerateMasmListingSyntax);}
    void setGenerateMasmListingSyntax() {_flags.set(GenerateMasmListingSyntax);}
@@ -851,8 +844,8 @@ protected:
 
    TR::X86ImmInstruction* getReturnTypeInfoInstruction() { return _returnTypeInfoInstruction; }
 
-   TR_X86OpCodes getXMMDoubleLoadOpCode() {return _xmmDoubleLoadOpCode;}
-   void setXMMDoubleLoadOpCode(TR_X86OpCodes o) {_xmmDoubleLoadOpCode = o;}
+   TR::InstOpCode::Mnemonic getXMMDoubleLoadOpCode() {return _xmmDoubleLoadOpCode;}
+   void setXMMDoubleLoadOpCode(TR::InstOpCode::Mnemonic o) {_xmmDoubleLoadOpCode = o;}
 
    TR::LabelSymbol *getSwitchToInterpreterLabel() {return _switchToInterpreterLabel;}
    void setSwitchToInterpreterLabel(TR::LabelSymbol *s) {_switchToInterpreterLabel = s;}
@@ -876,17 +869,6 @@ protected:
 }
 
 }
-
-
-// Trampolines
-//
-
-#if defined(TR_TARGET_64BIT)
-#define NEEDS_TRAMPOLINE(target, rip, cg) (cg->directCallRequiresTrampoline((intptr_t)target, (intptr_t)rip))
-#else
-// Give the C++ compiler a hand
-#define NEEDS_TRAMPOLINE(target, rip, cg) (0)
-#endif
 
 #define IS_32BIT_RIP(x,rip)  ((intptr_t)(x) == (intptr_t)(rip) + (int32_t)((intptr_t)(x) - (intptr_t)(rip)))
 

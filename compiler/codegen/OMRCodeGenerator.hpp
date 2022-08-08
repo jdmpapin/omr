@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -245,6 +245,27 @@ namespace TR
 namespace OMR
 {
 
+typedef TR::Register *(* TreeEvaluatorFunctionPointer)(TR::Node *node, TR::CodeGenerator *codeGen);
+
+class TreeEvaluatorFunctionPointerTable
+   {
+   private:
+   static TreeEvaluatorFunctionPointer table[];
+
+   static void checkTableSize();
+
+   public:
+   TreeEvaluatorFunctionPointer& operator[] (TR::ILOpCode opcode)
+      {
+      return table[opcode.getTableIndex()];
+      }
+
+   TreeEvaluatorFunctionPointer& operator[] (TR::VectorOperation operation)
+      {
+      return table[TR::ILOpCode::getTableIndex(operation)];
+      }
+   };
+
 class OMR_EXTENSIBLE CodeGenerator
    {
 
@@ -268,7 +289,6 @@ protected:
 
    TR_BitVector *_localsThatAreStored;
    int32_t _numLocalsWhenStoreAnalysisWasDone;
-   List<TR_Pair<TR::Node, int32_t> > _ialoadUnneeded;
 
    /**
     * @brief Constructor
@@ -388,9 +408,6 @@ public:
    TR::Instruction *getImplicitExceptionPoint() {return _implicitExceptionPoint;}
    TR::Instruction *setImplicitExceptionPoint(TR::Instruction *p) {return (_implicitExceptionPoint = p);}
 
-   void setNextAvailableBlockIndex(int32_t blockIndex) {}
-   int32_t getNextAvailableBlockIndex() { return -1; }
-
    bool mustGenerateSwitchToInterpreterPrePrologue() { return false; }
    bool buildInterpreterEntryPoint() { return false; }
    void generateCatchBlockBBStartPrologue(TR::Node *node, TR::Instruction *fenceInstruction) { return; }
@@ -463,7 +480,7 @@ public:
    // --------------------------------------------------------------------------
    // Tree evaluation
    //
-   static TR_TreeEvaluatorFunctionPointer *getTreeEvaluatorTable() {return _nodeToInstrEvaluators;}
+   static TreeEvaluatorFunctionPointerTable getTreeEvaluatorTable() {return _nodeToInstrEvaluators;}
 
    int32_t getEvaluationPriority(TR::Node*node);
    int32_t whichNodeToEvaluate(TR::Node*first, TR::Node* second);      // Decide which of two nodes should be evaluated first.
@@ -494,9 +511,6 @@ public:
 
    void startUsingRegister(TR::Register *reg);
    void stopUsingRegister(TR::Register *reg);
-
-   void setCurrentBlockIndex(int32_t blockIndex) { }
-   int32_t getCurrentBlockIndex() { return -1; }
 
    TR::Instruction *lastInstructionBeforeCurrentEvaluationTreeTop()
       {
@@ -1034,8 +1048,6 @@ public:
 
    TR_Array<TR::Register *>& getRegisterArray() {return _registerArray;}
 
-   bool needToAvoidCommoningInGRA() {return false;}
-
    bool considerTypeForGRA(TR::Node *node) {return true;}
    bool considerTypeForGRA(TR::DataType dt) {return true;}
    bool considerTypeForGRA(TR::SymbolReference *symRef) {return true;}
@@ -1087,9 +1099,26 @@ public:
    TR::list<TR_BackingStore*>& getSpill4FreeList() {return _spill4FreeList;}
    TR::list<TR_BackingStore*>& getSpill8FreeList() {return _spill8FreeList;}
    TR::list<TR_BackingStore*>& getSpill16FreeList() {return _spill16FreeList;}
+   TR::list<TR_BackingStore*>& getSpill32FreeList() {return _spill32FreeList;}
+   TR::list<TR_BackingStore*>& getSpill64FreeList() {return _spill64FreeList;}
    TR::list<TR_BackingStore*>& getInternalPointerSpillFreeList() {return _internalPointerSpillFreeList;}
    TR::list<TR_BackingStore*>& getCollectedSpillList() {return _collectedSpillList;}
    TR::list<TR_BackingStore*>& getAllSpillList() {return _allSpillList;}
+
+   /**
+    * @brief Returns the list of registers which is assigned first time in OOL cold path
+    *
+    * @return the list of registers which is assigned first time in OOL cold path
+    */
+   TR::list<TR::Register*> *getFirstTimeLiveOOLRegisterList() {return _firstTimeLiveOOLRegisterList;}
+
+   /**
+    * @brief Sets the list of registers which is assigned first time in OOL cold path
+    *
+    * @param r : the list of registers which is assigned first time in OOL cold path
+    * @return the list of registers
+    */
+   TR::list<TR::Register*> *setFirstTimeLiveOOLRegisterList(TR::list<TR::Register*> *r) {return _firstTimeLiveOOLRegisterList = r;}
 
    TR::list<TR::Register*> *getSpilledRegisterList() {return _spilledRegisterList;}
    TR::list<TR::Register*> *setSpilledRegisterList(TR::list<TR::Register*> *r) {return _spilledRegisterList = r;}
@@ -1175,6 +1204,7 @@ public:
    bool needRelocationsForStatics();
    bool needRelocationsForBodyInfoData();
    bool needRelocationsForPersistentInfoData();
+   bool needRelocationsForPersistentProfileInfoData();
    bool needRelocationsForLookupEvaluationData();
    bool needRelocationsForCurrentMethodPC();
 
@@ -1200,6 +1230,12 @@ public:
    void emitDataSnippets() {}
    bool hasDataSnippets() {return false;}
    int32_t setEstimatedLocationsForDataSnippetLabels(int32_t estimatedSnippetStart) {return 0;}
+
+   TR::list<TR::Snippet*> *getSnippetsToBePatchedOnClassUnload() { return &_snippetsToBePatchedOnClassUnload; }
+
+   TR::list<TR::Snippet*> *getMethodSnippetsToBePatchedOnClassUnload() { return &_methodSnippetsToBePatchedOnClassUnload; }
+
+   TR::list<TR::Snippet*> *getSnippetsToBePatchedOnClassRedefinition() { return &_snippetsToBePatchedOnClassRedefinition; }
 
    // --------------------------------------------------------------------------
    // Register pressure
@@ -1272,14 +1308,14 @@ public:
    // --------------------------------------------------------------------------
    // Code patching
    //
-   // Used to find out whether there is an appropriate instruction space as vgdnop space
-   int32_t sizeOfInstructionToBePatched(TR::Instruction *vgdnop);
-   int32_t sizeOfInstructionToBePatchedHCRGuard(TR::Instruction *vgdnop);
-   // Used to find which instruction is an appropriate instruction space as vgdnop space
-   TR::Instruction* getInstructionToBePatched(TR::Instruction *vgdnop);
+   // Used to find out whether there is an appropriate instruction space as vgnop space
+   int32_t sizeOfInstructionToBePatched(TR::Instruction *vgnop);
+   int32_t sizeOfInstructionToBePatchedHCRGuard(TR::Instruction *vgnop);
+   // Used to find which instruction is an appropriate instruction space as vgnop space
+   TR::Instruction* getInstructionToBePatched(TR::Instruction *vgnop);
    // Used to find the guard instruction where a given guard will actually patch
-   // currently can only return a value other than vgdnop for HCR guards
-   TR::Instruction* getVirtualGuardForPatching(TR::Instruction *vgdnop);
+   // currently can only return a value other than vgnop for HCR guards
+   TR::Instruction* getVirtualGuardForPatching(TR::Instruction *vgnop);
 
    void jitAddPicToPatchOnClassUnload(void *classPointer, void *addressToBePatched) {}
    void jitAdd32BitPicToPatchOnClassUnload(void *classPointer, void *addressToBePatched) {}
@@ -1572,12 +1608,6 @@ public:
    bool getSupportsEncodeUtf16LittleWithSurrogateTest() { return false; }
    bool getSupportsEncodeUtf16BigWithSurrogateTest() { return false; }
 
-   bool supportsZonedDFPConversions() {return _enabledFlags.testAny(SupportsZonedDFPConversions);}
-   void setSupportsZonedDFPConversions() {_enabledFlags.set(SupportsZonedDFPConversions);}
-
-   bool supportsFastPackedDFPConversions() {return _enabledFlags.testAny(SupportsFastPackedDFPConversions);}
-   void setSupportsFastPackedDFPConversions() {_enabledFlags.set(SupportsFastPackedDFPConversions);}
-
    bool getSupportsArraySet() {return _flags1.testAny(SupportsArraySet);}
    void setSupportsArraySet() {_flags1.set(SupportsArraySet);}
 
@@ -1621,7 +1651,8 @@ public:
    bool getSupportsAutoSIMD() { return _flags4.testAny(SupportsAutoSIMD);}
    void setSupportsAutoSIMD() { _flags4.set(SupportsAutoSIMD);}
 
-   bool getSupportsOpCodeForAutoSIMD(TR::ILOpCode, TR::DataType) { return false; }
+   static bool getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::ILOpCode opcode) { return false; }
+   bool getSupportsOpCodeForAutoSIMD(TR::ILOpCode opcode) { return false; }
 
    bool removeRegisterHogsInLowerTreesWalk() { return _flags3.testAny(RemoveRegisterHogsInLowerTreesWalk);}
    void setRemoveRegisterHogsInLowerTreesWalk() { _flags3.set(RemoveRegisterHogsInLowerTreesWalk);}
@@ -1898,7 +1929,7 @@ public:
 
    enum // enabledFlags
       {
-      SupportsZonedDFPConversions      = 0x0001,
+      // AVAILABLE                     = 0x0001,
       // AVAILABLE                     = 0x0002,
       // AVAILABLE                     = 0x0004,
       EnableRefinedAliasSets           = 0x0008,
@@ -1911,7 +1942,7 @@ public:
       // AVAILABLE                     = 0x0400,
       // AVAILABLE                     = 0x0800,
       // AVAILABLE                     = 0x1000,
-      SupportsFastPackedDFPConversions = 0x2000,
+      // AVAILABLE                     = 0x2000,
       };
 
    TR::SymbolReferenceTable *_symRefTab;
@@ -1945,6 +1976,8 @@ public:
    TR::list<TR_BackingStore*> _spill4FreeList;
    TR::list<TR_BackingStore*> _spill8FreeList;
    TR::list<TR_BackingStore*> _spill16FreeList;
+   TR::list<TR_BackingStore*> _spill32FreeList;
+   TR::list<TR_BackingStore*> _spill64FreeList;
    TR::list<TR_BackingStore*> _internalPointerSpillFreeList;
    TR::list<TR_BackingStore*> _collectedSpillList;
    TR::list<TR_BackingStore*> _allSpillList;
@@ -1958,6 +1991,7 @@ public:
 
    int32_t _accumulatorNodeUsage;
 
+   TR::list<TR::Register*> *_firstTimeLiveOOLRegisterList;
    TR::list<TR::Register*> *_spilledRegisterList;
    TR::list<OMR::RegisterUsage*> *_referencedRegistersList;
    int32_t _currentPathDepth;
@@ -2004,9 +2038,13 @@ public:
    flags16_t _enabledFlags;
 
    public:
-   static TR_TreeEvaluatorFunctionPointer _nodeToInstrEvaluators[];
+
+   static TreeEvaluatorFunctionPointerTable _nodeToInstrEvaluators;
 
    protected:
+
+   /// Determines whether register allocation has been completed
+   bool _afterRA;
 
    bool _disableInternalPointers;
 
@@ -2044,6 +2082,10 @@ public:
     * The binary object format to generate code for in this compilation
     */
    TR::ObjectFormat *_objectFormat;
+
+   TR::list<TR::Snippet *> _snippetsToBePatchedOnClassUnload;
+   TR::list<TR::Snippet *> _methodSnippetsToBePatchedOnClassUnload;
+   TR::list<TR::Snippet *> _snippetsToBePatchedOnClassRedefinition;
 
    };
 

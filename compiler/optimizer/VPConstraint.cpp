@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -131,29 +131,29 @@ TR::VPNotEqual          *TR::VPNotEqual::asNotEqual()                   { return
 int16_t TR::VPConstraint::getLowShort()
    {
    if (isUnsigned())
-       return TR::getMinUnsigned<TR::Int16>();
-   return TR::getMinSigned<TR::Int16>();
+       return static_cast<int16_t>(TR::getMinUnsigned<TR::Int16>());
+   return static_cast<int16_t>(TR::getMinSigned<TR::Int16>());
    }
 
 int16_t TR::VPConstraint::getHighShort()
    {
    if (isUnsigned())
-       return TR::getMaxUnsigned<TR::Int16>();
-   return TR::getMaxSigned<TR::Int16>();
+       return static_cast<int16_t>(TR::getMaxUnsigned<TR::Int16>());
+   return static_cast<int16_t>(TR::getMaxSigned<TR::Int16>());
    }
 
 int32_t TR::VPConstraint::getLowInt()
    {
    if (isUnsigned())
-      return TR::getMinUnsigned<TR::Int32>();
-   return TR::getMinSigned<TR::Int32>();
+      return static_cast<int32_t>(TR::getMinUnsigned<TR::Int32>());
+   return static_cast<int32_t>(TR::getMinSigned<TR::Int32>());
    }
 
 int32_t TR::VPConstraint::getHighInt()
    {
    if (isUnsigned())
-      return TR::getMaxUnsigned<TR::Int32>();
-   return TR::getMaxSigned<TR::Int32>();
+      return static_cast<int32_t>(TR::getMaxUnsigned<TR::Int32>());
+   return static_cast<int32_t>(TR::getMaxSigned<TR::Int32>());
    }
 
 int64_t TR::VPConstraint::getLowLong()
@@ -170,33 +170,33 @@ int64_t TR::VPConstraint::getHighLong()
 uint16_t TR::VPConstraint::getUnsignedLowShort()
    {
    if ( (getLowShort() ^ getHighShort()) >= 0)       // if both numbers are the same sign, return the small value
-      return (uint16_t)getLowShort();
+      return static_cast<uint16_t>(getLowShort());
 
-   return TR::getMinUnsigned<TR::Int16>();
+   return static_cast<uint16_t>(TR::getMinUnsigned<TR::Int16>());
    }
 
 uint16_t TR::VPConstraint::getUnsignedHighShort()
    {
    if ( (getLowShort() ^ getHighShort()) >= 0)       // if both numbers have the same sign, getHigh is the high value
-      return (uint16_t)getHighShort();
+      return static_cast<uint16_t>(getHighShort());
 
-   return TR::getMaxUnsigned<TR::Int16>();
+   return static_cast<uint16_t>(TR::getMaxUnsigned<TR::Int16>());
    }
 
 uint32_t TR::VPConstraint::getUnsignedLowInt()
    {
    if ( (getLowInt() ^ getHighInt()) >= 0)       // if both numbers are the same sign, return the small value
-      return (uint32_t)getLowInt();
+      return static_cast<uint32_t>(getLowInt());
 
-   return TR::getMinUnsigned<TR::Int32>();
+   return static_cast<uint32_t>(TR::getMinUnsigned<TR::Int32>());
    }
 
 uint32_t TR::VPConstraint::getUnsignedHighInt()
    {
    if ( (getLowInt() ^ getHighInt()) >= 0)       // if both numbers have the same sign, getHigh is the high value
-      return (uint32_t)getHighInt();
+      return static_cast<uint32_t>(getHighInt());
 
-   return TR::getMaxUnsigned<TR::Int32>();
+   return static_cast<uint32_t>(TR::getMaxUnsigned<TR::Int32>());
    }
 
 uint64_t TR::VPConstraint::getUnsignedLowLong()
@@ -623,6 +623,13 @@ bool TR::VPKnownObject::isArrayWithConstantElements(TR::Compilation * comp)
    return knot->isArrayWithConstantElements(_index);
    }
 
+bool TR::VPKnownObject::isArrayWithStableElements(TR::Compilation * comp)
+   {
+   TR::KnownObjectTable *knot = comp->getKnownObjectTable();
+   TR_ASSERT(knot, "TR::KnownObjectTable should not be null");
+   return knot->isArrayWithStableElements(_index);
+   }
+
 TR_YesNoMaybe TR::VPClassType::isArray()
    {
    if (_sig[0] == '[')
@@ -758,12 +765,12 @@ TR::VPClassType *TR::VPUnresolvedClass::getArrayClass(OMR::ValuePropagation *vp)
 
 bool TR::VPUnresolvedClass::isReferenceArray(TR::Compilation *comp)
    {
-   return _sig[0] == '[' && (_sig[1] == '[' || _sig[1] == 'L');
+   return _sig[0] == '[' && (_sig[1] == '[' || _sig[1] == 'L' || _sig[1] == 'Q');
    }
 
 bool TR::VPUnresolvedClass::isPrimitiveArray(TR::Compilation *comp)
    {
-   return _sig[0] == '[' && _sig[1] != '[' && _sig[1] != 'L';
+   return _sig[0] == '[' && _sig[1] != '[' && _sig[1] != 'L'  && _sig[1] != 'Q';
    }
 
 bool TR::VPNullObject::isNullObject()
@@ -864,6 +871,7 @@ TR::VPConstraint *TR::VPConstraint::create(OMR::ValuePropagation *vp, const char
    switch (sig[0])
       {
       case 'L':
+      case 'Q':
       case '[':
          return TR::VPClassType::create(vp, sig, len, method, isFixedClass);
       case 'B':
@@ -920,19 +928,19 @@ TR::VPIntConst *TR::VPIntConst::create(OMR::ValuePropagation *vp, int32_t v)
 TR::VPConstraint *TR::VPShortConst::createExclusion(OMR::ValuePropagation *vp, int16_t v)
    {
    if (v == TR::getMinSigned<TR::Int16>())
-       return TR::VPShortRange::create(vp,v+1,TR::getMaxSigned<TR::Int16>());
+       return TR::VPShortRange::create(vp,v+1,static_cast<int16_t>(TR::getMaxSigned<TR::Int16>()));
    if (v == TR::getMaxSigned<TR::Int16>())
-       return TR::VPShortRange::create(vp,TR::getMinSigned<TR::Int16>(),v-1);
-   return TR::VPMergedConstraints::create(vp, TR::VPShortRange::create(vp,TR::getMinSigned<TR::Int16>(),v-1),TR::VPShortRange::create(vp,v+1,TR::getMaxSigned<TR::Int16>()));
+       return TR::VPShortRange::create(vp,static_cast<int16_t>(TR::getMinSigned<TR::Int16>()),v-1);
+   return TR::VPMergedConstraints::create(vp, TR::VPShortRange::create(vp,static_cast<int16_t>(TR::getMinSigned<TR::Int16>()),v-1),TR::VPShortRange::create(vp,v+1,static_cast<int16_t>(TR::getMaxSigned<TR::Int16>())));
    }
 
 TR::VPConstraint *TR::VPIntConst::createExclusion(OMR::ValuePropagation *vp, int32_t v)
    {
    if (v == TR::getMinSigned<TR::Int32>())
-      return TR::VPIntRange::create(vp, v+1, TR::getMaxSigned<TR::Int32>());
+      return TR::VPIntRange::create(vp, v+1, static_cast<int32_t>(TR::getMaxSigned<TR::Int32>()));
    if (v == TR::getMaxSigned<TR::Int32>())
-      return TR::VPIntRange::create(vp, TR::getMinSigned<TR::Int32>(), v-1);
-   return TR::VPMergedConstraints::create(vp, TR::VPIntRange::create(vp, TR::getMinSigned<TR::Int32>(), v-1), TR::VPIntRange::create(vp, v+1, TR::getMaxSigned<TR::Int32>()));
+      return TR::VPIntRange::create(vp, static_cast<int32_t>(TR::getMinSigned<TR::Int32>()), v-1);
+   return TR::VPMergedConstraints::create(vp, TR::VPIntRange::create(vp, static_cast<int32_t>(TR::getMinSigned<TR::Int32>()), v-1), TR::VPIntRange::create(vp, v+1, static_cast<int32_t>(TR::getMaxSigned<TR::Int32>())));
    }
 
 TR::VPShortConstraint * TR::VPShortRange::create(OMR::ValuePropagation * vp, int16_t low, int16_t high, TR_YesNoMaybe canOverflow)
@@ -973,7 +981,7 @@ TR::VPShortConstraint *TR::VPShortRange::createWithPrecision(OMR::ValuePropagati
    {
    int64_t lo, hi;
    constrainRangeByPrecision(TR::getMinSigned<TR::Int16>(), TR::getMaxSigned<TR::Int16>(), precision, lo, hi, isNonNegative);
-   return TR::VPShortRange::create(vp, lo, hi);
+   return TR::VPShortRange::create(vp, static_cast<int16_t>(lo), static_cast<int16_t>(hi));
    }
 
 TR::VPIntConstraint *TR::VPIntRange::create(OMR::ValuePropagation *vp, int32_t low, int32_t high, TR_YesNoMaybe canOverflow)
@@ -1046,7 +1054,7 @@ TR::VPIntConstraint *TR::VPIntRange::createWithPrecision(OMR::ValuePropagation *
       else if (dt == TR::Int16)
          constrainRangeByPrecision(TR::getMinSigned<TR::Int16>(), TR::getMaxUnsigned<TR::Int16>(), precision, lo, hi, isNonNegative);
       }
-   return TR::VPIntRange::create(vp, lo, hi);
+   return TR::VPIntRange::create(vp, static_cast<int32_t>(lo), static_cast<int32_t>(hi));
    }
 
 TR::VPLongConst *TR::VPLongConst::create(OMR::ValuePropagation *vp, int64_t v)
@@ -1202,7 +1210,7 @@ TR::VPClassType *TR::VPClassType::create(OMR::ValuePropagation *vp, TR::SymbolRe
    int32_t len;
    char *name = TR::Compiler->cls.classNameChars(vp->comp(), symRef, len);
    TR_ASSERT(name, "can't get class name from symbol reference");
-   char *sig = classNameToSignature(name, len, vp->comp());
+   char *sig = TR::Compiler->cls.classNameToSignature(name, len, vp->comp());
    //return TR::VPUnresolvedClass::create(vp, sig, len, symRef->getOwningMethod(vp->comp()));
    return TR::VPClassType::create(vp, sig, len, symRef->getOwningMethod(vp->comp()), isFixedClass);
    }
@@ -1490,7 +1498,7 @@ TR::VPArrayInfo *TR::VPArrayInfo::create(OMR::ValuePropagation *vp, char *sig)
    else
       stride = TR::Symbol::convertTypeToSize(d);
 
-   return TR::VPArrayInfo::create(vp, 0, TR::getMaxSigned<TR::Int32>() / stride, stride);
+   return TR::VPArrayInfo::create(vp, 0, static_cast<int32_t>(TR::getMaxSigned<TR::Int32>()) / stride, stride);
    }
 
 TR::VPMergedConstraints *TR::VPMergedConstraints::create(OMR::ValuePropagation *vp, TR::VPConstraint *first, TR::VPConstraint *second)
@@ -1832,7 +1840,7 @@ TR::VPConstraint *TR::VPLongConstraint::merge1(TR::VPConstraint *other, OMR::Val
             lowVal = otherInt->getLow();
          else
             lowVal = getLow();
-         if ((int64_t)otherLong->getHigh() <= (int64_t)getHigh())
+         if ((int64_t)otherInt->getHigh() <= (int64_t)getHigh())
             highVal = getHigh();
          else
             highVal = otherInt->getHigh();
@@ -2935,8 +2943,33 @@ TR::VPClassType *TR::VPClassType::classTypesCompatible(TR::VPClassType * otherTy
       }
    }
 
+TR::VPConstraint *TR::VPClassType::typeIntersectLocation(
+   TR::VPObjectLocation *location, OMR::ValuePropagation *vp)
+   {
+   TR_YesNoMaybe classObject = isClassObject();
+   if (classObject != TR_maybe)
+      {
+      auto impliedKind = classObject == TR_yes
+         ? TR::VPObjectLocation::JavaLangClassObject
+         : TR::VPObjectLocation::NotClassObject;
 
+      auto impliedLocation = TR::VPObjectLocation::create(vp, impliedKind);
 
+      location = (TR::VPObjectLocation *) impliedLocation->intersect(location, vp);
+      if (!location) return NULL;
+      }
+
+   if (location->isClassObject() == TR_yes && classObject != TR_yes)
+      {
+      // Bundling this (the type constraint) with location into a VPClass would
+      // change the meaning of the type. Alone, this represents the type of the
+      // constrained value, but combined with location, it would instead be
+      // interpreted as the type represented by the constrained value.
+      return location;
+      }
+
+   return TR::VPClass::create(vp, this, NULL, NULL, NULL, location);
+   }
 
 // this routine encapsulates code that used to exist
 // in VPClass::intersect
@@ -3392,8 +3425,8 @@ TR::VPConstraint *TR::VPResolvedClass::intersect1(TR::VPConstraint *other, OMR::
             otherLen--;
             }
 
-         if (((*thisSig != 'L') && (*thisSig != '[')) &&
-             ((*otherSig == 'L') || (*otherSig == '[')))
+         if (((*thisSig != 'L') && (*thisSig != '[') && (*thisSig != 'Q')) &&
+             ((*otherSig == 'L') || (*otherSig == '[') || (*otherSig == 'Q')))
             return NULL;
 
          return this;
@@ -3424,16 +3457,7 @@ TR::VPConstraint *TR::VPResolvedClass::intersect1(TR::VPConstraint *other, OMR::
       return TR::VPClass::create(vp, this, NULL, NULL, other->asArrayInfo(), NULL);
    else if (other->asObjectLocation())
       {
-      TR::VPObjectLocation *location = other->asObjectLocation();
-      TR_YesNoMaybe classObject = isClassObject();
-      if (classObject != TR_maybe)
-         {
-         location = TR::VPObjectLocation::create(vp, classObject == TR_yes ?
-                                                TR::VPObjectLocation::ClassObject : TR::VPObjectLocation::NotClassObject);
-         location = (TR::VPObjectLocation *) location->intersect(other->asObjectLocation(), vp);
-         if (!location) return NULL;
-         }
-      return TR::VPClass::create(vp, this, NULL, NULL, NULL, location);
+      return typeIntersectLocation(other->asObjectLocation(), vp);
       }
    return this;
    }
@@ -3494,8 +3518,10 @@ TR::VPConstraint *TR::VPFixedClass::intersect1(TR::VPConstraint *other, OMR::Val
             otherLen--;
             }
 
-         if ((*thisSig != 'L') && ((*otherSig == 'L') || (*otherSig == '[')))
+         // Test if thisSig is primitive or an array, and otherSig is any kind of reference type
+         if ((*thisSig != 'L') && (*thisSig != 'Q') && ((*otherSig == 'L') || (*otherSig == '[') || (*otherSig == 'Q')))
             {
+            // Test if thisSig is not an array, or otherSig is not a java/lang/Object array
             if (! ((*thisSig == '[') && (otherLen == 18 && !strncmp(otherSig, "Ljava/lang/Object;", 18))) )
                return NULL;
             }
@@ -3524,16 +3550,7 @@ TR::VPConstraint *TR::VPFixedClass::intersect1(TR::VPConstraint *other, OMR::Val
       return TR::VPClass::create(vp, this, NULL, NULL, other->asArrayInfo(), NULL);
    else if (other->asObjectLocation())
       {
-      TR::VPObjectLocation *location = other->asObjectLocation();
-      TR_YesNoMaybe classObject = isClassObject();
-      if (classObject != TR_maybe)
-         {
-         location = TR::VPObjectLocation::create(vp, classObject == TR_yes ?
-                                                TR::VPObjectLocation::ClassObject : TR::VPObjectLocation::NotClassObject);
-         location = (TR::VPObjectLocation *) location->intersect(other->asObjectLocation(), vp);
-         if (!location) return NULL;
-         }
-      return TR::VPClass::create(vp, this, NULL, NULL, NULL, location);
+      return typeIntersectLocation(other->asObjectLocation(), vp);
       }
    return NULL;
    }
@@ -3635,7 +3652,7 @@ TR::VPConstraint *TR::VPUnresolvedClass::intersect1(TR::VPConstraint *other, OMR
    else if (other->asArrayInfo())
       return TR::VPClass::create(vp, this, NULL, NULL, other->asArrayInfo(), NULL);
    else if (other->asObjectLocation())
-      return TR::VPClass::create(vp, this, NULL, NULL, NULL, other->asObjectLocation()); // FIXME: unless rtresolve, should be on heap
+      return typeIntersectLocation(other->asObjectLocation(), vp);
    return this;
    }
 
@@ -4648,8 +4665,8 @@ TR::VPConstraint *TR::VPShortConstraint::getRange(int16_t low, int16_t high, boo
          return NULL;
 
       //disjoint merged constraint
-      TR::VPConstraint* range1 = TR::VPShortRange::create(vp, TR::getMinSigned<TR::Int16>(), high, TR_yes);
-      TR::VPConstraint* range2 = TR::VPShortRange::create(vp, low, TR::getMaxSigned<TR::Int16>(), TR_yes);
+      TR::VPConstraint* range1 = TR::VPShortRange::create(vp, static_cast<int16_t>(TR::getMinSigned<TR::Int16>()), static_cast<int16_t>(high), TR_yes);
+      TR::VPConstraint* range2 = TR::VPShortRange::create(vp, static_cast<int16_t>(low), static_cast<int16_t>(TR::getMaxSigned<TR::Int16>()), TR_yes);
       return TR::VPMergedConstraints::create(vp, range1, range2);
       }
 
@@ -4686,8 +4703,8 @@ TR::VPConstraint *TR::VPIntConstraint::getRange(int32_t low, int32_t high, bool 
          return NULL;
 
       //disjoint merged constraint
-      TR::VPConstraint* range1 = TR::VPIntRange::create(vp, TR::getMinSigned<TR::Int32>(), high, TR_yes);
-      TR::VPConstraint* range2 = TR::VPIntRange::create(vp, low, TR::getMaxSigned<TR::Int32>(), TR_yes);
+      TR::VPConstraint* range1 = TR::VPIntRange::create(vp, static_cast<int32_t>(TR::getMinSigned<TR::Int32>()), high, TR_yes);
+      TR::VPConstraint* range2 = TR::VPIntRange::create(vp, low, static_cast<int32_t>(TR::getMaxSigned<TR::Int32>()), TR_yes);
       return TR::VPMergedConstraints::create(vp, range1, range2);
       }
 
@@ -5253,7 +5270,7 @@ TR::VPConstraint *TR::VPLessThanOrEqual::propagateAbsoluteConstraint(TR::VPConst
       if (newBound > oldBound)
          return NULL;
 
-      constraint = TR::VPIntRange::create(vp, newBound, TR::getMaxSigned<TR::Int32>()-increment());
+      constraint = TR::VPIntRange::create(vp, newBound, static_cast<int32_t>(TR::getMaxSigned<TR::Int32>())-increment());
       }
    if (vp->trace())
       {
@@ -5301,7 +5318,7 @@ TR::VPConstraint *TR::VPGreaterThanOrEqual::propagateAbsoluteConstraint(TR::VPCo
       if (newBound < oldBound)
          return NULL;
 
-      constraint = TR::VPIntRange::create(vp, TR::getMinSigned<TR::Int32>() - increment(), newBound);
+      constraint = TR::VPIntRange::create(vp, static_cast<int32_t>(TR::getMinSigned<TR::Int32>()) - increment(), newBound);
       }
    if (vp->trace())
       {
@@ -5401,13 +5418,13 @@ TR::VPConstraint *TR::VPNotEqual::propagateAbsoluteConstraint(TR::VPConstraint *
 //       else
 //         {
          if (excludedValue != TR::getMinSigned<TR::Int32>())
-            newConstraint = TR::VPIntRange::create(vp, TR::getMinSigned<TR::Int32>(), excludedValue-1);
+            newConstraint = TR::VPIntRange::create(vp, static_cast<int32_t>(TR::getMinSigned<TR::Int32>()), excludedValue-1);
          if (excludedValue != TR::getMaxSigned<TR::Int32>())
             {
             if (newConstraint)
-               newConstraint = newConstraint->merge(TR::VPIntRange::create(vp, excludedValue+1, TR::getMaxSigned<TR::Int32>()), vp);
+               newConstraint = newConstraint->merge(TR::VPIntRange::create(vp, excludedValue+1, static_cast<int32_t>(TR::getMaxSigned<TR::Int32>())), vp);
             else
-               newConstraint = TR::VPIntRange::create(vp, excludedValue+1, TR::getMaxSigned<TR::Int32>());
+               newConstraint = TR::VPIntRange::create(vp, excludedValue+1, static_cast<int32_t>(TR::getMaxSigned<TR::Int32>()));
             }
 //         }
       }
@@ -5800,7 +5817,7 @@ void TR::VPResolvedClass::print(TR::Compilation *comp, TR::FILE *outFile)
    if (isSpecialClass((uintptr_t)_class))
       {
       sig = "<special>";
-      len = strlen(sig);
+      len = static_cast<int32_t>(strlen(sig));
       }
 
    trfprintf(outFile, "class %.*s", len, sig);

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -98,7 +98,9 @@ OMR::IlBuilder::IlBuilder(TR::IlBuilder *source)
    _count(-1),
    _partOfSequence(false),
    _connectedTrees(false),
-   _comesBack(true)
+   _comesBack(true),
+   _isHandler(source->_isHandler),
+   _bcIndex(source->_bcIndex)
    {
    }
 
@@ -207,6 +209,26 @@ OMR::IlBuilder::printBlock(TR::Block *block)
    comp()->getDebug()->print(comp()->getOutFile(), tt);
    }
 
+TR::IlBuilder *
+OMR::IlBuilder::setBCIndex(int32_t bcIndex)
+   {
+   _bcIndex = bcIndex;
+   return static_cast<TR::IlBuilder *>(this);
+   }
+
+/*
+ * Call this function before calling services on this builder so they will
+ * mark their IL nodes as having this builder's _bcIndex (very handy when
+ * looking at compiler logs and ultimate used to track program locations).
+ * Note: *all* generated nodes will be marked with this builder's _bcIndex until another
+ *       builder's SetCurrentIlGenerator() is called.
+ */
+void
+OMR::IlBuilder::SetCurrentIlGenerator()
+   {
+   comp()->setCurrentIlGenerator((TR_IlGenerator *)this);
+   }
+
 TR::SymbolReference *
 OMR::IlBuilder::lookupSymbol(const char *name)
    {
@@ -254,6 +276,7 @@ TR::IlValue *
 OMR::IlBuilder::NewValue(TR::IlType *dt)
    {
    TR_ASSERT_FATAL(0, "should not create a value without a TR::Node");
+   return 0;
    }
 
 TR::IlValue *
@@ -271,7 +294,7 @@ OMR::IlBuilder::Copy(TR::IlValue *value)
 
    TR::IlValue *newVal = newValue(newSymRef->getSymbol()->getDataType(), loadTemp(newSymRef));
 
-   TraceIL("IlBuilder[ %p ]::Copy value (%d) dataType (%d) to newVal (%d) at cpIndex (%d)\n", this, value->getID(), dt, newVal->getID(), newSymRef->getCPIndex());
+   TraceIL("IlBuilder[ %p ]::Copy value (%d) dataType (%d) to newVal (%d) at cpIndex (%d)\n", this, value->getID(), dt.getDataType(), newVal->getID(), newSymRef->getCPIndex());
 
    return newVal;
    }
@@ -594,14 +617,14 @@ OMR::IlBuilder::indirectLoadNode(TR::IlType *dt, TR::Node *addr, bool isVectorLo
    TR_ASSERT_FATAL(primType != TR::NoType, "Dereferencing an untyped pointer.");
    TR::DataType symRefType = primType;
    if (isVectorLoad)
-      symRefType = symRefType.scalarToVector();
+      symRefType = symRefType.scalarToVector(TR::VectorLength128);
 
    TR::SymbolReference *storeSymRef = symRefTab()->findOrCreateArrayShadowSymbolRef(symRefType, addr);
 
    TR::ILOpCodes loadOp = comp()->il.opCodeForIndirectArrayLoad(primType);
    if (isVectorLoad)
       {
-      loadOp = TR::ILOpCode::convertScalarToVector(loadOp);
+      loadOp = TR::ILOpCode::convertScalarToVector(loadOp, TR::VectorLength128);
       baseType = _types->PrimitiveType(symRefType);
       }
 
@@ -654,8 +677,8 @@ OMR::IlBuilder::VectorStore(const char *varName, TR::IlValue *value)
    TR::DataType dt = valueNode->getDataType();
    if (!dt.isVector())
       {
-      valueNode = TR::Node::create(TR::vsplats, 1, valueNode);
-      dt = dt.scalarToVector();
+      dt = dt.scalarToVector(TR::VectorLength128);
+      valueNode = TR::Node::create(TR::ILOpCode::createVectorOpCode(TR::vsplats, dt), 1, valueNode);
       }
 
    if (!_methodBuilder->symbolDefined(varName))
@@ -694,9 +717,13 @@ OMR::IlBuilder::VectorStoreAt(TR::IlValue *address, TR::IlValue *value)
    TraceIL("IlBuilder[ %p ]::VectorStoreAt address %d gets %d\n", this, address->getID(), value->getID());
 
    TR::Node *valueNode = loadValue(value);
+   TR::DataType dt = valueNode->getDataType();
 
-   if (!valueNode->getDataType().isVector())
-      valueNode = TR::Node::create(TR::vsplats, 1, valueNode);
+   if (!dt.isVector())
+      {
+      dt = dt.scalarToVector(TR::VectorLength128);
+      valueNode = TR::Node::create(TR::ILOpCode::createVectorOpCode(TR::vsplats, dt), 1, valueNode);
+      }
 
    indirectStoreNode(loadValue(address), valueNode);
    }
@@ -704,7 +731,7 @@ OMR::IlBuilder::VectorStoreAt(TR::IlValue *address, TR::IlValue *value)
 TR::IlValue *
 OMR::IlBuilder::CreateLocalArray(int32_t numElements, TR::IlType *elementType)
    {
-   uint32_t size = numElements * elementType->getSize();
+   uint32_t size = static_cast<uint32_t>(numElements * elementType->getSize());
    TR::SymbolReference *localArraySymRef = symRefTab()->createLocalPrimArray(size,
                                                                              methodSymbol(),
                                                                              8 /*FIXME: JVM-specific - byte*/);
@@ -726,7 +753,7 @@ TR::IlValue *
 OMR::IlBuilder::CreateLocalStruct(TR::IlType *structType)
    {
    //similar to CreateLocalArray except writing a method in StructType to get the struct size
-   uint32_t size = structType->getSize();
+   uint32_t size = static_cast<uint32_t>(structType->getSize());
    TR::SymbolReference *localStructSymRef = symRefTab()->createLocalPrimArray(size,
                                                                              methodSymbol(),
                                                                              8 /*FIXME: JVM-specific - byte*/);
@@ -794,7 +821,7 @@ OMR::IlBuilder::LoadAt(TR::IlType *dt, TR::IlValue *address)
    {
    TR_ASSERT_FATAL(address->getDataType() == TR::Address, "LoadAt needs an address operand");
    TR::IlValue *returnValue = indirectLoadNode(dt, loadValue(address));
-   TraceIL("IlBuilder[ %p ]::%d is LoadAt type %d address %d\n", this, returnValue->getID(), dt->getPrimitiveType(), address->getID());
+   TraceIL("IlBuilder[ %p ]::%d is LoadAt type %d address %d\n", this, returnValue->getID(), dt->getPrimitiveType().getDataType(), address->getID());
    return returnValue;
    }
 
@@ -803,7 +830,7 @@ OMR::IlBuilder::VectorLoadAt(TR::IlType *dt, TR::IlValue *address)
    {
    TR_ASSERT_FATAL(address->getDataType() == TR::Address, "LoadAt needs an address operand");
    TR::IlValue *returnValue = indirectLoadNode(dt, loadValue(address), true);
-   TraceIL("IlBuilder[ %p ]::%d is VectorLoadAt type %d address %d\n", this, returnValue->getID(), dt->getPrimitiveType(), address->getID());
+   TraceIL("IlBuilder[ %p ]::%d is VectorLoadAt type %d address %d\n", this, returnValue->getID(), dt->getPrimitiveType().getDataType(), address->getID());
    return returnValue;
    }
 
@@ -823,7 +850,7 @@ OMR::IlBuilder::IndexAt(TR::IlType *dt, TR::IlValue *base, TR::IlValue *index)
       {
       if (indexType != TR::Int64)
          {
-         TR::ILOpCodes op = TR::DataType::getDataTypeConversion(indexType, TR::Int64);
+         TR::ILOpCodes op = TR::ILOpCode::getDataTypeConversion(indexType, TR::Int64);
          indexNode = TR::Node::create(op, 1, indexNode);
          }
       elemSizeNode = TR::Node::lconst(elemType->getSize());
@@ -835,10 +862,10 @@ OMR::IlBuilder::IndexAt(TR::IlType *dt, TR::IlValue *base, TR::IlValue *index)
       TR::DataType targetType = TR::Int32;
       if (indexType != targetType)
          {
-         TR::ILOpCodes op = TR::DataType::getDataTypeConversion(indexType, targetType);
+         TR::ILOpCodes op = TR::ILOpCode::getDataTypeConversion(indexType, targetType);
          indexNode = TR::Node::create(op, 1, indexNode);
          }
-      elemSizeNode = TR::Node::iconst(elemType->getSize());
+      elemSizeNode = TR::Node::iconst(static_cast<int32_t>(elemType->getSize()));
       addOp = TR::aiadd;
       mulOp = TR::imul;
       }
@@ -871,7 +898,7 @@ OMR::IlBuilder::StructFieldInstanceAddress(const char* structName, const char* f
       }
    else
       {
-      offsetValue = ConstInt32(offset);
+      offsetValue = ConstInt32(static_cast<int32_t>(offset));
       }
    auto addr = Add(obj, offsetValue);
    return ConvertTo(ptype, addr);
@@ -925,7 +952,7 @@ TR::IlValue *
 OMR::IlBuilder::ConstInt64(int64_t value)
    {
    TR::IlValue *returnValue = newValue(Int64, TR::Node::lconst(value));
-   TraceIL("IlBuilder[ %p ]::%d is ConstInt64 %d\n", this, returnValue->getID(), value);
+   TraceIL("IlBuilder[ %p ]::%d is ConstInt64 %lld\n", this, returnValue->getID(), value);
    return returnValue;
    }
 
@@ -1046,7 +1073,7 @@ OMR::IlBuilder::ConvertBitsTo(TR::IlType* t, TR::IlValue* v)
       return v;
       }
 
-   TR::ILOpCodes convertOpcode = TR::DataType::getDataTypeBitConversion(typeFrom, typeTo);
+   TR::ILOpCodes convertOpcode = TR::ILOpCode::getDataTypeBitConversion(typeFrom, typeTo);
    TR_ASSERT_FATAL(convertOpcode != TR::BadILOp && TR::DataType::getSize(typeTo) == TR::DataType::getSize(typeFrom),
              "Builder [ %p ] requested bit conversion for value %d from type of size %d (%s) to type of size %d (%s) (consider using ConvertTo() to for narrowing/widening)",
              this, v->getID(), TR::DataType::getSize(typeFrom), typeFrom.toString(), TR::DataType::getSize(typeTo), typeTo.toString());
@@ -1078,10 +1105,10 @@ OMR::IlBuilder::doVectorConversions(TR::Node **leftPtr, TR::Node **rightPtr)
    TR::DataType rType = right->getDataType();
 
    if (lType.isVector() && !rType.isVector())
-      *rightPtr = TR::Node::create(TR::vsplats, 1, right);
+      *rightPtr = TR::Node::create(TR::ILOpCode::createVectorOpCode(TR::vsplats, lType), 1, right);
 
    if (!lType.isVector() && rType.isVector())
-      *leftPtr = TR::Node::create(TR::vsplats, 1, left);
+      *leftPtr = TR::Node::create(TR::ILOpCode::createVectorOpCode(TR::vsplats, rType), 1, left);
    }
 
 TR::IlValue *
@@ -1260,16 +1287,44 @@ OMR::IlBuilder::Sub(TR::IlValue *left, TR::IlValue *right)
    TR::IlValue *returnValue = NULL;
    if (left->getDataType() == TR::Address)
       {
-      if (TR::Compiler->target.is64Bit() && right->getDataType() == TR::Int32)
+      TR::IlValue *zero;
+      TR::ILOpCodes op;
+      bool needSub=true;
+      if (TR::Compiler->target.is64Bit())
          {
-         right = unaryOp(TR::i2l, right);
+         zero = ConstInt64(0);
+         op = TR::aladd;
+         if (right->getDataType() == TR::Int32)
+            {
+            right = unaryOp(TR::i2l, right);
+            }
+         else if (right->getDataType() == TR::Address)
+            {
+            left = unaryOp(TR::a2l, left);
+            right = unaryOp(TR::a2l, right);
+            op = TR::lsub;
+            needSub=false;
+            }
          }
-      else if (TR::Compiler->target.is32Bit() && right->getDataType() == TR::Int64)
+      else if (TR::Compiler->target.is32Bit())
          {
-         right = unaryOp(TR::l2i, right);
+         zero = ConstInt32(0);
+         op = TR::aiadd;
+         if (right->getDataType() == TR::Int64)
+            {
+            right = unaryOp(TR::l2i, right);
+            }
+         else if (right->getDataType() == TR::Address)
+            {
+            left = unaryOp(TR::a2i, left);
+            right = unaryOp(TR::a2i, right);
+            op = TR::isub;
+            needSub=false;
+            }
          }
-      right = Sub(TR::Compiler->target.is32Bit() ? ConstInt32(0) : ConstInt64(0), right);
-      returnValue = binaryOpFromNodes(TR::Compiler->target.is32Bit() ? TR::aiadd : TR::aladd, loadValue(left), loadValue(right));
+      if (needSub)
+         right = Sub(zero, right);
+      returnValue = binaryOpFromNodes(op, loadValue(left), loadValue(right));
       }
    else
       {
@@ -1352,7 +1407,7 @@ OMR::IlBuilder::setHandlerInfo(uint32_t catchType)
    {
    TR::Block *catchBlock = getEntry();
    catchBlock->setIsCold();
-   catchBlock->setHandlerInfoWithOutBCInfo(catchType, comp()->getInlineDepth(), -1, _methodSymbol->getResolvedMethod(), comp());
+   catchBlock->setHandlerInfoWithOutBCInfo(catchType, static_cast<uint8_t>(comp()->getInlineDepth()), -1, _methodSymbol->getResolvedMethod(), comp());
    }
 
 TR::Node*
@@ -2737,7 +2792,7 @@ OMR::IlBuilder::generateSwitchCases(TR::Node *switchNode, TR::Node *defaultNode,
    TR::IlBuilder *breakBuilder = OrphanBuilder();
    // each case handler is a sequence of two builder objects: first the one passed in via `cases`,
    //   and second a builder that branches to the breakBuilder (unless this case falls through)
-   for (int32_t c = 0; c < numCases; c++)
+   for (auto c = 0U; c < numCases; c++)
       {
       int32_t value = cases[c]->_value;
       TR::IlBuilder *handler = NULL;
@@ -2762,7 +2817,7 @@ OMR::IlBuilder::generateSwitchCases(TR::Node *switchNode, TR::Node *defaultNode,
       AppendBuilder(handler);
 
       TR::Node *caseNode = TR::Node::createCase(0, caseBlock->getEntry(), value);
-      switchNode->setAndIncChild(c+2, caseNode);
+      switchNode->setAndIncChild(static_cast<int32_t>(c+2), caseNode);
       }
 
    cfg()->addEdge(switchBlock, (*defaultBuilder)->getEntry());

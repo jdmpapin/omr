@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -36,8 +36,10 @@
 #include "SweepPoolState.hpp"
 #include "MarkMap.hpp"
 #include "MemoryPoolAddressOrderedListBase.hpp"
+#include "MemoryPoolAddressOrderedList.hpp"
 #include "SweepPoolManagerAddressOrderedListBase.hpp"
 #include "ModronAssertions.h"
+#include "CycleState.hpp"
 
 /**
  * Initialize any internal structures.
@@ -46,10 +48,7 @@
 bool
 MM_SweepPoolManagerAddressOrderedListBase::initialize(MM_EnvironmentBase *env)
 {
-	if (!MM_SweepPoolManager::initialize(env)) {
-		return false;
-	}
-	return true;
+	return MM_SweepPoolManager::initialize(env);
 }
 
 /**
@@ -168,6 +167,9 @@ MM_SweepPoolManagerAddressOrderedListBase::connectChunk(MM_EnvironmentBase *env,
 		omrtty_printf("CC: Previous consumes leading: %p(+%p) -> %p(+%p)\n", previousFreeEntry, previousFreeEntrySize, leadingFreeEntry, leadingFreeEntrySize);
 #endif
 		memoryPool->getLargeObjectAllocateStats()->decrementFreeEntrySizeClassStats(previousFreeEntrySize);
+
+		addFreeMemoryPostProcess(env, memoryPool, (void*)previousFreeEntry, ((uint8_t*)previousFreeEntry + previousFreeEntrySize + leadingFreeEntrySize), false, ((uint8_t*)previousFreeEntry + previousFreeEntrySize));
+
 		previousFreeEntrySize += leadingFreeEntrySize;
 		sweepState->_sweepFreeBytes += leadingFreeEntrySize;
  		sweepState->updateLargestFreeEntry(previousFreeEntrySize, previousPreviousFreeEntry);
@@ -188,10 +190,7 @@ MM_SweepPoolManagerAddressOrderedListBase::connectChunk(MM_EnvironmentBase *env,
 			/* The trailing/leading space forms a contiguous chunk - check if it belongs on the free list, abandon otherwise */
 
 			uintptr_t jointFreeSize = leadingFreeEntrySize + previousConnectChunk->trailingFreeCandidateSize;
-			if(memoryPool->canMemoryBeConnectedToPool(env,
-					previousConnectChunk->trailingFreeCandidate,
-					jointFreeSize)) {
-
+			if (previousConnectChunk->isFreeSizeEligibleForRecycling(jointFreeSize)) {
 				/* Free list candidate has been found - attach it to the free list */
 #if defined(J9MODRON_SWEEP_SCHEME_CONNECT_CHUNKS_TRACE)
 				omrtty_printf("CC: trailing/leading merged %p(+%p) + %p(+%p)\n", previousConnectChunk->trailingFreeCandidate, previousConnectChunk->trailingFreeCandidateSize, leadingFreeEntry, leadingFreeEntrySize);
@@ -208,6 +207,8 @@ MM_SweepPoolManagerAddressOrderedListBase::connectChunk(MM_EnvironmentBase *env,
 				previousFreeEntry = (MM_HeapLinkedFreeHeader *)previousConnectChunk->trailingFreeCandidate;
 				previousFreeEntrySize = jointFreeSize;
 
+				addFreeMemoryPostProcess(env, memoryPool, (void*)previousFreeEntry, ((uint8_t*)previousFreeEntry + previousFreeEntrySize), false);
+
 				/* Maintain the free bytes/holes count in the allocate profile for expansion/contraction purposes */
 				if(0 != jointFreeSize) {
 					sweepState->_sweepFreeBytes += jointFreeSize;
@@ -222,10 +223,7 @@ MM_SweepPoolManagerAddressOrderedListBase::connectChunk(MM_EnvironmentBase *env,
 			leadingFreeEntry = NULL;
 		} else {
 			/* The trailing space of the previous chunk has no connecting partner - check if the trailing space merits an entry in the free list */
-			if(memoryPool->canMemoryBeConnectedToPool(env,
-					previousConnectChunk->trailingFreeCandidate,
-					previousConnectChunk->trailingFreeCandidateSize)) {
-
+			if (previousConnectChunk->isTrailingFreeCandidateEligibleForRecycling()) {
 #if defined(J9MODRON_SWEEP_SCHEME_CONNECT_CHUNKS_TRACE)
 				omrtty_printf("CC: trailing from previous used %p(+%p)\n", previousConnectChunk->trailingFreeCandidate, previousConnectChunk->trailingFreeCandidateSize);
 #endif
@@ -236,10 +234,13 @@ MM_SweepPoolManagerAddressOrderedListBase::connectChunk(MM_EnvironmentBase *env,
 						previousConnectChunk->trailingFreeCandidate);
 
 				connectChunkPostProcess(chunk, sweepState, (MM_HeapLinkedFreeHeader *)previousConnectChunk->trailingFreeCandidate, previousFreeEntry);
+
 				/* only for SPMSAOL */
 				previousPreviousFreeEntry = previousFreeEntry;
 				previousFreeEntry = (MM_HeapLinkedFreeHeader *)previousConnectChunk->trailingFreeCandidate;
 				previousFreeEntrySize = previousConnectChunk->trailingFreeCandidateSize;
+
+				addFreeMemoryPostProcess(env, memoryPool, (void*)previousFreeEntry, ((uint8_t*)previousFreeEntry + previousFreeEntrySize), false);
 
 				/* Maintain the free bytes/holes count in the allocate profile for expansion/contraction purposes */
 				if(0 != previousConnectChunk->trailingFreeCandidateSize) {
@@ -267,9 +268,7 @@ MM_SweepPoolManagerAddressOrderedListBase::connectChunk(MM_EnvironmentBase *env,
 		 * Check if it merits an entry in the free list
 		 */
 		if(NULL != leadingFreeEntry) {
-			if(memoryPool->canMemoryBeConnectedToPool(env,
-					leadingFreeEntry,
-					leadingFreeEntrySize)) {
+			if (chunk->isFreeSizeEligibleForRecycling(leadingFreeEntrySize)) {
 
 				Assert_MM_true(previousFreeEntry <= leadingFreeEntry);
 
@@ -279,10 +278,13 @@ MM_SweepPoolManagerAddressOrderedListBase::connectChunk(MM_EnvironmentBase *env,
 						leadingFreeEntry);
 
 				connectChunkPostProcess(chunk, sweepState, leadingFreeEntry, previousFreeEntry);
+
 				/* only for SPMSAOL */
 				previousPreviousFreeEntry = previousFreeEntry;
 				previousFreeEntry = leadingFreeEntry;
 				previousFreeEntrySize = leadingFreeEntrySize;
+
+				addFreeMemoryPostProcess(env, memoryPool, (void*)previousFreeEntry, ((uint8_t*)previousFreeEntry + previousFreeEntrySize), false);
 
 				/* Maintain the free bytes/holes count in the allocate profile for expansion/contraction purposes */
 				if(0 != leadingFreeEntrySize) {
@@ -349,6 +351,7 @@ MM_SweepPoolManagerAddressOrderedListBase::connectChunk(MM_EnvironmentBase *env,
 
 	memoryPool->incrementDarkMatterBytes(chunk->_darkMatterBytes);
 	memoryPool->incrementDarkMatterSamples(chunk->_darkMatterSamples);
+	memoryPool->incrementScannableBytes(chunk->_scannableBytes, chunk->_nonScannableBytes);
 }
 
 
@@ -368,9 +371,7 @@ MM_SweepPoolManagerAddressOrderedListBase::flushFinalChunk(
 		MM_MemoryPoolAddressOrderedListBase *memoryPool = (MM_MemoryPoolAddressOrderedListBase *)memoryPoolBase;
 
 		/* Check if the entry is a candidate */
-		if (!memoryPool->canMemoryBeConnectedToPool(envModron,
-				sweepState->_connectPreviousChunk->trailingFreeCandidate,
-				sweepState->_connectPreviousChunk->trailingFreeCandidateSize)){
+		if (!sweepState->_connectPreviousChunk->isTrailingFreeCandidateEligibleForRecycling()) {
 			/* It is not - abandon it */
 			memoryPool->abandonMemoryInPool(envModron,
 					sweepState->_connectPreviousChunk->trailingFreeCandidate,
@@ -386,6 +387,9 @@ MM_SweepPoolManagerAddressOrderedListBase::flushFinalChunk(
 			sweepState->_connectPreviousPreviousFreeEntry = sweepState->_connectPreviousFreeEntry;
 			sweepState->_connectPreviousFreeEntry = (MM_HeapLinkedFreeHeader *)sweepState->_connectPreviousChunk->trailingFreeCandidate;
 			sweepState->_connectPreviousFreeEntrySize = sweepState->_connectPreviousChunk->trailingFreeCandidateSize;
+
+			addFreeMemoryPostProcess(envModron, memoryPool, (void*)sweepState->_connectPreviousFreeEntry, ((uint8_t*)sweepState->_connectPreviousFreeEntry + sweepState->_connectPreviousFreeEntrySize), false);
+
 			Assert_MM_true(sweepState->_connectPreviousFreeEntry != sweepState->_connectPreviousChunk->leadingFreeCandidate);
 
 			sweepState->_sweepFreeBytes += sweepState->_connectPreviousChunk->trailingFreeCandidateSize;
@@ -479,7 +483,8 @@ MM_SweepPoolManagerAddressOrderedListBase::addFreeMemory(MM_EnvironmentBase *env
 		address = (uintptr_t *) (((uintptr_t)address) + objectSizeDelta);
 		MM_MemoryPoolAddressOrderedListBase *memoryPool = (MM_MemoryPoolAddressOrderedListBase *)sweepChunk->memoryPool;
 
-		if(memoryPool->connectInnerMemoryToPool(env, address, heapFreeByteCount, sweepChunk->freeListTail)) {
+		if ((sweepChunk->isFreeSizeEligibleForRecycling(heapFreeByteCount)) &&
+			memoryPool->connectInnerMemoryToPool(env, address, heapFreeByteCount, sweepChunk->freeListTail)) {
 
 #if defined(J9MODRON_ALLOCATION_MANAGER_TRACE)
 			OMRPORT_ACCESS_FROM_OMRPORT(env->getPortLibrary());
@@ -494,9 +499,10 @@ MM_SweepPoolManagerAddressOrderedListBase::addFreeMemory(MM_EnvironmentBase *env
 
 			/* Maintain the free bytes/holes count in the chunk for heap expansion/contraction purposes (will be gathered up in the allocate profile) */
 			if(0 != heapFreeByteCount) {
+				addFreeMemoryPostProcess(env, memoryPool, address, ((uint8_t*)address + heapFreeByteCount), true);
+
 				sweepChunk->freeBytes += heapFreeByteCount;
 				sweepChunk->freeHoles += 1;
-//				sweepChunk->_largestFreeEntry = max(sweepChunk->_largestFreeEntry , heapFreeByteCount);
 				sweepChunk->updateLargestFreeEntry(heapFreeByteCount, sweepChunk->freeListTail);
 
 				/* increment thread local sizeClass stats that will later be merged */
@@ -513,4 +519,5 @@ MM_SweepPoolManagerAddressOrderedListBase::addFreeMemory(MM_EnvironmentBase *env
 
 	return result;
 }
+
 #endif /* defined(OMR_GC_MODRON_STANDARD) */

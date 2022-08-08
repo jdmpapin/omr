@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -434,44 +434,6 @@ bool TR_RedundantAsyncCheckRemoval::callDoesAnImplicitAsyncCheck(TR::Node *callN
        (symbol->getRecognizedMethod()==TR::sun_misc_Unsafe_compareAndSwapObject_jlObjectJjlObjectjlObject_Z))
       )
       return false;
-
-
-   if ((symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPPerformHysteresis)  ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPUseDFP) ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPHWAvailable) ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPIntConstructor) ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPLongConstructor) ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPLongExpConstructor) ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPAdd) ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPSubtract) ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPMultiply) ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPDivide) ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPScaledAdd) ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPScaledSubtract) ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPScaledMultiply) ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPScaledDivide) ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPRound) ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPSetScale) ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPCompareTo) ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPSignificance) ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPExponent) ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPBCDDigits) ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPUnscaledValue) ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPConvertPackedToDFP) ||
-       (symbol->getRecognizedMethod()==TR::java_math_BigDecimal_DFPConvertDFPToPacked)
-       )
-      return false;
-   if ((symbol->getRecognizedMethod()==TR::com_ibm_dataaccess_DecimalData_JITIntrinsicsEnabled) ||
-       (symbol->getRecognizedMethod()==TR::com_ibm_dataaccess_DecimalData_DFPFacilityAvailable) ||
-       (symbol->getRecognizedMethod()==TR::com_ibm_dataaccess_DecimalData_DFPUseDFP) ||
-       (symbol->getRecognizedMethod()==TR::com_ibm_dataaccess_DecimalData_DFPConvertPackedToDFP) ||
-       (symbol->getRecognizedMethod()==TR::com_ibm_dataaccess_DecimalData_DFPConvertDFPToPacked) ||
-       (symbol->getRecognizedMethod()==TR::com_ibm_dataaccess_DecimalData_createZeroBigDecimal) ||
-       (symbol->getRecognizedMethod()==TR::com_ibm_dataaccess_DecimalData_getlaside) ||
-       (symbol->getRecognizedMethod()==TR::com_ibm_dataaccess_DecimalData_setlaside) ||
-       (symbol->getRecognizedMethod()==TR::com_ibm_dataaccess_DecimalData_getflags) ||
-       (symbol->getRecognizedMethod()==TR::com_ibm_dataaccess_DecimalData_setflags))
-      return false;
 #endif
    return true;
    }
@@ -750,29 +712,28 @@ TR_RedundantAsyncCheckRemoval::markExtendees(TR::Block *block, bool canHaveAYiel
    }
 
 #define FIND_LOOP_ITERATIONS(Type,Name,NAME)   \
-bool Killme_CantBeginMacroWith_HASH_HASH; \
-Type incr = incrVal->getLow##Name();  \
+Type incr = static_cast<Type>(incrVal->getLow##Name());  \
 Type in, out, iters, diff; \
 if (incr == 0) continue; \
 if (entryVal && exitVal && entryVal->as##Name##Const() && exitVal->as##Name##Const()) \
   { \
-  in = entryVal->getLow##Name(); \
-  out = exitVal->getLow##Name(); \
+  in = static_cast<Type>(entryVal->getLow##Name()); \
+  out = static_cast<Type>(exitVal->getLow##Name()); \
   } \
 else if (entryVal && entryVal->as##Name##Const()) \
   { \
   Type lo, hi; \
   if (exitVal) \
     { \
-    lo = exitVal->getLow##Name(); \
-    hi = exitVal->getHigh##Name(); \
+    lo = static_cast<Type>(exitVal->getLow##Name()); \
+    hi = static_cast<Type>(exitVal->getHigh##Name()); \
     } \
   else \
     { \
-    lo = TR::getMinSigned<NAME>(); \
-    hi = TR::getMaxSigned<NAME>(); \
+    lo = static_cast<Type>(TR::getMinSigned<NAME>()); \
+    hi = static_cast<Type>(TR::getMaxSigned<NAME>()); \
     } \
-  in = entryVal->getLow##Name(); \
+  in = static_cast<Type>(entryVal->getLow##Name()); \
   if (incr > 0 && in < lo) \
     out = lo; \
   else if (incr < 0 && in > hi) \
@@ -783,7 +744,7 @@ else if (entryVal && entryVal->as##Name##Const()) \
 else \
   continue; \
 diff = in-out; \
-if (diff == TR::getMinSigned<NAME>()) \
+if (diff == static_cast<Type>(TR::getMinSigned<NAME>())) \
    continue; \
 iters = (diff < 0) ? -diff/incr : diff/-incr;
 
@@ -900,7 +861,7 @@ bool TR_RedundantAsyncCheckRemoval::originatesFromShortRunningMethod(TR_RegionSt
 	    }
 	 TR_InlinedCallSite &ics = comp()->getInlinedCallSite(callerIndex);
 	 if (!comp()->isShortRunningMethod(callerIndex) &&
-	     TR::Compiler->mtd.hasBackwardBranches((TR_OpaqueMethodBlock*)ics._vmMethodInfo))
+	     TR::Compiler->mtd.hasBackwardBranches(ics._methodInfo))
 	    break;
 	 //set callerIndex to its caller
 	 callerIndex = comp()->getInlinedCallSite(callerIndex)._byteCodeInfo.getCallerIndex();
@@ -1702,13 +1663,13 @@ uint32_t TR_LoopEstimator::estimateLoopIterationsUpperBound()
          // An exit condition that does not look recognizable disables
          // us from making any upper bound estimate
          //
-         return TR::getMaxSigned<TR::Int32>();
+         return static_cast<uint32_t>(TR::getMaxSigned<TR::Int32>());
          }
       }
 
    if (index == 0)
       {
-      return TR::getMaxSigned<TR::Int32>();
+      return static_cast<uint32_t>(TR::getMaxSigned<TR::Int32>());
       }
 
 
@@ -1784,11 +1745,11 @@ uint32_t TR_LoopEstimator::estimateLoopIterationsUpperBound()
                // Get rid of the increasing infinite loop (// FIXME: is this an infinite loop?)
                //
                if (incr > 0 && (opCode == TR::ificmplt || opCode == TR::ificmple))
-                  estimate = TR::getMaxSigned<TR::Int32>();
+                  estimate = static_cast<int32_t>(TR::getMaxSigned<TR::Int32>());
 
                // Get rid of the decreasing infinite loop
                else if (incr < 0 && (opCode == TR::ificmpgt || opCode == TR::ificmpge))
-                  estimate = TR::getMaxSigned<TR::Int32>();
+                  estimate = static_cast<int32_t>(TR::getMaxSigned<TR::Int32>());
 
                else
                   {
@@ -1801,19 +1762,19 @@ uint32_t TR_LoopEstimator::estimateLoopIterationsUpperBound()
             else
                {
                int32_t in    = einfo->_val;
-               int32_t lim   = cond->_limit;
+               int32_t lim   = static_cast<int32_t>(cond->_limit);
 
                // increasing infinite loops
                if (incr > 0 && (opCode == TR::ificmplt || opCode == TR::ificmple) && in > lim)
-                  estimate = TR::getMaxSigned<TR::Int32>();
+                  estimate = static_cast<int32_t>(TR::getMaxSigned<TR::Int32>());
 
                // decreasing infinite loops
                else if (incr < 0 && (opCode == TR::ificmpgt || opCode == TR::ificmpge) && in < lim)
-                  estimate = TR::getMaxSigned<TR::Int32>();
+                  estimate = static_cast<int32_t>(TR::getMaxSigned<TR::Int32>());
 
                // messed up induction variable info
                else if (incr == 0)
-                  estimate = TR::getMaxSigned<TR::Int32>();
+                  estimate = static_cast<int32_t>(TR::getMaxSigned<TR::Int32>());
 
                else
                   {
@@ -1843,7 +1804,7 @@ uint32_t TR_LoopEstimator::estimateLoopIterationsUpperBound()
       }
 
    if (estimate == -1)
-      return TR::getMaxSigned<TR::Int32>();
+      return static_cast<int32_t>(TR::getMaxSigned<TR::Int32>());
 
 
    /**

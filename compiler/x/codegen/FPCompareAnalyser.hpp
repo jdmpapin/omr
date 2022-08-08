@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -26,7 +26,7 @@
 #include <stdint.h>
 #include "codegen/CodeGenerator.hpp"
 #include "infra/Assert.hpp"
-#include "x/codegen/X86Ops.hpp"
+#include "codegen/InstOpCode.hpp"
 
 namespace TR { class Machine; }
 namespace TR { class Node; }
@@ -50,12 +50,6 @@ class TR_X86FPCompareAnalyser
       : _cg(cg), _machine(cg->machine()),
       _reversedOperands(false),
       _inputs(0) {}
-
-   virtual TR::Register *fpCompareAnalyser(TR::Node       *root,
-                                          TR_X86OpCodes cmpRegRegOpCode,
-                                          TR_X86OpCodes cmpRegMemOpCode,
-                                          TR_X86OpCodes cmpiRegRegOpCode,
-                                          bool           useFCOMIInstructions);
 
    // Possible actions based on the characteristics of the operands.
    //
@@ -124,19 +118,9 @@ class TR_IA32XMMCompareAnalyser : public TR_X86FPCompareAnalyser
 
    TR_IA32XMMCompareAnalyser(TR::CodeGenerator *cg) : TR_X86FPCompareAnalyser(cg) {}
 
-   virtual TR::Register *fpCompareAnalyser(TR::Node       *root,
-                                          TR_X86OpCodes cmpRegRegOpCode,
-                                          TR_X86OpCodes cmpRegMemOpCode,
-                                          TR_X86OpCodes cmpiRegRegOpCode,
-                                          bool           useFCOMIInstructions)
-      {
-      TR_ASSERT(0, "TR_IA32XMMCompareAnalyser::fpCompareAnalyser() should not be called\n");
-      return NULL;
-      }
-
    TR::Register *xmmCompareAnalyser(TR::Node        *root,
-                                   TR_X86OpCodes  cmpRegRegOpCode,
-                                   TR_X86OpCodes  cmpRegMemOpCode);
+                                   TR::InstOpCode::Mnemonic  cmpRegRegOpCode,
+                                   TR::InstOpCode::Mnemonic  cmpRegMemOpCode);
 
    };
 #endif

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -76,69 +76,6 @@ static OMR::TreeInfo *findOrCreateTreeInfo(TR::TreeTop *treeTop, List<OMR::TreeI
    t = new (comp->trStackMemory()) OMR::TreeInfo(treeTop, 0);
    targetTrees->add(t);
    return t;
-   }
-
-static bool fixUpTree(TR::Node *node, TR::TreeTop *treeTop, TR::NodeChecklist &visited, bool &highGlobalIndex, TR::Optimization *opt, vcount_t evaluatedVisitCount)
-   {
-   if (node->getVisitCount() == evaluatedVisitCount)
-      return false;
-
-   if (visited.contains(node))
-      return false;
-
-   visited.add(node);
-
-   bool containsFloatingPoint = false;
-   bool anchorLoadaddr = true;
-   bool anchorArrayCmp = true;
-
-   // for arraycmp node, don't create its tree top anchor
-   // fold it into if statment and save jump instruction
-   if (node->getOpCodeValue() == TR::arraycmp &&
-      !node->isArrayCmpLen() &&
-      opt->comp()->target().cpu.isX86())
-      {
-      anchorArrayCmp = false;
-      }
-
-   if ((node->getReferenceCount() > 1) &&
-       !node->getOpCode().isLoadConst() &&
-       anchorLoadaddr &&
-       anchorArrayCmp)
-      {
-      if (!opt->comp()->getOption(TR_ProcessHugeMethods))
-         {
-         int32_t nodeCount = opt->comp()->getNodeCount();
-         int32_t nodeCountLimit = 3 * USHRT_MAX / 4;
-         if (nodeCount > nodeCountLimit)
-            {
-            dumpOptDetails(opt->comp(),
-               "%snode count %d exceeds limit %d\n",
-               opt->optDetailString(), nodeCount, nodeCountLimit);
-            highGlobalIndex = true;
-            return containsFloatingPoint;
-            }
-         }
-
-      if (node->getOpCode().isFloatingPoint())
-        containsFloatingPoint = true;
-      TR::TreeTop *nextTree = treeTop->getNextTreeTop();
-      node->incFutureUseCount();
-      TR::TreeTop *anchorTreeTop = TR::TreeTop::create(opt->comp(), TR::Node::create(TR::treetop, 1, node));
-      anchorTreeTop->getNode()->setFutureUseCount(0);
-      treeTop->join(anchorTreeTop);
-      anchorTreeTop->join(nextTree);
-      }
-   else
-      {
-      for (int32_t i = 0; i < node->getNumChildren(); ++i)
-         {
-         TR::Node *child = node->getChild(i);
-         if (fixUpTree(child, treeTop, visited, highGlobalIndex, opt, evaluatedVisitCount))
-            containsFloatingPoint = true;
-         }
-      }
-   return containsFloatingPoint;
    }
 
 static inline bool isReadBarrierUnderTreetop(TR::Node *node)
@@ -629,7 +566,7 @@ void TR::DeadTreesElimination::prePerformOnBlocks()
           && tt->getPrevTreeTop()->getNode()->getOpCodeValue() == TR::BBStart
           && !tt->getPrevTreeTop()->getNode()->getBlock()->isExtensionOfPreviousBlock())
          {
-         requestOpt(OMR::redundantGotoElimination, tt->getEnclosingBlock());
+         requestOpt(OMR::redundantGotoElimination, true, tt->getEnclosingBlock());
          }
 
       if (node->getVisitCount() >= visitCount)
@@ -716,6 +653,69 @@ void TR::DeadTreesElimination::prePerformOnBlocks()
       if (!glRegDepRemoved)
          break;
       }
+   }
+
+bool TR::DeadTreesElimination::fixUpTree(TR::Node *node, TR::TreeTop *treeTop, TR::NodeChecklist &visited, bool &highGlobalIndex, vcount_t evaluatedVisitCount)
+   {
+   if (node->getVisitCount() == evaluatedVisitCount)
+      return false;
+
+   if (visited.contains(node))
+      return false;
+
+   visited.add(node);
+
+   bool containsFloatingPoint = false;
+   bool anchorLoadaddr = true;
+   bool anchorArrayCmp = true;
+
+   // for arraycmp node, don't create its tree top anchor
+   // fold it into if statment and save jump instruction
+   if (node->getOpCodeValue() == TR::arraycmp &&
+      !node->isArrayCmpLen() &&
+      comp()->target().cpu.isX86())
+      {
+      anchorArrayCmp = false;
+      }
+
+   if ((node->getReferenceCount() > 1) &&
+       !node->getOpCode().isLoadConst() &&
+       anchorLoadaddr &&
+       anchorArrayCmp)
+      {
+      if (!comp()->getOption(TR_ProcessHugeMethods))
+         {
+         int32_t nodeCount = comp()->getNodeCount();
+         int32_t nodeCountLimit = 3 * USHRT_MAX / 4;
+         if (nodeCount > nodeCountLimit)
+            {
+            dumpOptDetails(comp(),
+               "%snode count %d exceeds limit %d\n",
+               optDetailString(), nodeCount, nodeCountLimit);
+            highGlobalIndex = true;
+            return containsFloatingPoint;
+            }
+         }
+
+      if (node->getOpCode().isFloatingPoint())
+        containsFloatingPoint = true;
+      TR::TreeTop *nextTree = treeTop->getNextTreeTop();
+      node->incFutureUseCount();
+      TR::TreeTop *anchorTreeTop = TR::TreeTop::create(comp(), TR::Node::create(TR::treetop, 1, node));
+      anchorTreeTop->getNode()->setFutureUseCount(0);
+      treeTop->join(anchorTreeTop);
+      anchorTreeTop->join(nextTree);
+      }
+   else
+      {
+      for (int32_t i = 0; i < node->getNumChildren(); ++i)
+         {
+         TR::Node *child = node->getChild(i);
+         if (fixUpTree(child, treeTop, visited, highGlobalIndex, evaluatedVisitCount))
+            containsFloatingPoint = true;
+         }
+      }
+   return containsFloatingPoint;
    }
 
 namespace
@@ -866,7 +866,6 @@ int32_t TR::DeadTreesElimination::process(TR::TreeTop *startTree, TR::TreeTop *e
                  opCodeValue == TR::newarray) &&
                  child->getReferenceCount() > 1) ||
                  opCodeValue == TR::multianewarray ||
-                 opCodeValue == TR::MergeNew ||
                opCodeValue == TR::checkcast ||
                opCodeValue == TR::Prefetch ||
                opCodeValue == TR::iu2l ||
@@ -914,10 +913,7 @@ int32_t TR::DeadTreesElimination::process(TR::TreeTop *startTree, TR::TreeTop *e
                          (((opCodeValue == TR::New)  ||
                             (opCodeValue == TR::anewarray ||
                               opCodeValue == TR::newarray)) &&
-                          ///child->getFirstChild()->isNonNegative()))
                            child->markedAllocationCanBeRemoved()))
-                       //        opCodeValue == TR::multianewarray ||
-                       //        opCodeValue == TR::MergeNew)
                         treeTopCanBeEliminated = true;
                      }
                   }
@@ -955,7 +951,7 @@ int32_t TR::DeadTreesElimination::process(TR::TreeTop *startTree, TR::TreeTop *e
                // Anchor nodes with reference count > 1
                //
                bool highGlobalIndex = false;
-               if (fixUpTree(child->getChild(i), iter.currentTree(), visited, highGlobalIndex, self(), visitCount))
+               if (fixUpTree(child->getChild(i), iter.currentTree(), visited, highGlobalIndex, visitCount))
                   containsFloatingPoint = true;
                if (highGlobalIndex)
                   {
@@ -1007,6 +1003,7 @@ int32_t TR::DeadTreesElimination::process(TR::TreeTop *startTree, TR::TreeTop *e
                   {
                   requestOpt(
                      OMR::redundantGotoElimination,
+                     true,
                      prevTree->getNode()->getBlock());
                   }
                }
@@ -1044,7 +1041,33 @@ int32_t TR::DeadTreesElimination::process(TR::TreeTop *startTree, TR::TreeTop *e
                TR::Node *lastNode = lastTree->getNode();
                TR::Node *prevLastNode = prevLastTree->getNode();
 
-               if (lastNode->getOpCode().isIf() && !lastNode->getOpCode().isCompBranchOnly() &&
+               // If the node being moved is volatile, the order of the trees cannot
+               // be changed because that is the order containsNode used to check if
+               // canMoveIfVolatile should be true or not.
+               // For example, if the order of the trees look like below, adjusting
+               // the lastTree and prevLastTree in the following code would end up
+               // mistakenly reordering the RegStore nodes whose children are volatile
+               // loads.
+               //
+               // E.g
+               // === Before adjusting lastTree & prevLastTree
+               // TT1
+               // TT2 (iRegStore) <--- prevLastTree
+               //    iloadi (volatile)
+               // TTBeingMoved (iRegStore)
+               //    iloadi (volatile)
+               // TT3 <--- lastTree
+               //
+               // === After adjusting lastTree & prevLastTree
+               // TT1 <--- prevLastTree
+               // TTBeingMoved (iRegStore) // Incorrect: should not be before TT2
+               //    iloadi (volatile)
+               // TT2 (iRegStore) <--- lastTree  // Incorrect: should not be after TTBeingMoved
+               //    iloadi (volatile)
+               // TT3
+
+               if (!node->getFirstChild()->mightHaveVolatileSymbolReference() &&
+                   lastNode->getOpCode().isIf() && !lastNode->getOpCode().isCompBranchOnly() &&
                    prevLastNode->getOpCode().isStoreReg() &&
                    ((prevLastNode->getFirstChild() == lastNode->getFirstChild()) ||
                     (prevLastNode->getFirstChild() == lastNode->getSecondChild())))

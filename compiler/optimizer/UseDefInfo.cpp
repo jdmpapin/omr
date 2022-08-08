@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -72,8 +72,6 @@
 #define REACHING_DEFS_LIMIT                  (25000000)  // 25 Million
 
 
-const char* const TR_UseDefInfo::allocatorName = "UseDefInfo";
-
 /**
  * Constructs TR_UseDefInfo instance. Note that this should not be called directly.
  * Instead construction is handled by OMR::Optimizer::createUseDefInfo() method.
@@ -93,20 +91,20 @@ const char* const TR_UseDefInfo::allocatorName = "UseDefInfo";
  *                                   set to true.
  */
 TR_UseDefInfo::TR_UseDefInfo(TR::Compilation *comp, TR::CFG *cfg, TR::Optimizer *optimizer,
-      bool requiresGlobals, bool prefersGlobals, bool loadsShouldBeDefs, bool cannotOmitTrivialDefs, bool conversionRegsOnly, 
+      bool requiresGlobals, bool prefersGlobals, bool loadsShouldBeDefs, bool cannotOmitTrivialDefs, bool conversionRegsOnly,
       bool doCompletion, bool callsShouldBeUses)
    : _region(comp->trMemory()->heapMemoryRegion()),
      _compilation(comp),
      _optimizer(optimizer),
      _atoms(0, std::make_pair<TR::Node *, TR::TreeTop *>(NULL, NULL), _region),
      _useDefForMemorySymbols(false),
-     _useDefInfo(0, TR_UseDefInfo::BitVector(comp->allocator(allocatorName)), _region),
+     _useDefInfo(0, TR_UseDefInfo::BitVector(comp->allocator()), _region),
      _isUseDefInfoValid(false),
      _infoCache(_region),
-     _EMPTY(comp->allocator(allocatorName)),
+     _EMPTY(comp->allocator()),
      _useDerefDefInfo(0, static_cast<const BitVector *>(NULL), _region),
-     _defUseInfo(0, TR_UseDefInfo::BitVector(comp->allocator(allocatorName)), _region),
-     _loadDefUseInfo(0, TR_UseDefInfo::BitVector(comp->allocator(allocatorName)), _region),
+     _defUseInfo(0, TR_UseDefInfo::BitVector(comp->allocator()), _region),
+     _loadDefUseInfo(0, TR_UseDefInfo::BitVector(comp->allocator()), _region),
      _tempsOnly(false),
      _trace(comp->getOption(TR_TraceUseDefs)),
      _hasLoadsAsDefs(loadsShouldBeDefs),
@@ -154,9 +152,10 @@ void TR_UseDefInfo::prepareUseDefInfo(bool requiresGlobals, bool prefersGlobals,
    TR::SymbolReferenceTable *symRefTab = comp()->getSymRefTab();
    int32_t numSymRefs = comp()->getSymRefCount();
 
+
    if (_hasLoadsAsDefs &&
        !cannotOmitTrivialDefs &&
-       (comp()->getMethodHotness() < hot))
+       (comp()->getMethodHotness() < warm))
       {
       for (int32_t j = 0; j < numSymRefs; j++)
          {
@@ -306,7 +305,7 @@ void TR_UseDefInfo::prepareUseDefInfo(bool requiresGlobals, bool prefersGlobals,
    _defsChecklist = new (_region) TR_BitVector(getTotalNodes(), _region);
 
    //  traceMsg(comp(), "Growing useDefInfo to %d\n",getNumUseNodes());
-   _useDefInfo.resize(getNumUseNodes(), TR_UseDefInfo::BitVector(comp()->allocator(allocatorName)));
+   _useDefInfo.resize(getNumUseNodes(), TR_UseDefInfo::BitVector(comp()->allocator()));
    //   for (i = getNumUseNodes()-1; i >= 0; --i)
    //      _useDefInfo[i].GrowTo(getNumDefNodes());
    _isUseDefInfoValid = true;
@@ -415,7 +414,7 @@ bool TR_UseDefInfo::_runReachingDefinitions(TR_ReachingDefinitions& reachingDefi
 
    reachingDefinitions.perform();
 
-   bool succeeded = reachingDefinitions._blockAnalysisInfo;
+   bool succeeded = reachingDefinitions._blockAnalysisInfo != NULL;
    if (!succeeded)
       {
       invalidateUseDefInfo();
@@ -468,7 +467,7 @@ void TR_UseDefInfo::setVolatileSymbolsIndexAndRecurse(TR::BitVector &volatileSym
 void TR_UseDefInfo::findAndPopulateVolatileSymbolsIndex(TR::BitVector &volatileSymbols)
    {
 //   traceMsg(comp(), "In findAndPopulateVolatileSymbolsIndex\n");
-   for (int32_t symRefNumber = comp()->getSymRefTab()->getIndexOfFirstSymRef(); symRefNumber < comp()->getSymRefCount(); symRefNumber++)
+   for (int32_t symRefNumber = comp()->getSymRefTab()->getIndexOfFirstSymRef(); unsigned(symRefNumber) < comp()->getSymRefCount(); symRefNumber++)
       {
  //     traceMsg(comp(), "Considering symRef %d: ",symRefNumber);
       TR::SymbolReference* symRef = comp()->getSymRefTab()->getSymRef(symRefNumber);
@@ -641,7 +640,7 @@ void TR_UseDefInfo::findTrivialSymbolsToExclude(TR::Node *node, TR::TreeTop *tre
 bool TR_UseDefInfo::isTrivialUseDefNode(TR::Node *node, AuxiliaryData &aux)
    {
    if (aux._doneTrivialNode.get(node->getGlobalIndex()))
-      return aux._isTrivialNode.get(node->getGlobalIndex());
+      return aux._isTrivialNode.get(node->getGlobalIndex()) != 0;
 
    bool result = isTrivialUseDefNodeImpl(node, aux);
    aux._doneTrivialNode.set(node->getGlobalIndex());
@@ -795,8 +794,8 @@ void TR_UseDefInfo::findMemorySymbols(TR::Node *node)
        _valueNumberInfo->getNext(node->getFirstChild()) != node->getFirstChild()) // value number is shared with some other node
       {
       int32_t valueNumber = _valueNumberInfo->getValueNumber(node->getFirstChild());
-      uint32_t size = node->getSymbolReference()->getSymbol()->getSize();
-      uint32_t offset = node->getSymbolReference()->getOffset();
+      uint32_t size = static_cast<uint32_t>(node->getSymbolReference()->getSymbol()->getSize());
+      uint32_t offset = static_cast<uint32_t>(node->getSymbolReference()->getOffset());
 
       bool found = false;
       for (auto itr = _valueNumbersToMemorySymbolsMap[valueNumber]->begin(), end = _valueNumbersToMemorySymbolsMap[valueNumber]->end();
@@ -828,8 +827,8 @@ int32_t TR_UseDefInfo::getMemorySymbolIndex(TR::Node * node)
       return -1;
 
    int32_t valueNumber = _valueNumberInfo->getValueNumber(node->getFirstChild());
-   uint32_t size = node->getSymbolReference()->getSymbol()->getSize();
-   uint32_t offset = node->getSymbolReference()->getOffset();
+   uint32_t size = static_cast<uint32_t>(node->getSymbolReference()->getSymbol()->getSize());
+   uint32_t offset = static_cast<uint32_t>(node->getSymbolReference()->getOffset());
 
    for (auto itr = _valueNumbersToMemorySymbolsMap[valueNumber]->begin(), end = _valueNumbersToMemorySymbolsMap[valueNumber]->end();
         itr != end; ++itr)
@@ -1383,7 +1382,7 @@ bool TR_UseDefInfo::findUseDefNodes(
             comp()->getOptions()->realTimeGC())
       {
       localIndex = _numExpandedDefOnlyNodes;
-      _numExpandedDefOnlyNodes += TR::NumTypes + 1; // == arraylet shadows + read barrier....encode this where?  SymRefTab probably
+      _numExpandedDefOnlyNodes += TR::NumAllTypes + 1; // == arraylet shadows + read barrier....encode this where?  SymRefTab probably
       useDefIndex = _numDefOnlyNodes++;
       }
    //else
@@ -1711,7 +1710,7 @@ void TR_UseDefInfo::insertData(TR::Block *block, TR::Node *node,TR::Node *parent
          aux._defsForSymbol[j]->set(k);
          aux._expandedAtoms[k] = std::make_pair(node, treeTop);
          }
-      TR::GlobalSparseBitVector *mustKill = NULL;
+
       TR::Symbol *callSym = NULL;
       TR::Method *callMethod = NULL;
 
@@ -2926,7 +2925,7 @@ void TR_UseDefInfo::buildDefUseInfo(bool loadAsDef)
        ((_loadDefUseInfo.size() > 0) || !loadAsDef))
       return;
 
-   _defUseInfo.resize(getNumDefNodes(), TR_UseDefInfo::BitVector(comp()->allocator(allocatorName)));
+   _defUseInfo.resize(getNumDefNodes(), TR_UseDefInfo::BitVector(comp()->allocator()));
 
    if (loadAsDef)
       _loadDefUseInfo.resize(getNumDefNodes(), TR_UseDefInfo::BitVector(allocator()));

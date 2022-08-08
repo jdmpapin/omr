@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -288,40 +288,41 @@ TR_Debug::roundAddressEnumerationCounters(uint32_t boundary)
    }
 
 void
-TR_Debug::newNode(TR::Node *node)
+TR_Debug::breakOrDebugOnCreate(char *artifactName)
    {
-   char buf[20];
-   TR::SimpleRegex * regex;
-
-   sprintf(buf, "ND_%04x", node->getGlobalIndex());
-
-   regex = _comp->getOptions()->getBreakOnCreate();
-   if (regex && TR::SimpleRegex::match(regex, buf, false))
+   TR::SimpleRegex *regex = _comp->getOptions()->getBreakOnCreate();
+   if (regex && TR::SimpleRegex::match(regex, artifactName, false))
       breakOn();
 
    regex = _comp->getOptions()->getDebugOnCreate();
-   if (regex && TR::SimpleRegex::match(regex, buf, false))
+   if (regex && TR::SimpleRegex::match(regex, artifactName, false))
       debugOnCreate();
+   }
 
+void
+TR_Debug::newNode(TR::Node *node)
+   {
+   if (_comp->getOptions()->getBreakOnCreate() ||
+       _comp->getOptions()->getDebugOnCreate())
+      {
+      char buf[20];
+      sprintf(buf, "ND_%04x", node->getGlobalIndex());
+      breakOrDebugOnCreate(buf);
+      }
    }
 
 void
 TR_Debug::newLabelSymbol(TR::LabelSymbol *labelSymbol)
    {
-   TR_ASSERT(_comp, "Required compilation object is NULL.\n");
-   char buf[20];
-   TR::SimpleRegex * regex = NULL;
-
    _comp->getToNumberMap().Add((void *)labelSymbol, (intptr_t)_nextLabelNumber);
-   sprintf(buf, "L%04x", _nextLabelNumber);
 
-   regex = _comp->getOptions()->getBreakOnCreate();
-   if (regex && TR::SimpleRegex::match(regex, buf, false))
-      breakOn();
-
-   regex = _comp->getOptions()->getDebugOnCreate();
-   if (regex && TR::SimpleRegex::match(regex, buf, false))
-      debugOnCreate();
+   if (_comp->getOptions()->getBreakOnCreate() ||
+       _comp->getOptions()->getDebugOnCreate())
+      {
+      char buf[20];
+      sprintf(buf, "L%04x", _nextLabelNumber);
+      breakOrDebugOnCreate(buf);
+      }
 
    _nextLabelNumber++;
    }
@@ -329,74 +330,52 @@ TR_Debug::newLabelSymbol(TR::LabelSymbol *labelSymbol)
 void
 TR_Debug::newInstruction(TR::Instruction *instr)
    {
-   TR_ASSERT(_comp, "Required compilation object is NULL.\n");
    if (_comp->getAddressEnumerationOption(TR_EnumerateInstruction) ||
-      _comp->getOptions()->getBreakOnCreate())
+      _comp->getOptions()->getBreakOnCreate() ||
+      _comp->getOptions()->getDebugOnCreate())
       {
       char buf[20];
-      TR::SimpleRegex * regex;
-
       _comp->getToNumberMap().Add((void *)instr, (intptr_t)_nextInstructionNumber);
       sprintf(buf, "IN_%04x", _nextInstructionNumber);
-
-      regex = _comp->getOptions()->getBreakOnCreate();
-      if (regex && TR::SimpleRegex::match(regex, buf, false))
-         breakOn();
-
-      regex = _comp->getOptions()->getDebugOnCreate();
-      if (regex && TR::SimpleRegex::match(regex, buf, false))
-         debugOnCreate();
-
+      breakOrDebugOnCreate(buf);
       }
+
    _nextInstructionNumber++;
    }
 
 void
 TR_Debug::newRegister(TR::Register *reg)
    {
-   TR_ASSERT(_comp, "Required compilation object is NULL.\n");
-   char buf[20];
-   TR::SimpleRegex * regex;
-
-   regex = _comp->getOptions()->getBreakOnCreate();
-
    if (_comp->getAddressEnumerationOption(TR_EnumerateRegister))
       _comp->getToNumberMap().Add((void *)reg, (intptr_t)_nextRegisterNumber);
 
-   sprintf(buf, "GPR_%04x", _nextRegisterNumber );
+   if (_comp->getOptions()->getBreakOnCreate() ||
+       _comp->getOptions()->getDebugOnCreate())
+      {
+      char buf[20];
+      sprintf(buf, "GPR_%04x", _nextRegisterNumber );
+      breakOrDebugOnCreate(buf);
+      }
 
-   regex = _comp->getOptions()->getBreakOnCreate();
-   if (regex && TR::SimpleRegex::match(regex, buf, false))
-      breakOn();
-
-   regex = _comp->getOptions()->getDebugOnCreate();
-   if (regex && TR::SimpleRegex::match(regex, buf, false))
-      debugOnCreate();
-
-    _nextRegisterNumber++;
+   _nextRegisterNumber++;
    }
 
 void
 TR_Debug::newVariableSizeSymbol(TR::AutomaticSymbol *sym)
    {
-   TR_ASSERT(_comp, "Required compilation object is NULL.\n");
-   int32_t strLength = strlen(TR_VSS_NAME) + TR::getMaxSignedPrecision<TR::Int32>() + 7;
+   int32_t strLength = static_cast<int32_t>(strlen(TR_VSS_NAME)) + TR::getMaxSignedPrecision<TR::Int32>() + 7;
    char *buf = (char *)_comp->trMemory()->allocateHeapMemory(strLength);
-
-   TR::SimpleRegex * regex = NULL;
-
-   _comp->getToStringMap().Add((void *)sym, buf);
    sprintf(buf, "%s_%d",  TR_VSS_NAME, _nextVariableSizeSymbolNumber);
 
-   regex = _comp->getOptions()->getBreakOnCreate();
-   if (regex && TR::SimpleRegex::match(regex, buf, false))
-      breakOn();
+   _comp->getToStringMap().Add((void *)sym, buf);
 
-   regex = _comp->getOptions()->getDebugOnCreate();
-   if (regex && TR::SimpleRegex::match(regex, buf, false))
-      debugOnCreate();
+   if (_comp->getOptions()->getBreakOnCreate() ||
+       _comp->getOptions()->getDebugOnCreate())
+      {
+      breakOrDebugOnCreate(buf);
+      }
 
-    _nextVariableSizeSymbolNumber++;
+   _nextVariableSizeSymbolNumber++;
    }
 
 void
@@ -463,7 +442,7 @@ TR_Debug::getDiagnosticFormat(const char *format, char *buffer, int32_t length)
                allowedToWrite = false;
             if (allowedToWrite)
                memcpy(&buffer[j], base, c-base+1);
-            j+=c-base;
+            j+=static_cast<int32_t>(c-base);
             }
          }
       }
@@ -503,7 +482,6 @@ TR_Debug::performTransformationImpl(bool canOmitTransformation, const char * for
 
    const char *string = format; // without formattedString, we do our best with the format string itself
    bool alreadyFormatted = false;
-   char formatBuffer[200];
    char messageBuffer[300];
 
    // We try to avoid doing the work of formatting the string if we don't need to.
@@ -725,7 +703,7 @@ TR_Debug::printPrefix(TR::FILE *pOutFile, TR::Instruction *instr, uint8_t *curso
    {
    if (cursor != NULL)
       {
-      uint32_t offset = cursor - _comp->cg()->getCodeStart();
+      uint32_t offset = static_cast<uint32_t>(cursor - _comp->cg()->getCodeStart());
 
       char prefix[MAX_PREFIX_WIDTH + 1];
 
@@ -769,7 +747,7 @@ TR_Debug::printPrefix(TR::FILE *pOutFile, TR::Instruction *instr, uint8_t *curso
             sprintf(p1, " %02x", *cursor++);
          }
 
-      int leftOver = p0 + prefixWidth - p1;
+      int32_t leftOver = static_cast<int32_t>(p0 + prefixWidth - p1);
       if (leftOver >= 1)
          {
          memset(p1, ' ', leftOver);
@@ -800,21 +778,6 @@ TR_Debug::printPrefix(TR::FILE *pOutFile, TR::Instruction *instr, uint8_t *curso
       trfprintf(pOutFile, "\n [%s]\t", getName(instr));
       }
 
-   TR::SimpleRegex * regex = NULL;
-
-   if (regex)
-      {
-      char buf[20];
-      sprintf(buf, "%s", getName(instr));
-
-      char * p = buf;
-      while (*p!='I')
-         p++;
-
-      if (TR::SimpleRegex::match(regex, p))
-         breakOn();
-      }
-
    return cursor;
    }
 
@@ -825,7 +788,7 @@ TR_Debug::printSnippetLabel(TR::FILE *pOutFile, TR::LabelSymbol *label, uint8_t 
    int codeByteColumnWidth = TR::Compiler->debug.codeByteColumnWidth();
    int prefixWidth         = addressFieldWidth * 2 + codeByteColumnWidth + 12; // 8 bytes of offsets, 2 spaces, and opening and closing brackets
 
-   uint32_t offset = cursor - _comp->cg()->getCodeStart();
+   uint32_t offset = static_cast<uint32_t>(cursor - _comp->cg()->getCodeStart());
 
    if (_comp->getOption(TR_MaskAddresses))
       {
@@ -984,136 +947,133 @@ TR_Debug::nodePrintAllFlags(TR::Node *node, TR_PrettyPrinterString &output)
    {
    char *format = "%s";
 
-   output.append(format, node->printHasFoldedImplicitNULLCHK());
-   output.append(format, node->printIsHighWordZero());
-   output.append(format, node->printIsUnsigned());
-   output.append(format, node->printIsClassPointerConstant());
-   output.append(format, node->printIsMethodPointerConstant());
-   output.append(format, node->printIsSafeToSkipTableBoundCheck());
-   output.append(format, node->printIsProfilingCode());
-   output.append(format, node->printIsZero());
-   output.append(format, node->printIsNonZero());
-   output.append(format, node->printIsNonNegative());
-   output.append(format, node->printIsNonPositive());
-   output.append(format, node->printPointsToNull());
-   output.append(format, node->printRequiresConditionCodes());
-   output.append(format, node->printIsUnneededConversion());
-   output.append(format, node->printParentSupportsLazyClobber());
-   output.append(format, node->printIsFPStrictCompliant());
-   output.append(format, node->printCannotOverflow());
-   output.append(format, node->printPointsToNonNull());
+   output.appendf(format, node->printHasFoldedImplicitNULLCHK());
+   output.appendf(format, node->printIsHighWordZero());
+   output.appendf(format, node->printIsUnsigned());
+   output.appendf(format, node->printIsClassPointerConstant());
+   output.appendf(format, node->printIsMethodPointerConstant());
+   output.appendf(format, node->printIsSafeToSkipTableBoundCheck());
+   output.appendf(format, node->printIsProfilingCode());
+   output.appendf(format, node->printIsZero());
+   output.appendf(format, node->printIsNonZero());
+   output.appendf(format, node->printIsNonNegative());
+   output.appendf(format, node->printIsNonPositive());
+   output.appendf(format, node->printPointsToNull());
+   output.appendf(format, node->printRequiresConditionCodes());
+   output.appendf(format, node->printIsUnneededConversion());
+   output.appendf(format, node->printParentSupportsLazyClobber());
+   output.appendf(format, node->printIsFPStrictCompliant());
+   output.appendf(format, node->printCannotOverflow());
+   output.appendf(format, node->printPointsToNonNull());
 
-   output.append(format, node->printIsInvalid8BitGlobalRegister());
-   output.append(format, node->printIsDirectMemoryUpdate());
-   output.append(format, node->printIsTheVirtualCallNodeForAGuardedInlinedCall());
-   if (!inDebugExtension())
-      output.append(format, node->printIsDontTransformArrayCopyCall());
-   output.append(format, node->printIsNodeRecognizedArrayCopyCall());
-   output.append(format, node->printCanDesynchronizeCall());
-   output.append(format, node->printContainsCompressionSequence());
-   output.append(format, node->printIsInternalPointer());
-   output.append(format, node->printIsMaxLoopIterationGuard());
-   output.append(format, node->printIsProfiledGuard()     );
-   output.append(format, node->printIsInterfaceGuard()    );
-   output.append(format, node->printIsAbstractGuard()     );
-   output.append(format, node->printIsHierarchyGuard()    );
-   output.append(format, node->printIsNonoverriddenGuard());
-   output.append(format, node->printIsSideEffectGuard()   );
-   output.append(format, node->printIsDummyGuard()        );
-   output.append(format, node->printIsHCRGuard()          );
-   output.append(format, node->printIsOSRGuard()          );
-   output.append(format, node->printIsBreakpointGuard()          );
-   output.append(format, node->printIsMutableCallSiteTargetGuard() );
-   output.append(format, node->printIsByteToByteTranslate());
-   output.append(format, node->printIsByteToCharTranslate());
-   output.append(format, node->printIsCharToByteTranslate());
-   output.append(format, node->printIsCharToCharTranslate());
-   output.append(format, node->printSetSourceIsByteArrayTranslate() );
-   output.append(format, node->printSetTargetIsByteArrayTranslate() );
-   output.append(format, node->printSetTermCharNodeIsHint()         );
-   output.append(format, node->printSetTableBackedByRawStorage()    );
-   output.append(format, node->printIsForwardArrayCopy());
-   output.append(format, node->printIsBackwardArrayCopy());
-   output.append(format, node->printIsRarePathForwardArrayCopy());
-   output.append(format, node->printIsNoArrayStoreCheckArrayCopy());
-   output.append(format, node->printIsReferenceArrayCopy());
-   output.append(format, node->printIsHalfWordElementArrayCopy());
-   output.append(format, node->printIsWordElementArrayCopy());
-   output.append(format, node->printIsHeapObjectWrtBar());
-   output.append(format, node->printIsNonHeapObjectWrtBar());
-   output.append(format, node->printIsSkipWrtBar());
-   output.append(format, node->printIsArrayChkPrimitiveArray1());
-   output.append(format, node->printIsArrayChkReferenceArray1());
-   output.append(format, node->printIsArrayChkPrimitiveArray2());
-   output.append(format, node->printIsArrayChkReferenceArray2());
-   output.append(format, node->printNeedsPrecisionAdjustment());
-   output.append(format, node->printIsSignExtendedTo32BitAtSource());
-   output.append(format, node->printIsSignExtendedTo64BitAtSource());
-   output.append(format, node->printIsZeroExtendedTo32BitAtSource());
-   output.append(format, node->printIsZeroExtendedTo64BitAtSource());
-   output.append(format, node->printNeedsSignExtension());
-   output.append(format, node->printSkipSignExtension());
-   output.append(format, node->printSetUseSignExtensionMode());
-   output.append(format, node->printIsSeenRealReference());
-   output.append(format, node->printNormalizeNanValues());
-   output.append(format, node->printCannotTrackLocalUses());
-   output.append(format, node->printIsSkipSync());
-   output.append(format, node->printIsReadMonitor());
-   output.append(format, node->printIsLocalObjectMonitor());
-   output.append(format, node->printIsPrimitiveLockedRegion());
-   output.append(format, node->printIsSyncMethodMonitor());
-   output.append(format, node->printIsStaticMonitor());
-   output.append(format, node->printIsNormalizedShift());
-   output.append(format, node->printIsSimpleDivCheck());
-   output.append(format, node->printIsOmitSync());
-   output.append(format, node->printIsNOPLongStore());
-   output.append(format, node->printIsStoredValueIsIrrelevant());
-   output.append(format, node->printIsThrowInsertedByOSR());
-   output.append(format, node->printCanSkipZeroInitialization());
-   output.append(format, node->printIsDontMoveUnderBranch());
-   output.append(format, node->printIsPrivatizedInlinerArg());
-   output.append(format, node->printArrayCmpLen());
-   output.append(format, node->printArrayCmpSign());
-   output.append(format, node->printXorBitOpMem());
-   output.append(format, node->printOrBitOpMem());
-   output.append(format, node->printAndBitOpMem());
+   output.appendf(format, node->printIsInvalid8BitGlobalRegister());
+   output.appendf(format, node->printIsDirectMemoryUpdate());
+   output.appendf(format, node->printIsTheVirtualCallNodeForAGuardedInlinedCall());
+   output.appendf(format, node->printIsDontTransformArrayCopyCall());
+   output.appendf(format, node->printIsNodeRecognizedArrayCopyCall());
+   output.appendf(format, node->printCanDesynchronizeCall());
+   output.appendf(format, node->printContainsCompressionSequence());
+   output.appendf(format, node->printIsInternalPointer());
+   output.appendf(format, node->printIsMaxLoopIterationGuard());
+   output.appendf(format, node->printIsProfiledGuard()     );
+   output.appendf(format, node->printIsInterfaceGuard()    );
+   output.appendf(format, node->printIsAbstractGuard()     );
+   output.appendf(format, node->printIsHierarchyGuard()    );
+   output.appendf(format, node->printIsNonoverriddenGuard());
+   output.appendf(format, node->printIsSideEffectGuard()   );
+   output.appendf(format, node->printIsDummyGuard()        );
+   output.appendf(format, node->printIsHCRGuard()          );
+   output.appendf(format, node->printIsOSRGuard()          );
+   output.appendf(format, node->printIsBreakpointGuard()          );
+   output.appendf(format, node->printIsMutableCallSiteTargetGuard() );
+   output.appendf(format, node->printIsByteToByteTranslate());
+   output.appendf(format, node->printIsByteToCharTranslate());
+   output.appendf(format, node->printIsCharToByteTranslate());
+   output.appendf(format, node->printIsCharToCharTranslate());
+   output.appendf(format, node->printSetSourceIsByteArrayTranslate() );
+   output.appendf(format, node->printSetTargetIsByteArrayTranslate() );
+   output.appendf(format, node->printSetTermCharNodeIsHint()         );
+   output.appendf(format, node->printSetTableBackedByRawStorage()    );
+   output.appendf(format, node->printIsForwardArrayCopy());
+   output.appendf(format, node->printIsBackwardArrayCopy());
+   output.appendf(format, node->printIsRarePathForwardArrayCopy());
+   output.appendf(format, node->printIsNoArrayStoreCheckArrayCopy());
+   output.appendf(format, node->printIsReferenceArrayCopy());
+   output.appendf(format, node->printIsHalfWordElementArrayCopy());
+   output.appendf(format, node->printIsWordElementArrayCopy());
+   output.appendf(format, node->printIsHeapObjectWrtBar());
+   output.appendf(format, node->printIsNonHeapObjectWrtBar());
+   output.appendf(format, node->printIsSkipWrtBar());
+   output.appendf(format, node->printIsArrayChkPrimitiveArray1());
+   output.appendf(format, node->printIsArrayChkReferenceArray1());
+   output.appendf(format, node->printIsArrayChkPrimitiveArray2());
+   output.appendf(format, node->printIsArrayChkReferenceArray2());
+   output.appendf(format, node->printIsSignExtendedTo32BitAtSource());
+   output.appendf(format, node->printIsSignExtendedTo64BitAtSource());
+   output.appendf(format, node->printIsZeroExtendedTo32BitAtSource());
+   output.appendf(format, node->printIsZeroExtendedTo64BitAtSource());
+   output.appendf(format, node->printNeedsSignExtension());
+   output.appendf(format, node->printSkipSignExtension());
+   output.appendf(format, node->printSetUseSignExtensionMode());
+   output.appendf(format, node->printIsSeenRealReference());
+   output.appendf(format, node->printNormalizeNanValues());
+   output.appendf(format, node->printCannotTrackLocalUses());
+   output.appendf(format, node->printIsSkipSync());
+   output.appendf(format, node->printIsReadMonitor());
+   output.appendf(format, node->printIsLocalObjectMonitor());
+   output.appendf(format, node->printIsPrimitiveLockedRegion());
+   output.appendf(format, node->printIsSyncMethodMonitor());
+   output.appendf(format, node->printIsStaticMonitor());
+   output.appendf(format, node->printIsNormalizedShift());
+   output.appendf(format, node->printIsSimpleDivCheck());
+   output.appendf(format, node->printIsOmitSync());
+   output.appendf(format, node->printIsNOPLongStore());
+   output.appendf(format, node->printIsStoredValueIsIrrelevant());
+   output.appendf(format, node->printIsThrowInsertedByOSR());
+   output.appendf(format, node->printCanSkipZeroInitialization());
+   output.appendf(format, node->printIsDontMoveUnderBranch());
+   output.appendf(format, node->printIsPrivatizedInlinerArg());
+   output.appendf(format, node->printArrayCmpLen());
+   output.appendf(format, node->printArrayCmpSign());
+   output.appendf(format, node->printXorBitOpMem());
+   output.appendf(format, node->printOrBitOpMem());
+   output.appendf(format, node->printAndBitOpMem());
 #ifdef J9_PROJECT_SPECIFIC
-   output.append(format, node->printSkipCopyOnStore());
-   output.append(format, node->printSkipCopyOnLoad());
-   output.append(format, node->printSkipPadByteClearing());
-   output.append(format, node->printUseStoreAsAnAccumulator());
-   output.append(format, node->printCleanSignInPDStoreEvaluator());
+   output.appendf(format, node->printSkipCopyOnStore());
+   output.appendf(format, node->printSkipCopyOnLoad());
+   output.appendf(format, node->printSkipPadByteClearing());
+   output.appendf(format, node->printUseStoreAsAnAccumulator());
+   output.appendf(format, node->printCleanSignInPDStoreEvaluator());
 #endif
-   output.append(format, node->printUseCallForFloatToFixedConversion());
+   output.appendf(format, node->printUseCallForFloatToFixedConversion());
 #ifdef J9_PROJECT_SPECIFIC
-   output.append(format, node->printCleanSignDuringPackedLeftShift());
-   if (!inDebugExtension())
-      output.append(format, node->printIsInMemoryCopyProp());
+   output.appendf(format, node->printCleanSignDuringPackedLeftShift());
+   output.appendf(format, node->printIsInMemoryCopyProp());
 #endif
-   output.append(format, node->printAllocationCanBeRemoved());
-   output.append(format, node->printArrayTRT());
-   output.append(format, node->printCannotTrackLocalStringUses());
-   output.append(format, node->printCharArrayTRT());
-   output.append(format, node->printEscapesInColdBlock());
-   output.append(format, node->printIsDirectMethodGuard());
+   output.appendf(format, node->printAllocationCanBeRemoved());
+   output.appendf(format, node->printArrayTRT());
+   output.appendf(format, node->printCannotTrackLocalStringUses());
+   output.appendf(format, node->printCharArrayTRT());
+   output.appendf(format, node->printEscapesInColdBlock());
+   output.appendf(format, node->printIsDirectMethodGuard());
 #ifdef J9_PROJECT_SPECIFIC
-   output.append(format, node->printIsDontInlineUnsafePutOrderedCall());
+   output.appendf(format, node->printIsDontInlineUnsafePutOrderedCall());
 #endif
-   output.append(format, node->printIsHeapificationStore());
-   output.append(format, node->printIsHeapificationAlloc());
-   output.append(format, node->printIsIdentityless());
-   output.append(format, node->printIsLiveMonitorInitStore());
-   output.append(format, node->printIsMethodEnterExitGuard());
-   output.append(format, node->printReturnIsDummy());
+   output.appendf(format, node->printIsHeapificationStore());
+   output.appendf(format, node->printIsHeapificationAlloc());
+   output.appendf(format, node->printIsIdentityless());
+   output.appendf(format, node->printIsLiveMonitorInitStore());
+   output.appendf(format, node->printIsMethodEnterExitGuard());
+   output.appendf(format, node->printReturnIsDummy());
 #ifdef J9_PROJECT_SPECIFIC
-   output.append(format, node->printSharedMemory());
+   output.appendf(format, node->printSharedMemory());
 #endif
-   output.append(format, node->printSourceCellIsTermChar());
+   output.appendf(format, node->printSourceCellIsTermChar());
 #ifdef J9_PROJECT_SPECIFIC
-   output.append(format, node->printSpineCheckWithArrayElementChild());
+   output.appendf(format, node->printSpineCheckWithArrayElementChild());
 #endif
-   output.append(format, node->printStoreAlreadyEvaluated());
-   output.append(format, node->printCopyToNewVirtualRegister());
+   output.appendf(format, node->printStoreAlreadyEvaluated());
+   output.appendf(format, node->printCopyToNewVirtualRegister());
    }
 
 
@@ -1128,19 +1088,17 @@ TR_Debug::print(TR::SymbolReference * symRef, TR_PrettyPrinterString& output, bo
                           symRefName(this),
                           symRefKind(this),
                           otherInfo(this),
-                          symRefWCodeId(this),
                           symRefObjIndex(this),
                           labelSymbol(this);
 
    TR::Symbol * sym = symRef->getSymbol();
 
-   symRefAddress.append("%s", getName(sym));
+   symRefAddress.appendf("%s", getName(sym));
 
 
    if (sym)
       {
-      if (!inDebugExtension() &&
-          _comp->cg()->getMappingAutomatics() &&
+      if (_comp->cg()->getMappingAutomatics() &&
           sym->isRegisterMappedSymbol() &&
           sym->getRegisterMappedSymbol()->getOffset() != 0)
          {
@@ -1150,59 +1108,59 @@ TR_Debug::print(TR::SymbolReference * symRef, TR_PrettyPrinterString& output, bo
 
    if (symRef->getOffset() + displacement)
       {
-      symRefOffset.append( "%+d", displacement + symRef->getOffset());
+      symRefOffset.appendf( "%+d", displacement + symRef->getOffset());
       }
 
    if (symRef->getKnownObjectIndex() != TR::KnownObjectTable::UNKNOWN)
-      symRefObjIndex.append( " (obj%d)", (int)symRef->getKnownObjectIndex());
+      symRefObjIndex.appendf( " (obj%d)", (int)symRef->getKnownObjectIndex());
    else if (sym && sym->isFixedObjectRef() && comp()->getKnownObjectTable() && !symRef->isUnresolved())
       {
       TR::KnownObjectTable::Index i = comp()->getKnownObjectTable()->getExistingIndexAt((uintptr_t*)sym->castToStaticSymbol()->getStaticAddress());
       if (i != TR::KnownObjectTable::UNKNOWN)
-         symRefObjIndex.append( " (==obj%d)", (int)i);
+         symRefObjIndex.appendf( " (==obj%d)", (int)i);
       }
 
    if (sym)
       {
       if (symRef->isUnresolved())
-         symRefKind.append(" unresolved");
+         symRefKind.appends(" unresolved");
       switch (symRef->hasBeenAccessedAtRuntime())
          {
-         case TR_yes: symRefKind.append( " accessed");    break;
-         case TR_no:  symRefKind.append( " notAccessed"); break;
+         case TR_yes: symRefKind.appends( " accessed");    break;
+         case TR_no:  symRefKind.appends( " notAccessed"); break;
          default: break;
          }
       if (symRef->getSymbol()->isFinal())
-         symRefKind.append(" final");
+         symRefKind.appends(" final");
       if (symRef->getSymbol()->isVolatile())
-         symRefKind.append(" volatile");
+         symRefKind.appends(" volatile");
       switch (sym->getKind())
          {
          case TR::Symbol::IsAutomatic:
-            symRefName.append(" %s", getName(symRef));
+            symRefName.appendf(" %s", getName(symRef));
             if (sym->getAutoSymbol()->getName() == NULL)
-               symRefKind.append(" Auto");
+               symRefKind.appends(" Auto");
             else
-               symRefKind.append(" %s", sym->getAutoSymbol()->getName());
+               symRefKind.appendf(" %s", sym->getAutoSymbol()->getName());
             break;
          case TR::Symbol::IsParameter:
-            symRefKind.append(" Parm");
-            symRefName.append(" %s", getName(symRef));
+            symRefKind.appends(" Parm");
+            symRefName.appendf(" %s", getName(symRef));
             break;
          case TR::Symbol::IsStatic:
             if(symRef->isFromLiteralPool())
              {
-               symRefKind.append(" DLP-Static");
-               symRefName.append( " %s", getName(symRef));
+               symRefKind.appends(" DLP-Static");
+               symRefName.appendf(" %s", getName(symRef));
              }
             else
                {
-               symRefKind.append(" Static");
+               symRefKind.appends(" Static");
                if (sym->isNamed())
                   {
-                  symRefName.append(" \"%s\"", ((TR::StaticSymbol*)sym)->getName());
+                  symRefName.appendf(" \"%s\"", ((TR::StaticSymbol*)sym)->getName());
                   }
-               symRefName.append(" %s", getName(symRef));
+               symRefName.appendf(" %s", getName(symRef));
                }
             break;
 
@@ -1210,53 +1168,45 @@ TR_Debug::print(TR::SymbolReference * symRef, TR_PrettyPrinterString& output, bo
          case TR::Symbol::IsMethod:
             {
             TR::MethodSymbol *methodSym = sym->castToMethodSymbol();
-            if (!inDebugExtension())
+            if (methodSym->isNative())
+               symRefKind.appends(" native");
+            switch (methodSym->getMethodKind())
                {
-               if (methodSym->isNative())
-                  symRefKind.append(" native");
-               switch (methodSym->getMethodKind())
-                  {
-                  case TR::MethodSymbol::Virtual:
-                     symRefKind.append(" virtual");
-                     break;
-                  case TR::MethodSymbol::Interface:
-                     symRefKind.append(" interface");
-                     break;
-                  case TR::MethodSymbol::Static:
-                     symRefKind.append(" static");
-                     break;
-                  case TR::MethodSymbol::Special:
-                     symRefKind.append(" special");
-                     break;
-                  case TR::MethodSymbol::Helper:
-                     symRefKind.append(" helper");
-                     break;
-                  case TR::MethodSymbol::ComputedStatic:
-                     symRefKind.append(" computed-static");
-                     break;
-                  case TR::MethodSymbol::ComputedVirtual:
-                     symRefKind.append(" computed-virtual");
-                     break;
-                  default:
-                        symRefKind.append(" UNKNOWN");
-                     break;
-                  }
-
-               symRefKind.append(" Method");
-               symRefName.append(" %s", getName(symRef));
-               TR_OpaqueClassBlock *clazz = containingClass(symRef);
-               if (clazz)
-                  {
-                  if (TR::Compiler->cls.isInterfaceClass(_comp, clazz))
-                     otherInfo.append( " (Interface class)");
-                  else if (TR::Compiler->cls.isAbstractClass(_comp, clazz))
-                     otherInfo.append( " (Abstract class)");
-                  }
+               case TR::MethodSymbol::Virtual:
+                  symRefKind.appends(" virtual");
+                  break;
+               case TR::MethodSymbol::Interface:
+                  symRefKind.appends(" interface");
+                  break;
+               case TR::MethodSymbol::Static:
+                  symRefKind.appends(" static");
+                  break;
+               case TR::MethodSymbol::Special:
+                  symRefKind.appends(" special");
+                  break;
+               case TR::MethodSymbol::Helper:
+                  symRefKind.appends(" helper");
+                  break;
+               case TR::MethodSymbol::ComputedStatic:
+                  symRefKind.appends(" computed-static");
+                  break;
+               case TR::MethodSymbol::ComputedVirtual:
+                  symRefKind.appends(" computed-virtual");
+                  break;
+               default:
+                     symRefKind.appends(" UNKNOWN");
+                  break;
                }
-            else
+
+            symRefKind.appends(" Method");
+            symRefName.appendf(" %s", getName(symRef));
+            TR_OpaqueClassBlock *clazz = containingClass(symRef);
+            if (clazz)
                {
-               symRefKind.append(" Method", TR_Debug::getName(symRef));
-               symRefName.append(" %s", TR_Debug::getName(symRef));
+               if (TR::Compiler->cls.isInterfaceClass(_comp, clazz))
+                  otherInfo.appends(" (Interface class)");
+               else if (TR::Compiler->cls.isAbstractClass(_comp, clazz))
+                  otherInfo.appends(" (Abstract class)");
                }
             }
             break;
@@ -1264,62 +1214,62 @@ TR_Debug::print(TR::SymbolReference * symRef, TR_PrettyPrinterString& output, bo
          case TR::Symbol::IsShadow:
             if (sym->isNamedShadowSymbol() && sym->getNamedShadowSymbol()->getName() != NULL)
                {
-               symRefKind.append(" %s", sym->getNamedShadowSymbol()->getName());
-               symRefName.append(" %s", getName(symRef));
+               symRefKind.appendf(" %s", sym->getNamedShadowSymbol()->getName());
+               symRefName.appendf(" %s", getName(symRef));
                }
             else
                {
-               symRefKind.append(" Shadow");
-               symRefName.append(" %s", getName(symRef));
+               symRefKind.appends(" Shadow");
+               symRefName.appendf(" %s", getName(symRef));
                }
             break;
          case TR::Symbol::IsMethodMetaData:
-            symRefKind.append(" MethodMeta");
-            symRefName.append(" %s", symRef->getSymbol()->getMethodMetaDataSymbol()->getName());
+            symRefKind.appends(" MethodMeta");
+            symRefName.appendf(" %s", symRef->getSymbol()->getMethodMetaDataSymbol()->getName());
             break;
          case TR::Symbol::IsLabel:
             print(sym->castToLabelSymbol(), labelSymbol);
             if (!labelSymbol.isEmpty())
-               labelSymbol.append( " " );
+               labelSymbol.appends(" ");
             break;
          default:
             TR_ASSERT(0, "unexpected symbol kind");
          }
-         otherInfo.append( " [flags 0x%x 0x%x ]", sym->getFlags(),sym->getFlags2());
+         otherInfo.appendf( " [flags 0x%x 0x%x ]", sym->getFlags(),sym->getFlags2());
       }
 
    numSpaces = getNumSpacesAfterIndex( symRef->getReferenceNumber(), getIntLength(_comp->getSymRefTab()->baseArray.size()) );
 
-      symRefNum.append("#%d", symRef->getReferenceNumber());
+      symRefNum.appendf("#%d", symRef->getReferenceNumber());
 
    if (verbose)
       {
-       output.append("%s:%*s", symRefNum.getStr(), numSpaces, "");
+       output.appendf("%s:%*s", symRefNum.getStr(), numSpaces, "");
 
        if (hideHelperMethodInfo)
-          output.append(" %s%s[%s]%s", labelSymbol.getStr(), symRefWCodeId.getStr(), symRefOffset.getStr(), symRefObjIndex.getStr());
+          output.appendf(" %s[%s]%s", labelSymbol.getStr(), symRefOffset.getStr(), symRefObjIndex.getStr());
        else
-          output.append(" %s%s%s[%s%s%s]%s%s", symRefName.getStr(), labelSymbol.getStr(), symRefWCodeId.getStr(), symRefKind.getStr(), symRefOffset.isEmpty() ? "" : " ",
+          output.appendf(" %s%s[%s%s%s]%s%s", symRefName.getStr(), labelSymbol.getStr(), symRefKind.getStr(), symRefOffset.isEmpty() ? "" : " ",
                 symRefOffset.getStr(), symRefObjIndex.getStr(), otherInfo.getStr());
 
-       output.append(" [%s]", symRefAddress.getStr());
+       output.appendf(" [%s]", symRefAddress.getStr());
 
        if(sym)
           {
-          output.append (" (%s)",TR::DataType::getName(sym->getDataType()));
+          output.appendf(" (%s)",TR::DataType::getName(sym->getDataType()));
           if (sym->isVolatile())
              {
-             output.append(" [volatile]");
+             output.appends(" [volatile]");
              }
           }
       }
    else
       {
       if (hideHelperMethodInfo)
-         output.append(" %s%s[%s%s%s]%s", labelSymbol.getStr(), symRefWCodeId.getStr(), symRefNum.getStr(), symRefOffset.isEmpty() ? "" : " ", symRefOffset.getStr(),
+         output.appendf(" %s[%s%s%s]%s", labelSymbol.getStr(), symRefNum.getStr(), symRefOffset.isEmpty() ? "" : " ", symRefOffset.getStr(),
                symRefObjIndex.getStr());
       else
-         output.append(" %s%s%s[%s%s%s%s%s]%s%s", symRefName.getStr(), labelSymbol.getStr(), symRefWCodeId.getStr(), symRefNum.getStr(), symRefKind.isEmpty() ? "" : " ",
+         output.appendf(" %s%s[%s%s%s%s%s]%s%s", symRefName.getStr(), labelSymbol.getStr(), symRefNum.getStr(), symRefKind.isEmpty() ? "" : " ",
                symRefKind.getStr(), symRefOffset.isEmpty() ? "" : " ", symRefOffset.getStr(), symRefObjIndex.getStr(), otherInfo.getStr());
       }
 
@@ -1337,7 +1287,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::LabelSymbol * labelSymbol)
 void
 TR_Debug::print(TR::LabelSymbol * labelSymbol, TR_PrettyPrinterString& output)
    {
-   output.append( "%s", getName(labelSymbol));
+   output.appendf( "%s", getName(labelSymbol));
    }
 
 const char *
@@ -1535,9 +1485,9 @@ TR_Debug::getName(TR::LabelSymbol *labelSymbol)
 const char *
 TR_Debug::getPerCodeCacheHelperName(TR_CCPreLoadedCode helper)
    {
+#if defined(TR_TARGET_POWER)
    switch (helper)
       {
-#if defined(TR_TARGET_POWER)
       case TR_AllocPrefetch: return "Alloc Prefetch";
       case TR_ObjAlloc: return "Object Alloc Helper";
       case TR_VariableLenArrayAlloc: return "Variable Length Array Alloc Helper";
@@ -1546,9 +1496,9 @@ TR_Debug::getPerCodeCacheHelperName(TR_CCPreLoadedCode helper)
       case TR_writeBarrierAndCardMark: return "Write Barrier and Card Mark Helper";
       case TR_cardMark: return "Card Mark Helper";
       case TR_arrayStoreCHK: return "Array Store Check";
-#endif // TR_TARGET_POWER
       default: break;
       }
+#endif // TR_TARGET_POWER
    return "Unknown Helper";
    }
 
@@ -1569,7 +1519,7 @@ TR_Debug::getName(TR::SymbolReference * symRef)
    if (index < nonhelperIndex)
       {
       if (index >= numHelperSymbols + TR::SymbolReferenceTable::firstArrayShadowSymbol &&
-          index < numHelperSymbols + TR::SymbolReferenceTable::firstArrayShadowSymbol + TR::NumTypes)
+          index < numHelperSymbols + TR::SymbolReferenceTable::firstArrayShadowSymbol + TR::NumAllTypes)
          return "<array-shadow>";
       if (index >= numHelperSymbols + TR::SymbolReferenceTable::firstPerCodeCacheHelperSymbol &&
           index <= numHelperSymbols + TR::SymbolReferenceTable::lastPerCodeCacheHelperSymbol)
@@ -1628,6 +1578,8 @@ TR_Debug::getName(TR::SymbolReference * symRef)
             return "<arraycmp>";
          case TR::SymbolReferenceTable::currentTimeMaxPrecisionSymbol:
             return "<currentTimeMaxPrecision>";
+         case TR::SymbolReferenceTable::encodeASCIISymbol:
+            return "<encodeASCII>";
          case TR::SymbolReferenceTable::singlePrecisionSQRTSymbol:
             return "<fsqrt>";
          case TR::SymbolReferenceTable::killsAllMethodSymbol:
@@ -1660,6 +1612,22 @@ TR_Debug::getName(TR::SymbolReference * symRef)
              return "<osrFearPointHelper>";
          case TR::SymbolReferenceTable::eaEscapeHelperSymbol:
              return "<eaEscapeHelper>";
+         case TR::SymbolReferenceTable::j9VMThreadTempSlotFieldSymbol:
+             return "<j9VMThreadTempSlotFieldSymbol>";
+         case TR::SymbolReferenceTable::computedStaticCallSymbol:
+             return "<computedStaticCallSymbol>";
+         case TR::SymbolReferenceTable::j9VMThreadFloatTemp1Symbol:
+             return "<j9VMThreadFloatTemp1Symbol>";
+         case TR::SymbolReferenceTable::objectEqualityComparisonSymbol:
+             return "<objectEqualityComparison>";
+         case TR::SymbolReferenceTable::objectInequalityComparisonSymbol:
+             return "<objectInequalityComparison>";
+         case TR::SymbolReferenceTable::nonNullableArrayNullStoreCheckSymbol:
+             return "<nonNullableArrayNullStoreCheck>";
+         case TR::SymbolReferenceTable::J9JNIMethodIDvTableIndexFieldSymbol:
+             return "<J9JNIMethodIDvTableIndexFieldSymbol>";
+         case TR::SymbolReferenceTable::defaultValueSymbol:
+             return "<defaultValue>";
          }
       }
 
@@ -1693,8 +1661,8 @@ TR_Debug::print(TR::FILE *pOutFile, TR::SymbolReferenceTable * symRefTab)
    if (pOutFile != NULL && symRefTab->baseArray.size() > 0 && _comp->getOption(TR_TraceAliases))
       {
       trfprintf(pOutFile, "Symbol Reference Map for this method:\n");
-      for (int32_t i=0; i<symRefTab->baseArray.size(); i++)
-         if (symRefTab->getSymRef(i))
+      for (auto i = 0U; i<symRefTab->baseArray.size(); i++)
+         if (symRefTab->getSymRef(static_cast<int32_t>(i)))
             trfprintf(pOutFile,"  %d[" POINTER_PRINTF_FORMAT "]\n", i, symRefTab->getSymRef(i));
       }
    }
@@ -2069,6 +2037,7 @@ static const char *commonNonhelperSymbolNames[] =
    "<reverseLoad>",
    "<reverseStore>",
    "<currentTimeMaxPrecision>",
+   "<encodeASCII>",
    "<headerFlags>",
    "<singlePrecisionSQRT>",
    "<threadPrivateFlags>",
@@ -2106,6 +2075,8 @@ static const char *commonNonhelperSymbolNames[] =
    "<startPCLinkageInfo>",
    "<instanceShapeFromROMClass>",
    "<objectEqualityComparison>",
+   "<objectInequalityComparison>",
+   "<nonNullableArrayNullStoreCheck>",
    "<synchronizedFieldLoad>",
    "<atomicAdd>",
    "<atomicFetchAndAdd>",
@@ -2118,7 +2089,11 @@ static const char *commonNonhelperSymbolNames[] =
    "<atomicCompareAndSwapReturnValue>",
    "<jProfileValueSymbol>",
    "<jProfileValueWithNullCHKSymbol>",
-   "<j9VMThreadTempSlotField>"
+   "<j9VMThreadTempSlotField>",
+   "<computedStaticCallSymbol>",
+   "<j9VMThreadFloatTemp1>",
+   "<J9JNIMethodIDvTableIndexFieldSymbol>",
+   "<defaultValue>"
    };
 
 const char *
@@ -2235,24 +2210,21 @@ TR_Debug::printBlockInfo(TR::FILE *pOutFile, TR::Node *node)
          TR_BlockStructure *blockStructure = block->getStructureOf();
          if (_comp->getFlowGraph()->getStructure() && blockStructure)
             {
-            if (!inDebugExtension())
+            TR_Structure *parent = blockStructure->getParent();
+            while (parent)
                {
-               TR_Structure *parent = blockStructure->getParent();
-               while (parent)
+               TR_RegionStructure *region = parent->asRegion();
+               if (region->isNaturalLoop() ||
+                   region->containsInternalCycles())
                   {
-                  TR_RegionStructure *region = parent->asRegion();
-                  if (region->isNaturalLoop() ||
-                      region->containsInternalCycles())
-                     {
-                     trfprintf(pOutFile, " (in loop %d)", region->getNumber());
-                     break;
-                     }
-                  parent = parent->getParent();
+                  trfprintf(pOutFile, " (in loop %d)", region->getNumber());
+                  break;
                   }
-               TR_BlockStructure *dupBlock = blockStructure->getDuplicatedBlock();
-               if (dupBlock)
-                  trfprintf(pOutFile, " (dup of block_%d)", dupBlock->getNumber());
+               parent = parent->getParent();
                }
+            TR_BlockStructure *dupBlock = blockStructure->getDuplicatedBlock();
+            if (dupBlock)
+               trfprintf(pOutFile, " (dup of block_%d)", dupBlock->getNumber());
             }
          }
       else if (node && node->getOpCodeValue() == TR::BBEnd)
@@ -2478,7 +2450,6 @@ TR_Debug::dumpMethodInstrs(TR::FILE *pOutFile, const char *title, bool dumpTrees
    int16_t lastSourceFileIndex = -1; // ditto
    int32_t inlinedIndex = -1; // ditto
    int16_t lastInlinedIndex = -1; // ditto
-   char *sourceFileName; // ditto
    bool printLinenos = false;
    bool printBIandEI = false;
 
@@ -2801,7 +2772,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::GCRegisterMap * map)
    }
 
 void
-TR_Debug::print(TR::FILE *pOutFile, TR::list<TR::Snippet*> & snippetList, bool isWarm)
+TR_Debug::print(TR::FILE *pOutFile, TR::list<TR::Snippet*> & snippetList)
    {
    if (pOutFile == NULL)
       return;
@@ -2817,7 +2788,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::list<TR::Snippet*> & snippetList, bool i
 
 
 void
-TR_Debug::print(TR::FILE *pOutFile, List<TR::Snippet> & snippetList, bool isWarm)
+TR_Debug::print(TR::FILE *pOutFile, List<TR::Snippet> & snippetList)
    {
    if (pOutFile == NULL)
       return;
@@ -3432,7 +3403,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::GCStackAtlas * atlas)
       TR_GCStackAllocMap *stackAllocMap = atlas->getStackAllocMap();
 
       int mapBytes = (stackAllocMap->_numberOfSlotsMapped + 7) >> 3;
-      int bits = 0;
+      uint32_t bits = 0;
       bool firstBitOn = true;
       for (int i = 0; i < mapBytes; ++i)
          {
@@ -3483,7 +3454,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR_GCStackMap * map, TR::GCStackAtlas *atlas
    trfprintf(pOutFile,"\n    live stack slots containing addresses --> {");
 
    int mapBytes = (map->_numberOfSlotsMapped + 7) >> 3;
-   int bits = 0;
+   uint32_t bits = 0;
    bool firstBitOn = true;
    for (int i = 0; i < mapBytes; ++i)
       {
@@ -3533,8 +3504,7 @@ TR_Debug::dump(TR::FILE *pOutFile, TR_CHTable * chTable)
    trfprintf(pOutFile, "                       Class Hierarchy Assumption Table\n");
    trfprintf(pOutFile, "----------------------------------------------------------------------------------------\n");
 
-   if (!inDebugExtension() &&
-       !vguards.empty())
+   if (!vguards.empty())
       {
       uint8_t *startPC = _comp->cg()->getCodeStart();
 
@@ -3693,7 +3663,8 @@ TR_Debug::getRuntimeHelperName(int32_t index)
          case TR_releaseVMAccess:           return "jitReleaseVMAccess";
          case TR_throwCurrentException:     return "jitThrowCurrentException";
          case TR_throwClassCastException:   return "jitThrowClassCastException";
-         case TR_acmpHelper:                return "jitAcmpHelper";
+         case TR_acmpeqHelper:              return "jitAcmpeqHelper";
+         case TR_acmpneHelper:              return "jitAcmpneHelper";
 
          case TR_IncompatibleClassChangeError:return "jitThrowIncompatibleClassChangeError";
          case TR_newInstanceImplAccessCheck:return "jitNewInstanceImplAccessCheck";
@@ -3740,10 +3711,12 @@ TR_Debug::getRuntimeHelperName(int32_t index)
          case TR_volatileReadDouble:        return "jitVolatileReadDouble";
          case TR_volatileWriteDouble:       return "jitVolatileWriteDouble";
          case TR_referenceArrayCopy:        return "jitReferenceArrayCopy";
+         case TR_jitLookupDynamicInterfaceMethod: return "jitLookupDynamicInterfaceMethod";
+         case TR_jitLookupDynamicPublicInterfaceMethod: return "jitLookupDynamicPublicInterfaceMethod";
          }
       }
 #ifdef TR_TARGET_X86
-   else if ((_comp->target().cpu.isI386() || _comp->target().cpu.isAMD64()) && !inDebugExtension())
+   else if (_comp->target().cpu.isI386() || _comp->target().cpu.isAMD64())
       {
       if (index < TR_LXRH)
          {
@@ -3833,7 +3806,7 @@ TR_Debug::getRuntimeHelperName(int32_t index)
          }
       }
 #elif defined (TR_TARGET_POWER)
-   else if (_comp->target().cpu.isPower() && !inDebugExtension())
+   else if (_comp->target().cpu.isPower())
       {
       switch (index)
          {
@@ -3933,10 +3906,6 @@ TR_Debug::getRuntimeHelperName(int32_t index)
          case TR_PPCarrayAnd:                                      return "_arrayand";
          case TR_PPCarrayCmp:                                      return "_arraycmp";
          case TR_PPCoverlapArrayCopy:                              return "overlapArrayCopy";
-         case TR_PPCarrayCmpVMX:                                   return "__arrayCmpVMX";
-         case TR_PPCarrayCmpLenVMX:                                return "__arrayCmpLenVMX";
-         case TR_PPCarrayCmpScalar:                                return "__arrayCmpScalar";
-         case TR_PPCarrayCmpLenScalar:                             return "__arrayCmpLenScalar";
 
          case TR_PPCAESEncryptVMX:                                 return "PPCAESEncryptVMX";
          case TR_PPCAESDecryptVMX:                                 return "PPCAESDecryptVMX";
@@ -3945,11 +3914,10 @@ TR_Debug::getRuntimeHelperName(int32_t index)
          case TR_PPCAESCBCDecrypt:                                 return "PPCAESCBCDecrypt";
          case TR_PPCAESCBCEncrypt:                                 return "PPCAESCBCEncrypt";
          case TR_PPCAESKeyExpansion:                               return "PPCAESKeyExpansion";
-         case TR_PPCVectorLogDouble:                               return "__logd2";
          }
       }
 #elif defined (TR_TARGET_S390)
-   else if (_comp->target().cpu.isZ() && !inDebugExtension())
+   else if (_comp->target().cpu.isZ())
       {
       switch (index)
          {
@@ -4036,7 +4004,7 @@ TR_Debug::getRuntimeHelperName(int32_t index)
          }
       }
 #elif defined (TR_TARGET_ARM)
-   else if (_comp->target().cpu.isARM() && !inDebugExtension())
+   else if (_comp->target().cpu.isARM())
       {
       switch (index)
          {
@@ -4170,7 +4138,7 @@ TR_Debug::getRuntimeHelperName(int32_t index)
          }
       }
 #elif defined (TR_TARGET_ARM64)
-   else if (_comp->target().cpu.isARM64() && !inDebugExtension())
+   else if (_comp->target().cpu.isARM64())
       {
       switch (index)
          {
@@ -4212,13 +4180,25 @@ TR_Debug::getRuntimeHelperName(int32_t index)
          case TR_ARM64revertToInterpreterGlue:                     return "_revertToInterpreterGlue";
          case TR_ARM64doubleRemainder:                             return "doubleRemainder";
          case TR_ARM64floatRemainder:                              return "floatRemainder";
+         case TR_ARM64jitCollapseJNIReferenceFrame:                return "jitCollapseJNIReferenceFrame";
+         case TR_ARM64arrayCopy:                                   return "__arrayCopy";
+         case TR_ARM64forwardArrayCopy:                            return "__forwardArrayCopy";
+         case TR_ARM64backwardArrayCopy:                           return "__backwardArrayCopy";
+         case TR_ARM64forwardQuadWordArrayCopy:                    return "__fwQuadWordArrayCopy";
+         case TR_ARM64forwardDoubleWordArrayCopy:                  return "__fwDoubleWordArrayCopy";
+         case TR_ARM64forwardWordArrayCopy:                        return "__fwWordArrayCopy";
+         case TR_ARM64forwardHalfWordArrayCopy:                    return "__fwHalfWordArrayCopy";
+         case TR_ARM64backwardQuadWordArrayCopy:                   return "__bwQuadWordArrayCopy";
+         case TR_ARM64backwardDoubleWordArrayCopy:                 return "__bwDoubleWordArrayCopy";
+         case TR_ARM64backwardWordArrayCopy:                       return "__bwWordArrayCopy";
+         case TR_ARM64backwardHalfWordArrayCopy:                   return "__bwHalfWordArrayCopy";
+         case TR_ARM64interfaceCompleteSlot2:                      return "_interfaceCompleteSlot2";
+         case TR_ARM64interfaceSlotsUnavailable:                   return "_interfaceSlotsUnavailable";
+         case TR_ARM64PatchGCRHelper:                              return "_patchGCRHelper" ;
          }
       }
 #endif
 #endif // J9_PROJECT_SPECIFIC
-
-   if (inDebugExtension())
-      return "platform specific - not implemented";
 
    return "unknown helper";
    }
@@ -4416,7 +4396,7 @@ void TR_Debug::dumpSimulatedNode(TR::Node *node, char tagChar)
    trfprintf(_file, " %c ", tagChar);
 
    // 16 chars is enough room for ArrayCopyBNDCHK which is reasonably common
-   int32_t padding = 16 - strlen(getName(node->getOpCode()));
+   int32_t padding = 16 - static_cast<int32_t>(strlen(getName(node->getOpCode())));
    if (node->getOpCode().hasSymbolReference())
       {
       // Yes, big methods can have 4-digit symref numbers
@@ -4436,7 +4416,6 @@ void TR_Debug::dumpSimulatedNode(TR::Node *node, char tagChar)
       }
    else if (node->getOpCode().isLoadConst())
       {
-      int32_t value;
       const int32_t limit = 99999999;
       const char * const opCodeOnlyFormatString = "%s (big)   ";
       const char * const signedFormatString     = "%s %-8d";
@@ -4619,7 +4598,7 @@ TR_Debug::traceRegisterAssignment(const char *format, va_list args)
    trfprintf(_file, "details:                      ");
 
    int32_t  j = 0;
-   int32_t  length = strlen(format) + 40;
+   int32_t  length = static_cast<int32_t>(strlen(format)) + 40;
    char    *buffer = (char *)_comp->trMemory()->allocateHeapMemory(length + 1);
    bool     sawPercentR = false;
 
@@ -4629,7 +4608,7 @@ TR_Debug::traceRegisterAssignment(const char *format, va_list args)
          {
          ++c;
          const char *regName = getName(va_arg(args, TR::Register *));
-         int32_t slen  = strlen(regName);
+         int32_t slen  = static_cast<int32_t>(strlen(regName));
 
          if (j + slen >= length) // re-allocate buffer if too small
             {
@@ -4787,9 +4766,9 @@ TR_Debug::traceRegisterAssigned(TR_RegisterAssignmentFlags flags, TR::Register *
            getName(realReg),
            closeParen,
            postCoercionSymbol);
-   if ((_registerAssignmentTraceCursor += strlen(buf)) > 80)
+   if ((_registerAssignmentTraceCursor += static_cast<int16_t>(strlen(buf))) > 80)
       {
-      _registerAssignmentTraceCursor = strlen(buf);
+      _registerAssignmentTraceCursor = static_cast<int16_t>(strlen(buf));
       trfprintf(_file, "\n%s", buf);
       }
    else
@@ -4818,9 +4797,9 @@ TR_Debug::traceRegisterFreed(TR::Register *virtReg, TR::Register *realReg)
            virtReg->getFutureUseCount(),
            virtReg->getTotalUseCount(),
            getName(realReg));
-   if ((_registerAssignmentTraceCursor += strlen(buf)) > 80)
+   if ((_registerAssignmentTraceCursor += static_cast<int16_t>(strlen(buf))) > 80)
       {
-      _registerAssignmentTraceCursor = strlen(buf);
+      _registerAssignmentTraceCursor = static_cast<int16_t>(strlen(buf));
       trfprintf(_file, "\n%s", buf);
       }
    else
@@ -4840,9 +4819,9 @@ TR_Debug::traceRegisterInterference(TR::Register *virtReg, TR::Register *interfe
       return;
    char buf[40];
    sprintf(buf, "%s{%d,%d}? ", getName(interferingVirtual), interferingVirtual->getAssociation(), distance);
-   if ((_registerAssignmentTraceCursor += strlen(buf)) > 80)
+   if ((_registerAssignmentTraceCursor += static_cast<int16_t>(strlen(buf))) > 80)
       {
-      _registerAssignmentTraceCursor = strlen(buf);
+      _registerAssignmentTraceCursor = static_cast<int16_t>(strlen(buf));
       trfprintf(_file, "\n%s", buf);
       }
    else
@@ -4862,9 +4841,9 @@ TR_Debug::traceRegisterWeight(TR::Register *realReg, uint32_t weight)
       return;
    char buf[30];
    sprintf(buf, "%s[0x%x]? ", getName(realReg), weight);
-   if ((_registerAssignmentTraceCursor += strlen(buf)) > 80)
+   if ((_registerAssignmentTraceCursor += static_cast<int16_t>(strlen(buf))) > 80)
       {
-      _registerAssignmentTraceCursor = strlen(buf);
+      _registerAssignmentTraceCursor = static_cast<int16_t>(strlen(buf));
       trfprintf(_file, "\n%s", buf);
       }
    else
@@ -5221,12 +5200,12 @@ static int counterCompare(const char *left, const char *right)
       {
       // The terminator indicates a change in numeric/string comparison mode
       char *terminator = numericComparisonMode ? numericEnd : numericStart;
-      int leftSectionLength = strcspn(left, terminator);
-      int rightSectionLength = strcspn(right, terminator);
+      auto leftSectionLength = strcspn(left, terminator);
+      auto rightSectionLength = strcspn(right, terminator);
       if (leftSectionLength != rightSectionLength)
          {
          return numericComparisonMode
-               ? leftSectionLength - rightSectionLength // Assume that numbers are not 0-padded, so any longer number must be bigger
+               ? static_cast<int32_t>(leftSectionLength - rightSectionLength) // Assume that numbers are not 0-padded, so any longer number must be bigger
                : strcmp(left, right);
          }
       // strncmp also works for comparing numbers with an equal number of digits
@@ -5345,7 +5324,7 @@ void TR_Debug::printDebugCounters(TR::DebugCounterGroup *counterGroup, const cha
       counterArray[count++] = c;
       if (c->getCount() != 0)
          {
-         int32_t nameLength = strlen(c->getName());
+         int32_t nameLength = static_cast<int32_t>(strlen(c->getName()));
          longestName = std::max(longestName, nameLength);
          }
       }

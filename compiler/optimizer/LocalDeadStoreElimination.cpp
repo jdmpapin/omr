@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -208,7 +208,6 @@ void TR::LocalDeadStoreElimination::transformBlock(TR::TreeTop * entryTree, TR::
    int32_t symRefCount = comp()->getSymRefCount();
 
    comp()->incOrResetVisitCount();
-   int32_t i;
    TR::Node *currentNode;
    _curTree = exitTree;
    while (!(_curTree == entryTree))
@@ -326,8 +325,6 @@ void TR::LocalDeadStoreElimination::transformBlock(TR::TreeTop * entryTree, TR::
                firstChild->getOpCodeValue() == TR::newarray ||
                firstChild->getOpCodeValue() == TR::anewarray ||
                firstChild->getOpCodeValue() == TR::multianewarray ||
-               firstChild->getOpCodeValue() == TR::MergeNew ||
-               ///firstChild->getOpCodeValue() == TR::checkcast ||
                firstChild->getOpCode().isCheckCast() ||
                firstChild->getOpCodeValue() == TR::instanceof ||
                firstChild->getOpCodeValue() == TR::monent ||
@@ -964,17 +961,17 @@ void TR::LocalDeadStoreElimination::eliminateDeadObjectInitializations()
                       if (storeNode->getFirstChild()->getSecondChild()->getLongInt() > INT_MAX)
                          removableZeroStore = false;
                       else
-                         offset = storeNode->getSymbolReference()->getOffset() +
-                                  (int32_t)storeNode->getFirstChild()->getSecondChild()->getLongInt() -
-                                  TR::Compiler->om.contiguousArrayHeaderSizeInBytes();
+                         offset = static_cast<int32_t>(storeNode->getSymbolReference()->getOffset()) +
+                                  static_cast<int32_t>(storeNode->getFirstChild()->getSecondChild()->getLongInt()) -
+                                  static_cast<int32_t>(TR::Compiler->om.contiguousArrayHeaderSizeInBytes());
                       }
                    else
-                      offset = storeNode->getSymbolReference()->getOffset() +
-                               storeNode->getFirstChild()->getSecondChild()->getInt() -
-                               TR::Compiler->om.contiguousArrayHeaderSizeInBytes();
+                      offset = static_cast<int32_t>(storeNode->getSymbolReference()->getOffset()) +
+                               static_cast<int32_t>(storeNode->getFirstChild()->getSecondChild()->getInt()) -
+                               static_cast<int32_t>(TR::Compiler->om.contiguousArrayHeaderSizeInBytes());
                    }
                 else
-                   offset = storeNode->getSymbolReference()->getOffset() - fe()->getObjectHeaderSizeInBytes();
+                   offset = static_cast<int32_t>(storeNode->getSymbolReference()->getOffset() - static_cast<intptr_t>(fe()->getObjectHeaderSizeInBytes()));
 
                 if (removableZeroStore)
                    {

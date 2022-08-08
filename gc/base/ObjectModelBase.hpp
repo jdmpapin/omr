@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -107,19 +107,7 @@ public:
 	MMINLINE bool
 	compressObjectReferences()
 	{
-#if defined(OMR_GC_COMPRESSED_POINTERS)
-#if defined(OMR_GC_FULL_POINTERS)
-#if defined(OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES)
-		return (bool)OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES;
-#else /* defined(OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES) */
-		return _compressObjectReferences;
-#endif /* defined(OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES) */
-#else /* defined(OMR_GC_FULL_POINTERS) */
-		return true;
-#endif /* defined(OMR_GC_FULL_POINTERS) */
-#else /* defined(OMR_GC_COMPRESSED_POINTERS) */
-		return false;
-#endif /* defined(OMR_GC_COMPRESSED_POINTERS) */
+		return OMR_COMPRESS_OBJECT_REFERENCES(_compressObjectReferences);
 	}
 
 	/**
@@ -914,6 +902,20 @@ public:
 		setObjectFlags(destinationObjectPtr, OMR_OBJECT_METADATA_AGE_MASK, age);
 	}
 #endif /* defined(OMR_GC_MODRON_SCAVENGER) */
+
+	/**
+	 * Initialize an object of minimal object size at given addr.
+	 *
+	 * There is an assumption that the object is not visible (referred) by anyone, so the minimum initialization can be done.
+	 *
+	 * @param[in] env The environment for the calling thread.
+	 * @param[in] allocAddr address at which the object is created.
+	 */
+	MMINLINE void
+	initializeMinimumSizeObject(MM_EnvironmentBase *env, void *allocAddr)
+	{
+		_delegate.initializeMinimumSizeObject(env, allocAddr);
+	}
 
 	/**
 	 * Constructor.

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -19,10 +19,10 @@
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
-#ifndef OMR_NODE_INLINE_INCL
-#define OMR_NODE_INLINE_INCL
+#ifndef OMR_NODE_INLINES_INCL
+#define OMR_NODE_INLINES_INCL
 
-#include "il/OMRNode.hpp"
+#include "il/Node.hpp"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -132,20 +132,6 @@ OMR::Node::createWithSymRef(TR::ILOpCodes op, uint16_t numChildren,
 /**
  * Misc public functions
  */
-
-// A common query used by the optimizer
-bool
-OMR::Node::isSingleRef()
-   {
-   return self()->getReferenceCount() == 1;
-   }
-
-// A common query used by the code generators
-bool
-OMR::Node::isSingleRefUnevaluated()
-   {
-   return self()->isSingleRef() && !self()->getRegister();
-   }
 
 int32_t
 OMR::Node::getNumArguments()
@@ -496,7 +482,7 @@ OMR::Node::setInt(int32_t i)
    {
    TR_ASSERT(self()->getOpCodeValue() != TR::fconst, "TR::Node::setInt: used for an fconst node");
    self()->freeExtensionIfExists();
-   return  _unionBase._constValue= (int64_t)i;
+   return static_cast<int32_t>(_unionBase._constValue = (int64_t)i);
    }
 
 uint32_t

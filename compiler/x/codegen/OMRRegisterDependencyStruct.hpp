@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -37,24 +37,6 @@ namespace OMR { typedef OMR::X86::RegisterDependency RegisterDependencyConnector
 
 #include <stdint.h>
 
-#define GlobalRegisterFPDependency    0x04
-
-class TR_X86RegisterDependencyIndex
-   {
-   int32_t _index;
-
-   public:
-
-   TR_X86RegisterDependencyIndex(int32_t index):_index(index){}
-
-   operator int32_t() const { return _index; }
-   TR_X86RegisterDependencyIndex operator++()    { ++_index; return *this; }
-   TR_X86RegisterDependencyIndex operator--()    { --_index; return *this; }
-   TR_X86RegisterDependencyIndex operator++(int) { int32_t oldIndex = _index; _index++; return oldIndex; }
-   TR_X86RegisterDependencyIndex operator--(int) { int32_t oldIndex = _index; _index--; return oldIndex; }
-
-   };
-
 namespace OMR
 {
 namespace X86
@@ -62,9 +44,6 @@ namespace X86
 
 struct RegisterDependency : OMR::RegisterDependency
    {
-   uint32_t getGlobalFPRegister()   {return _flags & GlobalRegisterFPDependency;}
-   uint32_t setGlobalFPRegister()   {return (_flags |= GlobalRegisterFPDependency);}
-
    /**
     * @return Answers \c true if this register dependency refers to all x87 floating
     *         point registers collectively; \c false otherwise.

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -25,7 +25,14 @@ const OMR::ARM64::InstOpCode::OpCodeBinaryEntry OMR::ARM64::InstOpCode::binaryEn
 {
 //		BINARY    		Opcode    	Opcode		comments
 /* UNALLOCATED */
-		0x00000000,	/* BAD       	bad	invalid operation */
+		0x00000000,	/* Register Association */
+		0x00000000,	/* Bad Opcode */
+		0x00000000,	/* Define Doubleword */
+		0x00000000,	/* Fence */
+		0x00000000,	/* Destination of a jump */
+		0x00000000,	/* Entry to the method */
+		0x00000000,	/* Return */
+		0x00000000,	/* Virtual Guard NOP */
 /* Branch,exception generation and system Instruction */
 	/* Compare _ Branch (immediate) */
 		0x34000000,	/* CBZ       	cbzw	 */
@@ -275,6 +282,234 @@ const OMR::ARM64::InstOpCode::OpCodeBinaryEntry OMR::ARM64::InstOpCode::binaryEn
 		0xFD000000,	/* STR       	vstrimmd	 */
 		0xFD400000,	/* LDR       	vldrimmd	 */
 		0xF9800000,	/* PRFM      	prfmimm	 */
+	/* Atomic instructions introduced by FEAT_LSE */
+		/* Atomic memory operation instructions */
+		0xF8200000, /* LDADD    	ldaddx		*/
+		0xF8A00000, /* LDADDA    	ldaddax 	*/
+		0xF8600000, /* LDADDL    	ldaddlx 	*/
+		0xF8E00000, /* LDADDAL    	ldaddalx 	*/
+		0xB8200000, /* LDADD    	ldaddw		*/
+		0xB8A00000, /* LDADDA    	ldaddaw 	*/
+		0xB8600000, /* LDADDL    	ldaddlw 	*/
+		0xB8E00000, /* LDADDAL    	ldaddalw 	*/
+		0x38200000, /* LDADDB    	ldaddb		*/
+		0x38A00000, /* LDADDAB    	ldaddab 	*/
+		0x38600000, /* LDADDLB    	ldaddlb 	*/
+		0x38E00000, /* LDADDALB    	ldaddalb 	*/
+		0x78200000, /* LDADDH    	ldaddh		*/
+		0x78A00000, /* LDADDAH    	ldaddah 	*/
+		0x78600000, /* LDADDLH    	ldaddlh 	*/
+		0x78E00000, /* LDADDALH    	ldaddalh 	*/
+		0xF8201000, /* LDCLR    	ldclrx		*/
+		0xF8A01000, /* LDCLRA    	ldclrax 	*/
+		0xF8601000, /* LDCLRL    	ldclrlx 	*/
+		0xF8E01000, /* LDCLRAL    	ldclralx 	*/
+		0xB8201000, /* LDCLR    	ldclrw		*/
+		0xB8A01000, /* LDCLRA    	ldclraw 	*/
+		0xB8601000, /* LDCLRL    	ldclrlw 	*/
+		0xB8E01000, /* LDCLRAL    	ldclralw 	*/
+		0x38201000, /* LDCLRB    	ldclrb		*/
+		0x38A01000, /* LDCLRAB    	ldlrab 		*/
+		0x38601000, /* LDCLRLB    	ldclrlb 	*/
+		0x38E01000, /* LDCLRALB    	ldclralb 	*/
+		0x78201000, /* LDCLRH    	ldclrh		*/
+		0x78A01000, /* LDCLRAH    	ldclrah 	*/
+		0x78601000, /* LDCLRLH    	ldclrlh 	*/
+		0x78E01000, /* LDCLRALH    	ldclralh 	*/
+		0xF8202000, /* LDEOR  		ldeorx		*/
+		0xF8A02000, /* LDEORA  		ldeorax		*/
+		0xF8602000, /* LDEORL  		ldeorlx		*/
+		0xF8E02000, /* LDEORAL 		ldeoralx	*/
+		0xB8202000, /* LDEOR  		ldeorw		*/
+		0xB8A02000, /* LDEORA  		ldeoraw		*/
+		0xB8602000, /* LDEORL  		ldeorlw		*/
+		0xB8E02000, /* LDEORAL 		ldeoralw	*/
+		0x38202000, /* LDEORB  		ldeorb		*/
+		0x38A02000, /* LDEORAB 		ldeorab		*/
+		0x38602000, /* LDEORLB 		ldeorlb		*/
+		0x38E02000, /* LDEORALB 	ldeoralb	*/
+		0x78202000, /* LDEORH  		ldeorh		*/
+		0x78A02000, /* LDEORAH 		ldeorah		*/
+		0x78602000, /* LDEORLH 		ldeorlh		*/
+		0x78E02000, /* LDEORALH 	ldeoralh	*/
+		0xF8203000, /* LDSET  		ldsetx		*/
+		0xF8A03000, /* LDSETA  		ldsetax		*/
+		0xF8603000, /* LDSETL  		ldsetlx		*/
+		0xF8E03000, /* LDSETAL 		ldsetalx	*/
+		0xB8203000, /* LDSET  		ldsetw		*/
+		0xB8A03000, /* LDSETA  		ldsetaw		*/
+		0xB8603000, /* LDSETL  		ldsetlw		*/
+		0xB8E03000, /* LDSETAL 		ldsetalw	*/
+		0x38203000, /* LDSETB  		ldsetb		*/
+		0x38A03000, /* LDSETAB 		ldsetab		*/
+		0x38603000, /* LDSETLB 		ldsetlb		*/
+		0x38E03000, /* LDSETALB 	ldsetalb	*/
+		0x78203000, /* LDSETH  		ldseth		*/
+		0x78A03000, /* LDSETAH 		ldsetah		*/
+		0x78603000, /* LDSETLH 		ldsetlh		*/
+		0x78E03000, /* LDSETALH 	ldsetalh	*/
+		0xF8204000, /* LDSMAX  		ldsmaxx		*/
+		0xF8A04000, /* LDSMAXA 		ldsmaxax	*/
+		0xF8604000, /* LDSMAXL 		ldsmaxlx	*/
+		0xF8E04000, /* LDSMAXAL		ldsmaxalx	*/
+		0xB8204000, /* LDSMAX  		ldsmaxw		*/
+		0xB8A04000, /* LDSMAXA 		ldsmaxaw	*/
+		0xB8604000, /* LDSMAXL 		ldsmaxlw	*/
+		0xB8E04000, /* LDSMAXAL		ldsmaxalw	*/
+		0x38204000, /* LDSMAXB 		ldsmaxb		*/
+		0x38A04000, /* LDSMAXAB		ldsmaxab	*/
+		0x38604000, /* LDSMAXLB		ldsmaxlb	*/
+		0x38E04000, /* LDSMAXALB	ldsmaxalb	*/
+		0x78204000, /* LDSMAXH 		ldsmaxh		*/
+		0x78A04000, /* LDSMAXAH		ldsmaxah	*/
+		0x78604000, /* LDSMAXLH		ldsmaxlh	*/
+		0x78E04000, /* LDSMAXALH	ldsmaxalh	*/
+		0xF8205000, /* LDSMIN  		ldsminx		*/
+		0xF8A05000, /* LDSMINA 		ldsminax	*/
+		0xF8605000, /* LDSMINL 		ldsminlx	*/
+		0xF8E05000, /* LDSMINAL 	ldsminalx	*/
+		0xB8205000, /* LDSMIN  		ldsminw		*/
+		0xB8A05000, /* LDSMINA 		ldsminaw	*/
+		0xB8605000, /* LDSMINL 		ldsminlw	*/
+		0xB8E05000, /* LDSMINAL 	ldsminalw	*/
+		0x38205000, /* LDSMINB 		ldsminb		*/
+		0x38A05000, /* LDSMINAB 	ldsminab	*/
+		0x38605000, /* LDSMINLB 	ldsminlb	*/
+		0x38E05000, /* LDSMINALB	ldsminalb	*/
+		0x78205000, /* LDSMINH 		ldsminh		*/
+		0x78A05000, /* LDSMINAH 	ldsminah	*/
+		0x78605000, /* LDSMINLH 	ldsminlh	*/
+		0x78E05000, /* LDSMINALH	ldsminalh	*/
+		0xF8206000, /* LDUMAX  		ldumaxx		*/
+		0xF8A06000, /* LDUMAXA 		ldumaxax	*/
+		0xF8606000, /* LDUMAXL 		ldumaxlx	*/
+		0xF8E06000, /* LDUMAXAL		ldumaxalx	*/
+		0xB8206000, /* LDUMAX  		ldumaxw		*/
+		0xB8A06000, /* LDUMAXA 		ldumaxaw	*/
+		0xB8606000, /* LDUMAXL 		ldumaxlw	*/
+		0xB8E06000, /* LDUMAXAL		ldumaxalw	*/
+		0x38206000, /* LDUMAXB 		ldumaxb		*/
+		0x38A06000, /* LDUMAXAB		ldumaxab	*/
+		0x38606000, /* LDUMAXLB		ldumaxlb	*/
+		0x38E06000, /* LDUMAXALB	ldumaxalb	*/
+		0x78206000, /* LDUMAXH 		ldumaxh		*/
+		0x78A06000, /* LDUMAXAH		ldumaxah	*/
+		0x78606000, /* LDUMAXLH		ldumaxlh	*/
+		0x78E06000, /* LDUMAXALH	ldumaxalh	*/
+		0xF8207000, /* LDUMIN  		lduminx		*/
+		0xF8A07000, /* LDUMINA 		lduminax	*/
+		0xF8607000, /* LDUMINL 		lduminlx	*/
+		0xF8E07000, /* LDUMINAL 	lduminalx	*/
+		0xB8207000, /* LDUMIN  		lduminw		*/
+		0xB8A07000, /* LDUMINA 		lduminaw	*/
+		0xB8607000, /* LDUMINL 		lduminlw	*/
+		0xB8E07000, /* LDUMINAL 	lduminalw	*/
+		0x38207000, /* LDUMINB  	lduminb		*/
+		0x38A07000, /* LDUMINAB 	lduminab	*/
+		0x38607000, /* LDUMINLB 	lduminlb	*/
+		0x38E07000, /* LDUMINALB 	lduminalb	*/
+		0x78207000, /* LDUMINH  	lduminh		*/
+		0x78A07000, /* LDUMINAH 	lduminah	*/
+		0x78607000, /* LDUMINLH 	lduminlh	*/
+		0x78E07000, /* LDUMINALH 	lduminalh	*/
+		0xF820001F, /* STADDD		staddx 		*/
+		0xF860001F, /* STADDDL		staddlx		*/
+		0xB820001F, /* STADDD		staddw 		*/
+		0xB860001F, /* STADDDL		staddlw		*/
+		0x3820001F, /* STADDDB		staddb 		*/
+		0x3860001F, /* STADDDLB		staddlb		*/
+		0x7820001F, /* STADDDH		staddh 		*/
+		0x7860001F, /* STADDDLH		staddlh		*/
+		0xF820101F, /* STCLR		stclrx 		*/
+		0xF860101F, /* STCLRL		stclrlx		*/
+		0xB820101F, /* STCLR		stclrw 		*/
+		0xB860101F, /* STCLRL		stclrlw		*/
+		0x3820101F, /* STCLRB		stclrb 		*/
+		0x3860101F, /* STCLRLB		stclrlb		*/
+		0x7820101F, /* STCLRH		stclrh 		*/
+		0x7860101F, /* STCLRLH		stclrlh		*/
+		0xF820201F, /* STEOR		steorx 		*/
+		0xF860201F, /* STEORL		steorlx		*/
+		0xB820201F, /* STEOR		steorw 		*/
+		0xB860201F, /* STEORL		steorlw		*/
+		0x3820201F, /* STEORB		steorb 		*/
+		0x3860201F, /* STEORLB		steorlb		*/
+		0x7820201F, /* STEORH		steorh 		*/
+		0x7860201F, /* STEORLH		steorlh		*/
+		0xF820301F, /* STSET		stsetx 		*/
+		0xF860301F, /* STSETL		stsetlx		*/
+		0xB820301F, /* STSET		stsetw 		*/
+		0xB860301F, /* STSETL		stsetlw		*/
+		0x3820301F, /* STSETB		stsetb 		*/
+		0x3860301F, /* STSETLB		stsetlb		*/
+		0x7820301F, /* STSETH		stseth 		*/
+		0x7860301F, /* STSETLH		stsetlh		*/
+		0xF820401F, /* STSMAX		stsmaxx 	*/
+		0xF860401F, /* STSMAXL		stsmaxlx	*/
+		0xB820401F, /* STSMAX		stsmaxw 	*/
+		0xB860401F, /* STSMAXL		stsmaxlw	*/
+		0x3820401F, /* STSMAXB		stsmaxb 	*/
+		0x3860401F, /* STSMAXLB		stsmaxlb	*/
+		0x7820401F, /* STSMAXH		stsmaxh 	*/
+		0x7860401F, /* STSMAXLH		stsmaxlh	*/
+		0xF820501F, /* STSMIN		stsminx 	*/
+		0xF860501F, /* STSMINL		stsminlx	*/
+		0xB820501F, /* STSMIN		stsminw 	*/
+		0xB860501F, /* STSMINL		stsminlw	*/
+		0x3820501F, /* STSMINB		stsminb 	*/
+		0x3860501F, /* STSMINLB		stsminlb	*/
+		0x7820501F, /* STSMINH		stsminh 	*/
+		0x7860501F, /* STSMINLH		stsminlh	*/
+		0xF820601F, /* STUMAX		stumaxx 	*/
+		0xF860601F, /* STUMAXL		stumaxlx	*/
+		0xB820601F, /* STUMAX		stumaxw 	*/
+		0xB860601F, /* STUMAXL		stumaxlw	*/
+		0x3820601F, /* STUMAXB		stumaxb 	*/
+		0x3860601F, /* STUMAXLB		stumaxlb	*/
+		0x7820601F, /* STUMAXH		stumaxh 	*/
+		0x7860601F, /* STUMAXLH		stumaxlh	*/
+		0xF820701F, /* STUMIN		stuminx 	*/
+		0xF860701F, /* STUMINL		stuminlx	*/
+		0xB820701F, /* STUMIN		stuminw 	*/
+		0xB860701F, /* STUMINL		stuminlw	*/
+		0x3820701F, /* STUMINB		stuminb 	*/
+		0x3860701F, /* STUMINLB		stuminlb	*/
+		0x7820701F, /* STUMINH		stuminh 	*/
+		0x7860701F, /* STUMINLH		stuminlh	*/
+		/* Swap instructions */
+		0xF8208000, /* SWP			swpx		*/
+		0xF8A08000, /* SWPA			swpax		*/
+		0xF8608000, /* SWPL			swplx		*/
+		0xF8E08000, /* SWPAL		swpalx		*/
+		0xB8208000, /* SWP			swpw		*/
+		0xB8A08000, /* SWPA			swpaw		*/
+		0xB8608000, /* SWPL			swplw		*/
+		0xB8E08000, /* SWPAL		swpalw		*/
+		0x38208000, /* SWPB			swpb		*/
+		0x38A08000, /* SWPAB		swpab		*/
+		0x38608000, /* SWPLB		swplb		*/
+		0x38E08000, /* SWPALB		swpalb		*/
+		0x78208000, /* SWPH			swph		*/
+		0x78A08000, /* SWPAH		swpah		*/
+		0x78608000, /* SWPLH		swplh		*/
+		0x78E08000, /* SWPALH		swpalh		*/
+		/* Compare and swap instructions */
+		0xC8A07C00, /* CAS			casx		*/
+		0xC8E07C00, /* CASA			casax		*/
+		0xC8A0FC00, /* CASL			caslx		*/
+		0xC8E0FC00, /* CASAL		casalx		*/
+		0x88A07C00, /* CAS			casw		*/
+		0x88E07C00, /* CASA			casaw		*/
+		0x88A0FC00, /* CASL			caslw		*/
+		0x88E0FC00, /* CASAL		casalw		*/
+		0x08A07C00, /* CASB			casb		*/
+		0x08E07C00, /* CASAB		casab		*/
+		0x08A0FC00, /* CASLB		caslb		*/
+		0x08E0FC00, /* CASALB		casalb		*/
+		0x48A07C00, /* CASH			cash		*/
+		0x48E07C00, /* CASAH		casah		*/
+		0x48A0FC00, /* CASLH		caslh		*/
+		0x48E0FC00, /* CASALH		casalh		*/
 /* Data processing - Immediate */
 	/* PC-rel. addressing */
 		0x10000000,	/* ADR       	adr	 */
@@ -443,9 +678,6 @@ const OMR::ARM64::InstOpCode::OpCodeBinaryEntry OMR::ARM64::InstOpCode::binaryEn
 	/* Floating-Point Immediate */
 		0x1E201000,	/* FMOV      	fmovimms	 */
 		0x1E601000,	/* FMOV      	fmovimmd	 */
-	/* Move Immediate */
-		0x0F000400,	/* MOVI      	movi0s	 */
-		0x2F00E400,	/* MOVI      	movi0d	 */
 	/* Floating-Point Compare */
 		0x1E202000,	/* FCMP      	fcmps	 */
 		0x1E202008,	/* FCMP      	fcmps_zero	 */
@@ -476,5 +708,314 @@ const OMR::ARM64::InstOpCode::OpCodeBinaryEntry OMR::ARM64::InstOpCode::binaryEn
 		0x1E604800,	/* FMAX      	fmaxd	 */
 		0x1E205800,	/* FMIN      	fmins	 */
 		0x1E605800,	/* FMIN      	fmind	 */
+	/* Vector Immediate */
+		0x4F00E400,	/* MOVI      	vmovi16b */
+		0x4F008400,	/* MOVI      	vmovi8h	 */
+		0x0F000400,	/* MOVI      	vmovi2s	 */
+		0x4F000400,	/* MOVI      	vmovi4s	 */
+		0x4F00C400,	/* MOVI      	vmovi4s_one */
+		0x2F00E400,	/* MOVI      	movid	 */
+		0x6F00E400,	/* MOVI      	vmovi2d	 */
+		0x4F00F400,	/* FMOV      	vfmov4s	 */
+		0x6F00F400,	/* FMOV      	vfmov2d	 */
+		0x6F008400,	/* MVNI      	vmovi8h	 */
+		0x6F000400,	/* MVNI      	vmovi4s	 */
+		0x6F00C400,	/* MVNI      	vmovi4s_one */
+		0x6F009400,	/* BIC      	vbicimm8h */
+		0x6F001400,	/* BIC      	vbicimm4s */
+		0x4F009400,	/* ORR      	vorrimm8h */
+		0x4F001400,	/* ORR      	vorrimm4s */
+		0x4F085400,	/* SHL      	vshl16b  */
+		0x4F105400,	/* SHL      	vshl8h	 */
+		0x4F205400,	/* SHL      	vshl4s	 */
+		0x4F405400,	/* SHL      	vshl2d	 */
+		0x0F08A400,	/* SSHLL    	vsshll_8h	*/
+		0x0F10A400,	/* SSHLL    	vsshll_4s	*/
+		0x0F20A400,	/* SSHLL    	vsshll_2d	*/
+		0x4F08A400,	/* SSHLL2   	vsshll2_8h	*/
+		0x4F10A400,	/* SSHLL2   	vsshll2_4s	*/
+		0x4F20A400,	/* SSHLL2   	vsshll2_2d	*/
+		0x2F08A400,	/* USHLL    	vushll_8h	*/
+		0x2F10A400,	/* USHLL    	vushll_4s	*/
+		0x2F20A400,	/* USHLL    	vushll_2d	*/
+		0x6F08A400,	/* USHLL2    	vushll2_8h	*/
+		0x6F10A400,	/* USHLL2    	vushll2_4s	*/
+		0x6F20A400,	/* USHLL2    	vushll2_2d	*/
+		0x4F080400,	/* SSHR      	vsshr16b */
+		0x4F100400,	/* SSHR      	vsshr8h	 */
+		0x4F200400,	/* SSHR      	vsshr4s	 */
+		0x4F400400,	/* SSHR      	vsshr2d	 */
+		0x6F080400,	/* USHR      	vushr16b */
+		0x6F100400,	/* USHR      	vushr8h	 */
+		0x6F200400,	/* USHR      	vushr4s	 */
+		0x6F400400,	/* USHR      	vushr2d	 */
+		0x2E213800,	/* SHLL     	vshll_8h	*/
+		0x2E613800,	/* SHLL     	vshll_4s	*/
+		0x2EA13800,	/* SHLL     	vshll_2d	*/
+		0x6E213800,	/* SHLL2    	vshll2_8h	*/
+		0x6E613800,	/* SHLL2    	vshll2_4s	*/
+		0x6EA13800,	/* SHLL2    	vshll2_2d	*/
+	/* Vector Compare */
+		0x6E208C00,	/* CMEQ      	vcmeq16b */
+		0x6E608C00,	/* CMEQ      	vcmeq8b */
+		0x6EA08C00,	/* CMEQ      	vcmeq4s */
+		0x6EE08C00,	/* CMEQ      	vcmeq2d */
+		0x4E209800,	/* CMEQ      	vcmeq16b_zero */
+		0x4E609800,	/* CMEQ      	vcmeq8h_zero */
+		0x4EA09800,	/* CMEQ      	vcmeq4s_zero */
+		0x4EE09800,	/* CMEQ      	vcmeq2d_zero */
+		0x6E203C00,	/* CMHS      	vcmhs16b */
+		0x6E603C00,	/* CMHS      	vcmhs8h */
+		0x6EA03C00,	/* CMHS      	vcmhs4s */
+		0x6EE03C00,	/* CMHS      	vcmhs2d */
+		0x4E203C00,	/* CMGE      	vcmge16b */
+		0x4E603C00,	/* CMGE      	vcmge8h */
+		0x4EA03C00,	/* CMGE      	vcmge4s */
+		0x4EE03C00,	/* CMGE      	vcmge2d */
+		0x6E208800,	/* CMGE      	vcmge16b_zero */
+		0x6E608800,	/* CMGE      	vcmge8h_zero */
+		0x6EA08800,	/* CMGE      	vcmge4s_zero */
+		0x6EE08800,	/* CMGE      	vcmge2d_zero */
+		0x6E203400,	/* CMHI      	vcmhi16b */
+		0x6E603400,	/* CMHI      	vcmhi8h */
+		0x6EA03400,	/* CMHI      	vcmhi4s */
+		0x6EE03400,	/* CMHI      	vcmhi2d */
+		0x4E203400,	/* CMGT      	vcmgt16b */
+		0x4E603400,	/* CMGT      	vcmgt8h */
+		0x4EA03400,	/* CMGT      	vcmgt4s */
+		0x4EE03400,	/* CMGT      	vcmgt2d */
+		0x4E208800,	/* CMGT      	vcmgt16b_zero */
+		0x4E608800,	/* CMGT      	vcmgt8h_zero */
+		0x4EA08800,	/* CMGT      	vcmgt4s_zero */
+		0x4EE08800,	/* CMGT      	vcmgt2d_zero */
+		0x6E209800,	/* CMLE      	vcmle16b_zero */
+		0x6E609800,	/* CMLE      	vcmle8h_zero */
+		0x6EA09800,	/* CMLE      	vcmle4s_zero */
+		0x6EE09800,	/* CMLE      	vcmle2d_zero */
+		0x4E20A800,	/* CMLT      	vcmlt16b_zero */
+		0x4E60A800,	/* CMLT      	vcmlt8h_zero */
+		0x4EA0A800,	/* CMLT      	vcmlt4s_zero */
+		0x4EE0A800,	/* CMLT      	vcmlt2d_zero */
+		0x4E208C00,	/* CMTST      	vcmtst16b */
+		0x4E608C00,	/* CMTST      	vcmtst8h */
+		0x4EA08C00,	/* CMTST      	vcmtst4s */
+		0x4EE08C00,	/* CMTST      	vcmtst2d */
+		0x4E20E400,	/* FCMEQ      	vfcmeq4s */
+		0x4E60E400,	/* FCMEQ      	vfcmeq2d */
+		0x4EA0D800,	/* FCMEQ      	vfcmeq4s_zero */
+		0x4EE0D800,	/* FCMEQ      	vfcmeq2d_zero */
+		0x6E20E400,	/* FCMGE      	vfcmge4s */
+		0x6E60E400,	/* FCMGE      	vfcmge2d */
+		0x6EA0C800,	/* FCMGE      	vfcmge4s_zero */
+		0x6EE0C800,	/* FCMGE      	vfcmge2d_zero */
+		0x6EA0E400,	/* FCMGT      	vfcmgt4s */
+		0x6EE0E400,	/* FCMGT      	vfcmgt2d */
+		0x4EA0C800,	/* FCMGT      	vfcmgt4s_zero */
+		0x4EE0C800,	/* FCMGT      	vfcmgt2d_zero */
+		0x6EA0D800,	/* FCMLE      	vfcmle4s_zero */
+		0x6EE0D800,	/* FCMLE      	vfcmle2d_zero */
+		0x4EA0E800,	/* FCMLT      	vfcmlt4s_zero */
+		0x4EE0E800,	/* FCMLT      	vfcmlt2d_zero */
+		0x6E20EC00,	/* FACGE      	vfacge4s */
+		0x6E60EC00,	/* FACGE      	vfacge2d */
+		0x6EA0EC00,	/* FACGT      	vfacgt4s */
+		0x6EE0EC00,	/* FACGT      	vfacgt2d */
+	/* Vector Data-processing (2 source) */
+		0x4E208400,	/* ADD      	vadd16b	 */
+		0x4E608400,	/* ADD      	vadd8h	 */
+		0x4EA08400,	/* ADD      	vadd4s	 */
+		0x4EE08400,	/* ADD      	vadd2d	 */
+		0x4E20D400,	/* FADD      	vfadd4s	 */
+		0x4E60D400,	/* FADD      	vfadd2d	 */
+		0x6E208400,	/* SUB      	vsub16b	 */
+		0x6E608400,	/* SUB      	vsub8h	 */
+		0x6EA08400,	/* SUB      	vsub4s	 */
+		0x6EE08400,	/* SUB      	vsub2d	 */
+		0x4EA0D400,	/* FSUB      	vfsub4s	 */
+		0x4EE0D400,	/* FSUB      	vfsub2d	 */
+		0x4E209C00,	/* MUL      	vmul16b	 */
+		0x4E609C00,	/* MUL      	vmul8h	 */
+		0x4EA09C00,	/* MUL      	vmul4s	 */
+		0x6E20DC00,	/* FMUL      	vfmul4s	 */
+		0x6E60DC00,	/* FMUL      	vfmul2d	 */
+		0x6E20FC00,	/* FDIV      	vfdiv4s	 */
+		0x6E60FC00,	/* FDIV      	vfdiv2d	 */
+		0x4E201C00,	/* AND      	vand16b	 */
+		0x4E601C00,	/* BIC      	vbic16b	 */
+		0x4EA01C00,	/* ORR      	vorr16b	 */
+		0x6E201C00,	/* EOR      	veor16b	 */
+		0x4E209400,	/* MLA       	vmla16b	 */
+		0x4E609400,	/* MLA       	vmla8h	 */
+		0x4EA09400,	/* MLA       	vmla4s	 */
+		0x4E20CC00,	/* FMLA      	vfmla4s	 */
+		0x4E60CC00,	/* FMLA      	vfmla2d	 */
+		0x4E206C00,	/* SMIN      	vsmin16b */
+		0x4E606C00,	/* SMIN      	vsmin8h	 */
+		0x4EA06C00,	/* SMIN      	vsmin4s	 */
+		0x4EA0F400,	/* FMIN      	vfmin4s	 */
+		0x4EE0F400,	/* FMIN      	vfmin2d	 */
+		0x4E206400,	/* SMAX      	vsmax16b */
+		0x4E606400,	/* SMAX      	vsmax8h	 */
+		0x4EA06400,	/* SMAX      	vsmax4s	 */
+		0x4E20F400,	/* FMAX      	vfmax4s	 */
+		0x4E60F400,	/* FMAX      	vfmax2d	 */
+		0x4E204400,	/* SSHL      	vsshl16b */
+		0x4E604400,	/* SSHL      	vsshl8h	 */
+		0x4EA04400,	/* SSHL      	vsshl4s	 */
+		0x4EE04400,	/* SSHL      	vsshl2d	 */
+		0x6E204400,	/* USHL      	vushl16b */
+		0x6E604400,	/* USHL      	vushl8h	 */
+		0x6EA04400,	/* USHL      	vushl4s	 */
+		0x6EE04400,	/* USHL      	vushl2d	 */
+		0x6EE01C00,	/* BIF       	vbif16b	 */
+		0x6EA01C00,	/* BIT       	vbit16b	 */
+		0x6E601C00,	/* BSL       	vbsl16b	 */
+		0x4E003800,	/* ZIP1      	vzip1_16b */
+		0x4E403800,	/* ZIP1      	vzip1_8h */
+		0x4E803800,	/* ZIP1      	vzip1_4s */
+		0x4EC03800,	/* ZIP1      	vzip1_2d */
+		0x4E007800,	/* ZIP2      	vzip2_16b */
+		0x4E407800,	/* ZIP2      	vzip2_8h */
+		0x4E807800,	/* ZIP2      	vzip2_4s */
+		0x4EC07800,	/* ZIP2      	vzip2_2d */
+		0x4E001800,	/* UZP1      	vuzp1_16b */
+		0x4E401800,	/* UZP1      	vuzp1_8h */
+		0x4E801800,	/* UZP1      	vuzp1_4s */
+		0x4EC01800,	/* UZP1      	vuzp1_2d */
+		0x4E005800,	/* UZP2      	vuzp2_16b */
+		0x4E405800,	/* UZP2      	vuzp2_8h */
+		0x4E805800,	/* UZP2      	vuzp2_4s */
+		0x4EC05800,	/* UZP2      	vuzp2_2d */
+	/* Vector Data-processing (1 source) */
+		0x6E20B800,	/* NEG      	vneg16b	 */
+		0x6E60B800,	/* NEG      	vneg8h	 */
+		0x6EA0B800,	/* NEG      	vneg4s	 */
+		0x6EE0B800,	/* NEG      	vneg2d	 */
+		0x6EA0F800,	/* FNEG      	vfneg4s	 */
+		0x6EE0F800,	/* FNEG      	vfneg2d	 */
+		0x6E205800,	/* NOT      	vnot16b	 */
+		0x6EA1F800,	/* FSQRT   	vfsqrt4s */
+		0x6EE1F800,	/* FSQRT   	vfsqrt2d */
+		0x4E20B800,	/* ABS     	vabs16b  */
+		0x4E60B800,	/* ABS     	vabs8h   */
+		0x4EA0B800,	/* ABS     	vabs4s   */
+		0x4EE0B800,	/* ABS     	vabs2d   */
+		0x4EA0F800,	/* ABS     	vfabs4s  */
+		0x4EE0F800,	/* ABS     	vfabs2d  */
+		0x4E201800,	/* REV16   	vrev16_16b */
+		0x6E200800,	/* REV32   	vrev32_16b */
+		0x6E600800,	/* REV32   	vrev32_8h */
+		0x4E200800,	/* REV64   	vrev64_16b */
+		0x4E600800,	/* REV64   	vrev64_8h */
+		0x4EA00800,	/* REV64   	vrev64_4s */
+	/* Vector Copy */
+		/* DUP (general) */
+		0x4E010C00,	/* DUP   	vdup16b */
+		0x4E020C00,	/* DUP   	vdup8h */
+		0x4E040C00,	/* DUP   	vdup4s */
+		0x4E080C00,	/* DUP   	vdup2d */
+		/* DUP (element) */
+		0x4E010400,	/* DUP   	vdupe16b */
+		0x4E020400,	/* DUP   	vdupe8h */
+		0x4E040400,	/* DUP   	vdupe4s */
+		0x4E080400,	/* DUP   	vdupe2d */
+		/* SMOV */
+		0x0E012C00,	/* SMOV  	smovwb */
+		0x0E022C00,	/* SMOV  	smovwh */
+		0x4E012C00,	/* SMOV  	smovxb */
+		0x4E022C00,	/* SMOV  	smovxh */
+		0x4E042C00,	/* SMOV  	smovxs */
+		/* UMOV */
+		0x0E013C00,	/* UMOV  	umovwb */
+		0x0E023C00,	/* UMOV  	umovwh */
+		0x0E043C00,	/* UMOV  	umovws */
+		0x4E083C00,	/* UMOV  	umovxd */
+		/* INS (general) */
+		0x4E011C00,	/* INS  	vinswb  */
+		0x4E021C00,	/* INS  	vinswh  */
+		0x4E041C00,	/* INS  	vinsws  */
+		0x4E081C00,	/* INS  	vinsxd  */
+		/* INS (element) */
+		0x6E010400,	/* INS  	vinseb  */
+		0x6E020400,	/* INS  	vinseh  */
+		0x6E040400,	/* INS  	vinses  */
+		0x6E080400,	/* INS  	vinsed  */
+	/* Vector by element arithmetics */
+		0x5F809000,	/* FMUL (scalar)  	fmulelem_4s */
+		0x5FC09000,	/* FMUL (scalar)  	fmulelem_2d */
+		0x4F809000,	/* FMUL  	vfmulelem_4s */
+		0x4FC09000,	/* FMUL  	vfmulelem_4s */
+	/* Vector widening and narrowing arithmetics */
+		0x2E208000,	/* UMLAL   	vumlal_8h */
+		0x2E608000,	/* UMLAL   	vumlal_4s */
+		0x2EA08000,	/* UMLAL   	vumlal_2d */
+		0x6E208000,	/* UMLAL2  	vumlal2_8h */
+		0x6E608000,	/* UMLAL2  	vumlal2_4s */
+		0x6EA08000,	/* UMLAL2  	vumlal2_2d */
+		0x2E20A000,	/* UMLSL   	vumlsl_8h */
+		0x2E60A000,	/* UMLSL   	vumlsl_4s */
+		0x2EA0A000,	/* UMLSL   	vumlsl_2d */
+		0x6E20A000,	/* UMLSL2  	vumlsl2_8h */
+		0x6E60A000,	/* UMLSL2  	vumlsl2_4s */
+		0x6EA0A000,	/* UMLSL2  	vumlsl2_2d */
+		0x2E20C000,	/* UMULL   	vumull_8h */
+		0x2E60C000,	/* UMULL   	vumull_4s */
+		0x2EA0C000,	/* UMULL   	vumull_2d */
+		0x6E20C000,	/* UMULL2  	vumull2_8h */
+		0x6E60C000,	/* UMULL2  	vumull2_4s */
+		0x6EA0C000,	/* UMULL2  	vumull2_2d */
+	/* Vector reduce instructions */
+		0x4E31B800,	/* ADDV   	vaddv16b */
+		0x4E71B800,	/* ADDV   	vaddv8h */
+		0x4Eb1B800,	/* ADDV   	vaddv4s */
+		0x6E30C800,	/* FMAXNMV 	vfmaxnmv4s */
+		0x6E30F800,	/* FMAXV  	vfmaxv4s */
+		0x6EB0C800,	/* FMINNMV 	vfminnmv4s */
+		0x6EB0F800,	/* FMINV  	vfminv4s */
+		0x4E303800,	/* SADDLV 	vsaddlv8h */
+		0x4E703800,	/* SADDLV 	vsaddlv4s */
+		0x4EB03800,	/* SADDLV 	vsaddlv2d */
+		0x4E30A800,	/* SMAXV  	vsmaxv16b */
+		0x4E70A800,	/* SMAXV  	vsmaxv8h */
+		0x4EB0A800,	/* SMAXV  	vsmaxv4s */
+		0x4E31A800,	/* SMINV  	vsminv16b */
+		0x4E71A800,	/* SMINV  	vsminv8h */
+		0x4EB1A800,	/* SMINV  	vsminv4s */
+		0x6E303800,	/* UADDLV 	vuaddlv8h */
+		0x6E703800,	/* UADDLV 	vuaddlv4s */
+		0x6EB03800,	/* UADDLV 	vuaddlv2d */
+		0x6E30A800,	/* UMAXV  	vumaxv16b */
+		0x6E70A800,	/* UMAXV  	vumaxv8h */
+		0x6EB0A800,	/* UMAXV  	vumaxv4s */
+		0x6E31A800,	/* UMINV  	vuminv16b */
+		0x6E71A800,	/* UMINV  	vuminv8h */
+		0x6EB1A800,	/* UMINV  	vuminv4s */
+	/* Vector pairwise instructions */
+		0x4E20BC00,	/* ADDP   	vaddp16b */
+		0x4E60BC00,	/* ADDP   	vaddp8h */
+		0x4EA0BC00,	/* ADDP   	vaddp4s */
+		0x4EE0BC00,	/* ADDP   	vaddp2d */
+		0x5EF1B800,	/* ADDP (scalar) addp2d */
+		0x6E20D400,	/* FADDP  	vfaddp4s */
+		0x6E60D400,	/* FADDP  	vfaddp2d */
+		0x7E30D800,	/* FADDP(scalar) faddp2s */
+		0x7E70D800,	/* FADDP(scalar) faddp2d */
+		0x6E20C400,	/* FMAXNMP 	vfmaxnmp4s */
+		0x6E60C400,	/* FMAXNMP 	vfmaxnmp2d */
+		0x7E30C800,	/* FMAXNMP(scalar) 	fmaxnmp2s */
+		0x7E70C800,	/* FMAXNMP(scalar) 	fmaxnmp2d */
+		0x6E20F400,	/* FMAXP 	vfmaxp4s */
+		0x6E60F400,	/* FMAXP 	vfmaxp2d */
+		0x7E30F800,	/* FMAXP(scalar) 	fmaxp2s */
+		0x7E70F800,	/* FMAXP(scalar) 	fmaxp2d */
+		0x6EA0C400,	/* FMINNMP 	vfminnmp4s */
+		0x6EE0C400,	/* FMINNMP 	vfminnmp2d */
+		0x7EB0C800,	/* FMINNMP(scalar) 	fminnmp2s */
+		0x7EF0C800,	/* FMINNMP(scalar) 	fminnmp2d */
+		0x6EA0F400,	/* FMINP 	vfminp4s */
+		0x6EE0F400,	/* FMINP 	vfminp2d */
+		0x7EB0F800,	/* FMINP(scalar) 	fminp2s */
+		0x7EF0F800,	/* FMINP(scalar) 	fminp2d */
+	/* Hint instructions */
 		0xD503201F,	/* NOP          nop      */
 };

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -220,7 +220,7 @@ MM_MemorySubSpaceUniSpace::timeForHeapExpand(MM_EnvironmentBase *env, MM_Allocat
 	MM_MemorySpace *memorySpace;
 
 	/* Determine if the PSA or memory sub space can be expanded ..if not we are done */
-	if((NULL == _physicalSubArena) || !_physicalSubArena->canExpand(env) || (maxExpansionInSpace(env) == 0 )) {
+	if ((NULL == _physicalSubArena) || !_physicalSubArena->canExpand(env) || (maxExpansionInSpace(env) == 0 )) {
 		return 0;
 	}
 	
@@ -229,7 +229,7 @@ MM_MemorySubSpaceUniSpace::timeForHeapExpand(MM_EnvironmentBase *env, MM_Allocat
 		expandToSatisfy = true;
 		memorySpace = env->getMemorySpace();
 		
-		if ((memorySpace->findLargestFreeEntry(env, allocDescription)) >= sizeInBytesRequired ){
+		if ((memorySpace->findLargestFreeEntry(env, allocDescription)) >= sizeInBytesRequired ) {
 			expandToSatisfy = false;
 		}
 	} else {
@@ -273,21 +273,21 @@ MM_MemorySubSpaceUniSpace::timeForHeapContract(MM_EnvironmentBase *env, MM_Alloc
 	}
 
 	MM_Heap * heap = env->getExtensions()->getHeap();
+
 	uintptr_t actualSoftMx = heap->getActualSoftMxSize(env);
 
 	if (0 != actualSoftMx) {
-		uintptr_t activeMemorySize = getActiveMemorySize();
+		uintptr_t activeMemorySize = getActiveMemorySize(MEMORY_TYPE_OLD);
 		if (actualSoftMx < activeMemorySize) {
 			/* the softmx is less than the currentsize so we're going to attempt an aggressive contract */
-			_contractionSize = getActiveMemorySize() - actualSoftMx;
-			_extensions->heap->getResizeStats()->setLastContractReason(HEAP_RESIZE);
+			_contractionSize = activeMemorySize - actualSoftMx;
+			_extensions->heap->getResizeStats()->setLastContractReason(SOFT_MX_CONTRACT);
 			return true;
 		}
 	}
 	
 	/* Don't shrink if -Xmaxf1.0 specfied, i.e max free is 100% */
-	uintptr_t heapFreeMaximumHeuristicMultiplier = getHeapFreeMaximumHeuristicMultiplier(env);
-	if (100 == _extensions->heapFreeMaximumRatioMultiplier || heapFreeMaximumHeuristicMultiplier >= 100) {
+	if (100 == _extensions->heapFreeMaximumRatioMultiplier) {
 		Trc_MM_MemorySubSpaceUniSpace_timeForHeapContract_Exit2(env->getLanguageVMThread());
 		return false;
 	}
@@ -459,7 +459,7 @@ MM_MemorySubSpaceUniSpace::calculateExpandSize(MM_EnvironmentBase *env, uintptr_
 	/* The desired free is the sum of these 2 rounded to heapAlignment */
 	uintptr_t desiredFree = MM_Math::roundToCeiling(_extensions->heapAlignment, minimumFree + bytesRequired);
 
-	if(desiredFree <= currentFree) {
+	if (desiredFree <= currentFree) {
 		/* Only expand if we didn't expand in last _extensions->heapExpansionStabilizationCount global collections */
 		if (_extensions->isStandardGC() || _extensions->isMetronomeGC()) {
 			uintptr_t gcCount = 0;
@@ -491,7 +491,7 @@ MM_MemorySubSpaceUniSpace::calculateExpandSize(MM_EnvironmentBase *env, uintptr_
 		}	
 	}
 
-	if (expandToSatisfy){
+	if (expandToSatisfy) {
 		/* 
 		 * TO DO - If the last free chunk abuts the end of the heap we only need
 		 * to expand by (bytesRequired - size of last free chunk) to satisfy the
@@ -514,14 +514,14 @@ MM_MemorySubSpaceUniSpace::calculateExpandSize(MM_EnvironmentBase *env, uintptr_
 	/* Expand size now in range -Xmine =< expandSize <= -Xmaxe */
 	
 	/* Adjust within -XsoftMx limit */
-	if (expandToSatisfy){
+	if (expandToSatisfy) {
 		/* we need at least bytesRequired or we will get an OOM */
-		expandSize = adjustExpansionWithinSoftMax(env, expandSize, bytesRequired);
+		expandSize = adjustExpansionWithinSoftMax(env, expandSize, bytesRequired, MEMORY_TYPE_OLD);
 	} else {
 		/* we are adjusting based on other command line options, so fully respect softmx,
 		 * the minimum expand it can allow in this case is 0
 		 */
-		expandSize = adjustExpansionWithinSoftMax(env, expandSize, 0);
+		expandSize = adjustExpansionWithinSoftMax(env, expandSize, 0, MEMORY_TYPE_OLD);
 	}
 
 	Trc_MM_MemorySubSpaceUniSpace_calculateExpandSize_Exit1(env->getLanguageVMThread(), desiredFree, currentFree, expandSize);
@@ -562,7 +562,7 @@ MM_MemorySubSpaceUniSpace::calculateCollectorExpandSize(MM_EnvironmentBase *env,
 	expandSize = MM_Math::roundToCeiling(_extensions->heapAlignment, expandSize);	
 		
 	/* Adjust within -XsoftMx limit */
-	expandSize = adjustExpansionWithinSoftMax(env, expandSize, 0);
+	expandSize = adjustExpansionWithinSoftMax(env, expandSize, 0, MEMORY_TYPE_OLD);
 	
 	Trc_MM_MemorySubSpaceUniSpace_calculateCollectorExpandSize_Exit1(env->getLanguageVMThread(), expandSize);
 	return expandSize; 
@@ -601,7 +601,7 @@ MM_MemorySubSpaceUniSpace::checkForRatioExpand(MM_EnvironmentBase *env, uintptr_
 	}
 
 	/* Is too much time is being spent in GC? */
-	if (gcPercentage < _extensions->heapExpansionGCTimeThreshold) {
+	if (gcPercentage < _extensions->heapExpansionGCRatioThreshold._valueSpecified) {
 		Trc_MM_MemorySubSpaceUniSpace_checkForRatioExpand_Exit2(env->getLanguageVMThread(), gcPercentage);
 		return 0;
 	} else {
@@ -654,16 +654,16 @@ MM_MemorySubSpaceUniSpace::checkForRatioContract(MM_EnvironmentBase *env)
 	
 	/* Ask the collector for percentage of time spent in GC */
 	uint32_t gcPercentage;
-	if(NULL != _collector) {
+	if (NULL != _collector) {
 		gcPercentage = _collector->getGCTimePercentage(env);
 	} else {
 		gcPercentage = _extensions->getGlobalCollector()->getGCTimePercentage(env);
 	}
 	
-	/* If we are spending less than extensions->heapContractionGCTimeThreshold of
+	/* If we are spending less than extensions->heapContractionGCRatioThreshold of
 	 * our time in gc then we should attempt to shrink the heap
 	 */ 	
-	if (gcPercentage > 0 && gcPercentage < _extensions->heapContractionGCTimeThreshold) {
+	if (gcPercentage > 0 && gcPercentage < _extensions->heapContractionGCRatioThreshold._valueSpecified) {
 		Trc_MM_MemorySubSpaceUniSpace_checkForRatioContract_Exit1(env->getLanguageVMThread(), gcPercentage);
 		return true;
 	} else {
@@ -684,47 +684,15 @@ MM_MemorySubSpaceUniSpace::adjustExpansionWithinFreeLimits(MM_EnvironmentBase *e
 	uintptr_t result = expandSize;
 	
 	if (expandSize > 0 ) { 
-		if(_extensions->heapExpansionMinimumSize > 0 ) {
+		if (_extensions->heapExpansionMinimumSize > 0 ) {
 			result = OMR_MAX(_extensions->heapExpansionMinimumSize, expandSize);
 		}
 		
-		if(_extensions->heapExpansionMaximumSize > 0 ) {
+		if (_extensions->heapExpansionMaximumSize > 0 ) {
 			result = OMR_MIN(_extensions->heapExpansionMaximumSize, expandSize);
 		}	
 	}
 	return result;
-}
-
-/**
- * Compare the specified expand amount with -XsoftMX value
- * @return Updated expand size
- */		
-MMINLINE uintptr_t		
-MM_MemorySubSpaceUniSpace::adjustExpansionWithinSoftMax(MM_EnvironmentBase *env, uintptr_t expandSize, uintptr_t minimumBytesRequired)
-{
-	MM_Heap * heap = env->getExtensions()->getHeap();
-
-	uintptr_t actualSoftMx = heap->getActualSoftMxSize(env);
-	uintptr_t activeMemorySize = getActiveMemorySize();
-	OMRPORT_ACCESS_FROM_OMRPORT(env->getPortLibrary());
-	
-	if (0 != actualSoftMx) {
-		if ((minimumBytesRequired != 0) && ((activeMemorySize + minimumBytesRequired) > actualSoftMx)) {
-			if (J9_EVENT_IS_HOOKED(env->getExtensions()->omrHookInterface, J9HOOK_MM_OMR_OOM_DUE_TO_SOFTMX)) {
-				ALWAYS_TRIGGER_J9HOOK_MM_OMR_OOM_DUE_TO_SOFTMX(env->getExtensions()->omrHookInterface, env->getOmrVMThread(), omrtime_hires_clock(),
-						heap->getMaximumMemorySize(), heap->getActiveMemorySize(), env->getExtensions()->softMx, minimumBytesRequired);
-				actualSoftMx = heap->getActualSoftMxSize(env);
-			}
-		}
-		if (actualSoftMx < activeMemorySize) {
-			/* if our softmx is smaller than our currentsize, we should be contracting not expanding */
-			expandSize = 0;
-		} else if((activeMemorySize + expandSize) > actualSoftMx) {
-			/* we would go past our -XsoftMx so just expand up to it instead */
-			expandSize = actualSoftMx - activeMemorySize;
-		}
-	}
-	return expandSize;
 }
 
 uintptr_t
@@ -738,7 +706,7 @@ MM_MemorySubSpaceUniSpace::getHeapFreeMaximumHeuristicMultiplier(MM_EnvironmentB
 		gcPercentage = _extensions->getGlobalCollector()->getGCTimePercentage(env);
 	}
 
-	uintptr_t expectedGcPercentage = (_extensions->heapContractionGCTimeThreshold + _extensions->heapExpansionGCTimeThreshold) / 2;
+	uintptr_t expectedGcPercentage = (_extensions->heapContractionGCRatioThreshold._valueSpecified + _extensions->heapExpansionGCRatioThreshold._valueSpecified) / 2;
 	uintptr_t gcRatio = gcPercentage / expectedGcPercentage;
 	uintptr_t freeMaxMultiplier = OMR_MIN(_extensions->heapFreeMaximumRatioMultiplier + 6 * gcRatio * gcRatio, _extensions->heapFreeMaximumRatioDivisor);
 	
@@ -758,7 +726,7 @@ MM_MemorySubSpaceUniSpace::getHeapFreeMinimumHeuristicMultiplier(MM_EnvironmentB
 		gcPercentage = _extensions->getGlobalCollector()->getGCTimePercentage(env);
 	}
 
-	uintptr_t expectedGcPercentage = (_extensions->heapContractionGCTimeThreshold + _extensions->heapExpansionGCTimeThreshold) / 2;
+	uintptr_t expectedGcPercentage = (_extensions->heapContractionGCRatioThreshold._valueSpecified + _extensions->heapExpansionGCRatioThreshold._valueSpecified) / 2;
 	uintptr_t gcRatio = gcPercentage / expectedGcPercentage;
 	uintptr_t freeMinMultiplier = OMR_MIN(_extensions->heapFreeMinimumRatioMultiplier + 1 * gcRatio * gcRatio, _extensions->heapFreeMinimumRatioDivisor - 5);
 	

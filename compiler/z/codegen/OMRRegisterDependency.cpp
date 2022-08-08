@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -97,8 +97,8 @@ OMR::Z::RegisterDependencyConditions::RegisterDependencyConditions(TR::CodeGener
 
    totalNum = totalNum + numLongs + numLongDoubles;
 
-   _preConditions = new (totalNum, cg->trMemory()) TR_S390RegisterDependencyGroup;
-   _postConditions = new (totalNum, cg->trMemory()) TR_S390RegisterDependencyGroup;
+   _preConditions = new (totalNum, cg->trMemory()) TR::RegisterDependencyGroup;
+   _postConditions = new (totalNum, cg->trMemory()) TR::RegisterDependencyGroup;
    _numPreConditions = totalNum;
    _addCursorForPre = 0;
    _numPostConditions = totalNum;
@@ -163,8 +163,8 @@ OMR::Z::RegisterDependencyConditions::RegisterDependencyConditions(TR::CodeGener
    }
 
 OMR::Z::RegisterDependencyConditions::RegisterDependencyConditions(TR::RegisterDependencyConditions* iConds, uint16_t numNewPreConds, uint16_t numNewPostConds, TR::CodeGenerator * cg)
-   : _preConditions(TR_S390RegisterDependencyGroup::create((iConds?iConds->getNumPreConditions():0)+numNewPreConds, cg->trMemory())),
-     _postConditions(TR_S390RegisterDependencyGroup::create((iConds?iConds->getNumPostConditions():0)+numNewPostConds, cg->trMemory())),
+   : _preConditions(new ((iConds ? iConds->getNumPreConditions() : 0) + numNewPreConds, cg->trMemory()) TR::RegisterDependencyGroup),
+     _postConditions(new ((iConds ? iConds->getNumPostConditions() : 0) + numNewPostConds, cg->trMemory()) TR::RegisterDependencyGroup),
      _numPreConditions((iConds?iConds->getNumPreConditions():0)+numNewPreConds),
      _addCursorForPre(0),
      _numPostConditions((iConds?iConds->getNumPostConditions():0)+numNewPostConds),
@@ -174,7 +174,7 @@ OMR::Z::RegisterDependencyConditions::RegisterDependencyConditions(TR::RegisterD
    {
      int32_t i;
 
-     TR_S390RegisterDependencyGroup* depGroup;
+     TR::RegisterDependencyGroup* depGroup;
      uint16_t numPreConds = (iConds?iConds->getNumPreConditions():0)+numNewPreConds;
      uint16_t numPostConds = (iConds?iConds->getNumPostConditions():0)+numNewPostConds;
      uint32_t flag;
@@ -222,8 +222,8 @@ OMR::Z::RegisterDependencyConditions::RegisterDependencyConditions(TR::RegisterD
 OMR::Z::RegisterDependencyConditions::RegisterDependencyConditions(TR::RegisterDependencyConditions * conds_1,
                                      TR::RegisterDependencyConditions * conds_2,
                                      TR::CodeGenerator * cg)
-   : _preConditions(TR_S390RegisterDependencyGroup::create(conds_1->getNumPreConditions()+conds_2->getNumPreConditions(), cg->trMemory())),
-     _postConditions(TR_S390RegisterDependencyGroup::create(conds_1->getNumPostConditions()+conds_2->getNumPostConditions(), cg->trMemory())),
+   : _preConditions(new (conds_1->getNumPreConditions() + conds_2->getNumPreConditions(), cg->trMemory()) TR::RegisterDependencyGroup),
+     _postConditions(new (conds_1->getNumPostConditions()+conds_2->getNumPostConditions(), cg->trMemory()) TR::RegisterDependencyGroup),
      _numPreConditions(conds_1->getNumPreConditions()+conds_2->getNumPreConditions()),
      _addCursorForPre(0),
      _numPostConditions(conds_1->getNumPostConditions()+conds_2->getNumPostConditions()),
@@ -232,7 +232,7 @@ OMR::Z::RegisterDependencyConditions::RegisterDependencyConditions(TR::RegisterD
      _cg(cg)
    {
    int32_t i;
-   TR_S390RegisterDependencyGroup* depGroup;
+   TR::RegisterDependencyGroup* depGroup;
    uint32_t flag;
    TR::RealRegister::RegNum rr;
    TR::Register* vr;
@@ -307,6 +307,26 @@ OMR::Z::RegisterDependencyConditions::RegisterDependencyConditions(TR::RegisterD
          {
          _numPostConditions--;
          }
+      }
+   }
+
+OMR::Z::RegisterDependencyConditions::RegisterDependencyConditions(uint16_t numPreConds, uint16_t numPostConds, TR::CodeGenerator *cg)
+   : _preConditions(new (numPreConds, cg->trMemory()) TR::RegisterDependencyGroup),
+     _postConditions(new (numPostConds + NUM_VM_THREAD_REG_DEPS, cg->trMemory()) TR::RegisterDependencyGroup),
+      _numPreConditions(numPreConds),
+      _addCursorForPre(0),
+      _numPostConditions(numPostConds + NUM_VM_THREAD_REG_DEPS),
+      _addCursorForPost(0),
+      _isUsed(false),
+      _cg(cg)
+   {
+   for(int32_t i=0;i<numPreConds;i++)
+      {
+      _preConditions->clearDependencyInfo(i);
+      }
+   for(int32_t j=0;j<numPostConds + NUM_VM_THREAD_REG_DEPS;j++)
+      {
+      _postConditions->clearDependencyInfo(j);
       }
    }
 
@@ -481,6 +501,121 @@ TR::RegisterDependencyConditions  *OMR::Z::RegisterDependencyConditions::clone(T
    return other;
    }
 
+
+uint32_t
+OMR::Z::RegisterDependencyConditions::setNumPreConditions(uint16_t n, TR_Memory * m)
+   {
+   if (_preConditions == NULL)
+      {
+      _preConditions = new (n,m) TR::RegisterDependencyGroup;
+
+      for (int32_t i = 0; i < n; i++)
+         {
+         _preConditions->clearDependencyInfo(i);
+         }
+      }
+   return _numPreConditions = n;
+   }
+
+void
+OMR::Z::RegisterDependencyConditions::addPreCondition(TR::Register *vr, TR::RealRegister::RegDep rr, uint8_t flag)
+   {
+   TR_ASSERT(!getIsUsed(), "ERROR: cannot add pre conditions to an used dependency, create a copy first\n");
+
+   // dont add dependencies if reg is real register
+   if (vr && vr->getRealRegister()!=NULL) return;
+
+   TR_ASSERT_FATAL(_addCursorForPre < _numPreConditions,"addPreCondition list overflow. addCursorForPre(%d), numPreConditions(%d), virtual register name(%s) and pointer(%p)\n",_addCursorForPre, _numPreConditions,vr->getRegisterName(_cg->comp()),vr);
+   _preConditions->setDependencyInfo(_addCursorForPre++, vr, static_cast<TR::RealRegister::RegNum>(rr), flag);
+   }
+
+void
+OMR::Z::RegisterDependencyConditions::addPostCondition(TR::Register *vr, TR::RealRegister::RegDep rr, uint8_t flag)
+   {
+   TR_ASSERT(!getIsUsed(), "ERROR: cannot add post conditions to an used dependency, create a copy first\n");
+
+   // dont add dependencies if reg is real register
+   if (vr && vr->getRealRegister()!=NULL) return;
+   TR_ASSERT_FATAL(_addCursorForPost < _numPostConditions,"addPostCondition list overflow. addCursorForPost(%d), numPostConditions(%d), virtual register name(%s) and pointer(%p)\n",_addCursorForPost, _numPostConditions,vr->getRegisterName(_cg->comp()),vr);
+   _postConditions->setDependencyInfo(_addCursorForPost++, vr, static_cast<TR::RealRegister::RegNum>(rr), flag);
+   }
+
+void
+OMR::Z::RegisterDependencyConditions::assignPreConditionRegisters(TR::Instruction *currentInstruction, TR_RegisterKinds kindToBeAssigned, TR::CodeGenerator *cg)
+   {
+   if (_preConditions != NULL)
+      {
+      cg->clearRegisterAssignmentFlags();
+      cg->setRegisterAssignmentFlag(TR_PreDependencyCoercion);
+      _preConditions->assignRegisters(currentInstruction, kindToBeAssigned, _addCursorForPre, cg);
+      }
+   }
+
+void
+OMR::Z::RegisterDependencyConditions::assignPostConditionRegisters(TR::Instruction *currentInstruction, TR_RegisterKinds kindToBeAssigned, TR::CodeGenerator *cg)
+   {
+   if (_postConditions != NULL)
+      {
+      cg->clearRegisterAssignmentFlags();
+      cg->setRegisterAssignmentFlag(TR_PostDependencyCoercion);
+      _postConditions->assignRegisters(currentInstruction, kindToBeAssigned, _addCursorForPost, cg);
+      }
+   }
+
+TR::Register *
+OMR::Z::RegisterDependencyConditions::searchPreConditionRegister(TR::RealRegister::RegNum rr, uint8_t flag)
+   {
+   return _preConditions==NULL?NULL:_preConditions->searchForRegister(rr, flag, _addCursorForPre, _cg);
+   }
+
+TR::Register *
+OMR::Z::RegisterDependencyConditions::searchPostConditionRegister(TR::RealRegister::RegNum rr, uint8_t flag)
+   {
+   return _postConditions==NULL?NULL:_postConditions->searchForRegister(rr, flag, _addCursorForPost, _cg);
+   }
+
+TR::Register *
+OMR::Z::RegisterDependencyConditions::searchPreConditionRegister(TR::Register * vr, uint8_t flag)
+   {
+   return _preConditions==NULL?NULL:_preConditions->searchForRegister(vr, flag, _addCursorForPre, _cg);
+   }
+
+TR::Register *
+OMR::Z::RegisterDependencyConditions::searchPostConditionRegister(TR::Register * vr, uint8_t flag)
+   {
+   return _postConditions==NULL?NULL:_postConditions->searchForRegister(vr, flag, _addCursorForPost, _cg);
+   }
+
+int32_t
+OMR::Z::RegisterDependencyConditions::searchPostConditionRegisterPos(TR::Register * vr, uint8_t flag)
+   {
+   return _postConditions==NULL?-1:_postConditions->searchForRegisterPos(vr, flag, _addCursorForPost, _cg);
+   }
+
+void
+OMR::Z::RegisterDependencyConditions::stopUsingDepRegs(TR::CodeGenerator *cg, TR::Register *ret1, TR::Register *ret2)
+   {
+   if (_preConditions != NULL)
+      _preConditions->stopUsingDepRegs(_addCursorForPre, ret1, ret2, cg);
+   if (_postConditions != NULL)
+      _postConditions->stopUsingDepRegs(_addCursorForPost, ret1, ret2, cg);
+   }
+
+uint32_t
+OMR::Z::RegisterDependencyConditions::setNumPostConditions(uint16_t n, TR_Memory * m)
+   {
+   if (_postConditions == NULL)
+      {
+      _postConditions = new (n,m) TR::RegisterDependencyGroup;
+
+      for (int32_t i = 0; i < n; i++)
+         {
+         _postConditions->clearDependencyInfo(i);
+         }
+      }
+   return _numPostConditions = n;
+   }
+
 bool
 OMR::Z::RegisterDependencyConditions::refsRegister(TR::Register * r)
    {
@@ -557,7 +692,7 @@ OMR::Z::RegisterDependencyConditions::usesRegister(TR::Register * r)
 void
 OMR::Z::RegisterDependencyConditions::bookKeepingRegisterUses(TR::Instruction * instr, TR::CodeGenerator * cg, int32_t oldPreCursor, int32_t oldPostCursor)
    {
-   if (instr->getOpCodeValue() != TR::InstOpCode::ASSOCREGS)
+   if (instr->getOpCodeValue() != TR::InstOpCode::assocreg)
       {
       // We create a register association directive for each dependency
 
@@ -585,7 +720,7 @@ OMR::Z::RegisterDependencyConditions::bookKeepingRegisterUses(TR::Instruction * 
    }
 
 uint32_t
-TR_S390RegisterDependencyGroup::genBitMapOfAssignableGPRs(TR::CodeGenerator * cg,
+OMR::Z::RegisterDependencyGroup::genBitMapOfAssignableGPRs(TR::CodeGenerator * cg,
                                                            uint32_t numberOfRegisters)
    {
    TR::Machine* machine = cg->machine();
@@ -609,7 +744,7 @@ TR_S390RegisterDependencyGroup::genBitMapOfAssignableGPRs(TR::CodeGenerator * cg
    }
 
 void
-TR_S390RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentInstruction,
+OMR::Z::RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentInstruction,
                                                 TR_RegisterKinds  kindToBeAssigned,
                                                 uint32_t          numOfDependencies,
                                                 TR::CodeGenerator *cg)
@@ -621,88 +756,85 @@ TR_S390RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentInstru
    TR::RealRegister * dependentRealReg, * assignedRegister;
    int32_t i, j;
    bool changed;
-   uint32_t availRegMask = genBitMapOfAssignableGPRs(cg, numOfDependencies);
+   uint32_t availRegMask = self()->genBitMapOfAssignableGPRs(cg, numOfDependencies);
 
-   if (!comp->getOption(TR_DisableOOL))
+   for (i = 0; i< numOfDependencies; i++)
       {
-      for (i = 0; i< numOfDependencies; i++)
+      TR::RegisterDependency &regDep = _dependencies[i];
+      virtReg = regDep.getRegister();
+      if (regDep.isSpilledReg() && !virtReg->getRealRegister())
          {
-         TR::RegisterDependency &regDep = _dependencies[i];
-         virtReg = regDep.getRegister();
-         if (regDep.isSpilledReg() && !virtReg->getRealRegister())
+         TR_ASSERT_FATAL(virtReg->getBackingStorage() != NULL, "Spilled virtual register on dependency list does not have backing storage");
+
+         if (virtReg->getAssignedRealRegister())
             {
-            TR_ASSERT_FATAL(virtReg->getBackingStorage() != NULL, "Spilled virtual register on dependency list does not have backing storage");
-
-            if (virtReg->getAssignedRealRegister())
-               {
-               // this happens when the register was first spilled in main line path then was reverse spilled
-               // and assigned to a real register in OOL path. We protected the backing store when doing
-               // the reverse spill so we could re-spill to the same slot now
-               TR::Node *currentNode = currentInstruction->getNode();
-               TR::RealRegister *assignedReg = toRealRegister(virtReg->getAssignedRegister());
-               cg->traceRegisterAssignment ("\nOOL: Found %R spilled in main line and reused inside OOL", virtReg);
-               TR::MemoryReference * tempMR = generateS390MemoryReference(currentNode, virtReg->getBackingStorage()->getSymbolReference(), cg);
-               TR::InstOpCode::Mnemonic opCode;
-               TR_RegisterKinds rk = virtReg->getKind();
-               switch (rk)
-                  {
-                  case TR_GPR:
-                     if (virtReg->is64BitReg())
-                        {
-                        opCode = TR::InstOpCode::LG;
-                        }
-                     else
-                        {
-                        opCode = TR::InstOpCode::L;
-                        }
-                     break;
-                  case TR_FPR:
-                     opCode = TR::InstOpCode::LD;
-                     break;
-                  case TR_VRF:
-                     opCode = TR::InstOpCode::VL;
-                     break;
-                  default:
-                     TR_ASSERT( 0, "\nRegister kind not supported in OOL spill\n");
-                     break;
-                  }
-
-               bool isVector = (rk == TR_VRF);
-
-               TR::Instruction *inst = isVector ? generateVRXInstruction(cg, opCode, currentNode, assignedReg, tempMR, 0, currentInstruction) :
-                                                     generateRXInstruction (cg, opCode, currentNode, assignedReg, tempMR, currentInstruction);
-               cg->traceRAInstruction(inst);
-
-               assignedReg->setAssignedRegister(NULL);
-               virtReg->setAssignedRegister(NULL);
-               assignedReg->setState(TR::RealRegister::Free);
-               }
-
-            // now we are leaving the OOL sequence, anything that was previously spilled in OOL hot path or main line
-            // should be considered as mainline spill for the next OOL sequence.
-            virtReg->getBackingStorage()->setMaxSpillDepth(1);
-            }
-         // we also need to free up all locked backing storage if we are exiting the OOL during backwards RA assignment
-         else if (currentInstruction->isLabel() && virtReg->getAssignedRealRegister())
-            {
-            TR_BackingStore * location = virtReg->getBackingStorage();
+            // this happens when the register was first spilled in main line path then was reverse spilled
+            // and assigned to a real register in OOL path. We protected the backing store when doing
+            // the reverse spill so we could re-spill to the same slot now
+            TR::Node *currentNode = currentInstruction->getNode();
+            TR::RealRegister *assignedReg = toRealRegister(virtReg->getAssignedRegister());
+            cg->traceRegisterAssignment ("\nOOL: Found %R spilled in main line and reused inside OOL", virtReg);
+            TR::MemoryReference * tempMR = generateS390MemoryReference(currentNode, virtReg->getBackingStorage()->getSymbolReference(), cg);
+            TR::InstOpCode::Mnemonic opCode;
             TR_RegisterKinds rk = virtReg->getKind();
-            int32_t dataSize;
-            if (toS390LabelInstruction(currentInstruction)->getLabelSymbol()->isStartOfColdInstructionStream() &&
-                location)
+            switch (rk)
                {
-               traceMsg (comp,"\nOOL: Releasing backing storage (%p)\n", location);
-               if (rk == TR_GPR)
-                  dataSize = TR::Compiler->om.sizeofReferenceAddress();
-               else if (rk == TR_VRF)
-                  dataSize = 16; // Will change to 32 in a few years..
-               else
-                  dataSize = 8;
-
-               location->setMaxSpillDepth(0);
-               cg->freeSpill(location,dataSize,0);
-               virtReg->setBackingStorage(NULL);
+               case TR_GPR:
+                  if (virtReg->is64BitReg())
+                     {
+                     opCode = TR::InstOpCode::LG;
+                     }
+                  else
+                     {
+                     opCode = TR::InstOpCode::L;
+                     }
+                  break;
+               case TR_FPR:
+                  opCode = TR::InstOpCode::LD;
+                  break;
+               case TR_VRF:
+                  opCode = TR::InstOpCode::VL;
+                  break;
+               default:
+                  TR_ASSERT( 0, "\nRegister kind not supported in OOL spill\n");
+                  break;
                }
+
+            bool isVector = (rk == TR_VRF);
+
+            TR::Instruction *inst = isVector ? generateVRXInstruction(cg, opCode, currentNode, assignedReg, tempMR, 0, currentInstruction) :
+                                                   generateRXInstruction (cg, opCode, currentNode, assignedReg, tempMR, currentInstruction);
+            cg->traceRAInstruction(inst);
+
+            assignedReg->setAssignedRegister(NULL);
+            virtReg->setAssignedRegister(NULL);
+            assignedReg->setState(TR::RealRegister::Free);
+            }
+
+         // now we are leaving the OOL sequence, anything that was previously spilled in OOL hot path or main line
+         // should be considered as mainline spill for the next OOL sequence.
+         virtReg->getBackingStorage()->setMaxSpillDepth(1);
+         }
+      // we also need to free up all locked backing storage if we are exiting the OOL during backwards RA assignment
+      else if (currentInstruction->isLabel() && virtReg->getAssignedRealRegister())
+         {
+         TR_BackingStore * location = virtReg->getBackingStorage();
+         TR_RegisterKinds rk = virtReg->getKind();
+         int32_t dataSize;
+         if (toS390LabelInstruction(currentInstruction)->getLabelSymbol()->isStartOfColdInstructionStream() &&
+               location)
+            {
+            traceMsg (comp,"\nOOL: Releasing backing storage (%p)\n", location);
+            if (rk == TR_GPR)
+               dataSize = TR::Compiler->om.sizeofReferenceAddress();
+            else if (rk == TR_VRF)
+               dataSize = 16; // Will change to 32 in a few years..
+            else
+               dataSize = 8;
+
+            location->setMaxSpillDepth(0);
+            cg->freeSpill(location,dataSize,0);
+            virtReg->setBackingStorage(NULL);
             }
          }
       }
@@ -1231,7 +1363,7 @@ TR_S390RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentInstru
 
    // Unblock all other regs
    //
-   unblockRegisters(numOfDependencies, cg);
+   self()->unblockRegisters(numOfDependencies, cg);
 
 
 
@@ -1242,14 +1374,14 @@ TR_S390RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentInstru
    //
    for (i = 0; i < numOfDependencies; i++)
       {
-      TR::Register * dependentRegister = getRegisterDependency(i)->getRegister();
+      TR::Register * dependentRegister = self()->getRegisterDependency(i)->getRegister();
 
       // We decrement the use count, and kill if there are no further uses
       // We pay special attention to pairs, as it is not the parent placeholder
       // that must have its count decremented, but rather the children.
       if (dependentRegister->getRegisterPair() == NULL &&
           dependentRegister->getAssignedRegister() != NULL &&
-          !getRegisterDependency(i)->isSpilledReg()
+          !self()->getRegisterDependency(i)->isSpilledReg()
          )
          {
          TR::Register * assignedRegister = dependentRegister->getAssignedRegister();
@@ -1327,23 +1459,20 @@ TR_S390RegisterDependencyGroup::assignRegisters(TR::Instruction   *currentInstru
          }
       }
 
-   if (!comp->getOption(TR_DisableOOL))
+   // TODO: Is this HPR related? Do we need this code?
+   for (i = 0; i < numOfDependencies; i++)
       {
-      // TODO: Is this HPR related? Do we need this code?
-      for (i = 0; i < numOfDependencies; i++)
+      if (_dependencies[i].getRegister()->getRealRegister())
          {
-         if (_dependencies[i].getRegister()->getRealRegister())
+         TR::RealRegister* realReg = toRealRegister(_dependencies[i].getRegister());
+         if (_dependencies[i].isSpilledReg())
             {
-            TR::RealRegister* realReg = toRealRegister(_dependencies[i].getRegister());
-            if (_dependencies[i].isSpilledReg())
-               {
-               virtReg = realReg->getAssignedRegister();
+            virtReg = realReg->getAssignedRegister();
 
-               traceMsg(comp,"\nOOL HPR Spill: %s", cg->getDebug()->getName(realReg));
-               traceMsg(comp,":%s\n", cg->getDebug()->getName(virtReg));
+            traceMsg(comp,"\nOOL HPR Spill: %s", cg->getDebug()->getName(realReg));
+            traceMsg(comp,":%s\n", cg->getDebug()->getName(virtReg));
 
-               virtReg->setAssignedRegister(NULL);
-               }
+            virtReg->setAssignedRegister(NULL);
             }
          }
       }
@@ -1363,7 +1492,7 @@ OMR::Z::RegisterDependencyConditions::createRegisterAssociationDirective(TR::Ins
    // dependent register instruction onto the machine.
    // Only the registers that this instruction interferes with are modified.
    //
-   TR_S390RegisterDependencyGroup * depGroup = getPreConditions();
+   TR::RegisterDependencyGroup * depGroup = getPreConditions();
    for (int32_t j = 0; j < getNumPreConditions(); j++)
       {
       TR::RegisterDependency * dependency = depGroup->getRegisterDependency(j);
@@ -1384,7 +1513,7 @@ OMR::Z::RegisterDependencyConditions::createRegisterAssociationDirective(TR::Ins
       }
    }
 
-bool OMR::Z::RegisterDependencyConditions::doesConditionExist( TR_S390RegisterDependencyGroup * regDepArr, TR::RegisterDependency *depToCheck, uint32_t numberOfRegisters )
+bool OMR::Z::RegisterDependencyConditions::doesConditionExist( TR::RegisterDependencyGroup * regDepArr, TR::RegisterDependency *depToCheck, uint32_t numberOfRegisters )
    {
    uint32_t flag = depToCheck->getFlags();
    TR::Register *vr = depToCheck->getRegister();

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -37,17 +37,6 @@ namespace TR { class Instruction; }
 namespace TR { class LabelSymbol; }
 namespace TR { class Node; }
 
-extern char* AOTcgDiagOn;
-
-#define AOTcgDiag0(comp,s)                    AOTcgDummy()
-#define AOTcgDiag1(comp,s,p1)                 AOTcgDummy()
-#define AOTcgDiag2(comp,s,p1,p2)              AOTcgDummy()
-#define AOTcgDiag3(comp,s,p1,p2,p3)           AOTcgDummy()
-#define AOTcgDiag4(comp,s,p1,p2,p3,p4)        AOTcgDummy()
-#define AOTcgDiag5(comp,s,p1,p2,p3,p4,p5)     AOTcgDummy()
-#define AOTcgDiag6(comp,s,p1,p2,p3,p4,p5,p6)  AOTcgDummy()
-inline  void AOTcgDummy(){}
-
 typedef enum
    {
    TR_UnusedGlobalValue             = 0,
@@ -66,8 +55,10 @@ typedef enum
 namespace TR {
 
 /** encapsulates debug information about a relocation record */
-struct RelocationDebugInfo
+class RelocationDebugInfo
    {
+   public:
+
    /** the file name of the code that generated the associated RR*/
    const char* file;
    /** the line number in the file file that created the associated RR*/
@@ -117,6 +108,8 @@ class LabelRelocation : public TR::Relocation
    TR::LabelSymbol *getLabel()                  {return _label;}
    TR::LabelSymbol *setLabel(TR::LabelSymbol *l) {return (_label = l);}
 
+   protected:
+   void assertLabelDefined();
    };
 
 class LabelRelative8BitRelocation : public TR::LabelRelocation

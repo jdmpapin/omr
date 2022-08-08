@@ -204,7 +204,6 @@ private:
    int32_t _offsetToLongDispSlot;
    uint8_t _numberOfDependencyGPRegisters;
    int32_t _offsetToFirstLocal;
-   bool    _stackSizeCheckNeeded;
    bool    _raContextSaveNeeded;
    bool    _raContextRestoreNeeded;
    int32_t _largestOutgoingArgumentAreaSize; ///< Arguments for registers could be saved in discontiguous area
@@ -242,9 +241,6 @@ enum TR_DispatchType
    bool isFastLinkLinkageType();
 
    bool isZLinuxLinkageType();
-
-   bool    setStackSizeCheckNeeded(bool v) { return _stackSizeCheckNeeded = v; }
-   bool    getStackSizeCheckNeeded() { return _stackSizeCheckNeeded; }
 
    bool    setRaContextSaveNeeded(bool v) { return _raContextSaveNeeded = v; }
    bool    getRaContextSaveNeeded() { return _raContextSaveNeeded; }
@@ -332,8 +328,6 @@ enum TR_DispatchType
    virtual bool isAggregateReturnedInRegistersAndMemoryCall(TR::Node *callNode) { return false; }
 
    int32_t  isForceSaveIncomingParameters() { return _properties & ForceSaveIncomingParameters; }
-   int32_t  isLongDoubleReturnedOnStorage() { return _properties & LongDoubleReturnedOnStorage; }
-   int32_t  isLongDoublePassedOnStorage() { return _properties & LongDoublePassedOnStorage; }
    int32_t  isParmsMappedBeforeAutos() { return _properties & ParmsMappedBeforeAutos; }
 
    int64_t killAndAssignRegister(int64_t killMask, TR::RegisterDependencyConditions * deps,

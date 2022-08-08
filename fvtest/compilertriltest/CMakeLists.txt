@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -30,7 +30,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Add bigobj compiler options for TypeConversionTest.cpp under Windows
-if(OMR_HOST_OS STREQUAL "win")
+if(OMR_OS_WINDOWS)
 	add_compile_options(-bigobj)
 endif()
 
@@ -64,13 +64,9 @@ target_link_libraries(comptest
 	tril
 )
 
-if(OMR_HOST_OS STREQUAL "zos")
-	target_link_libraries(comptest j9a2e)
-endif()
-
 set_property(TARGET comptest PROPERTY FOLDER fvtest)
 
-add_test(
+omr_add_test(
 	NAME comptest
-	COMMAND comptest --gtest_color=yes --gtest_output=xml:${CMAKE_CURRENT_BINARY_DIR}/comptest-results.xml
+	COMMAND $<TARGET_FILE:comptest> --gtest_color=yes --gtest_output=xml:${CMAKE_CURRENT_BINARY_DIR}/comptest-results.xml
 )

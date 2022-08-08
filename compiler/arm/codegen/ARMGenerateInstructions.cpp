@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2016 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -25,7 +25,7 @@
 
 
 TR::Instruction *generateInstruction(TR::CodeGenerator *cg,
-                                    TR_ARMOpCodes     op,
+                                    TR::InstOpCode::Mnemonic     op,
                                     TR::Node          *node,
                                     TR::Instruction   *prev)
    {
@@ -36,7 +36,7 @@ TR::Instruction *generateInstruction(TR::CodeGenerator *cg,
    }
 
 TR::Instruction *generateAdminInstruction(TR::CodeGenerator *cg,
-                                         TR_ARMOpCodes     op,
+                                         TR::InstOpCode::Mnemonic     op,
                                          TR::Node          *node,
                                          TR::Node          *fenceNode,
                                          TR::Instruction   *prev)
@@ -48,7 +48,7 @@ TR::Instruction *generateAdminInstruction(TR::CodeGenerator *cg,
    }
 
 TR::Instruction *generateAdminInstruction(TR::CodeGenerator                   *cg,
-                                         TR_ARMOpCodes                       op,
+                                         TR::InstOpCode::Mnemonic                       op,
                                          TR::Node                            *node,
                                          TR::RegisterDependencyConditions *cond,
                                          TR::Node                            *fenceNode,
@@ -61,7 +61,7 @@ TR::Instruction *generateAdminInstruction(TR::CodeGenerator                   *c
    }
 
 TR::Instruction *generateImmInstruction(TR::CodeGenerator                   *cg,
-                                          TR_ARMOpCodes                       op,
+                                          TR::InstOpCode::Mnemonic                       op,
                                           TR::Node                            *node,
                                           uint32_t                            imm,
                                           TR::RegisterDependencyConditions *cond,
@@ -75,7 +75,7 @@ TR::Instruction *generateImmInstruction(TR::CodeGenerator                   *cg,
    }
 
 TR::Instruction *generateImmInstruction(TR::CodeGenerator                   *cg,
-                                          TR_ARMOpCodes                       op,
+                                          TR::InstOpCode::Mnemonic                       op,
                                           TR::Node                            *node,
                                           uint32_t                            imm,
                                           TR::Instruction                     *prev)
@@ -88,7 +88,7 @@ TR::Instruction *generateImmInstruction(TR::CodeGenerator                   *cg,
    }
 
 TR::Instruction *generateImmInstruction(TR::CodeGenerator                   *cg,
-                                          TR_ARMOpCodes                       op,
+                                          TR::InstOpCode::Mnemonic                       op,
                                           TR::Node                            *node,
                                           uint32_t                            imm,
                                           TR_ExternalRelocationTargetKind relocationKind,
@@ -101,7 +101,7 @@ TR::Instruction *generateImmInstruction(TR::CodeGenerator                   *cg,
    }
 
 TR::Instruction *generateImmInstruction(TR::CodeGenerator                   *cg,
-                                          TR_ARMOpCodes                       op,
+                                          TR::InstOpCode::Mnemonic                       op,
                                           TR::Node                            *node,
                                           uint32_t                            imm,
                                           TR_ExternalRelocationTargetKind relocationKind,
@@ -115,7 +115,7 @@ TR::Instruction *generateImmInstruction(TR::CodeGenerator                   *cg,
    }
 
 TR::Instruction *generateImmSymInstruction(TR::CodeGenerator                   *cg,
-                                          TR_ARMOpCodes                       op,
+                                          TR::InstOpCode::Mnemonic                       op,
                                           TR::Node                            *node,
                                           uint32_t                            imm,
                                           TR::RegisterDependencyConditions *cond,
@@ -131,14 +131,14 @@ TR::Instruction *generateImmSymInstruction(TR::CodeGenerator                   *
    }
 
 TR::Instruction *generateMemSrc1Instruction(TR::CodeGenerator      *cg,
-                                           TR_ARMOpCodes          op,
+                                           TR::InstOpCode::Mnemonic          op,
                                            TR::Node               *node,
                                            TR::MemoryReference *mf,
                                            TR::Register           *sreg,
                                            TR::Instruction        *prev)
    {
 #if (defined(__VFP_FP__) && !defined(__SOFTFP__))
-   TR_ARMOpCode    opCode(op);
+   TR::InstOpCode    opCode(op);
    if (opCode.isVFPOp())
       {
       mf->fixupVFPOffset(node, cg);
@@ -152,14 +152,14 @@ TR::Instruction *generateMemSrc1Instruction(TR::CodeGenerator      *cg,
    }
 
 TR::Instruction *generateTrg1MemInstruction(TR::CodeGenerator      *cg,
-                                           TR_ARMOpCodes          op,
+                                           TR::InstOpCode::Mnemonic          op,
                                            TR::Node               *node,
                                            TR::Register           *treg,
                                            TR::MemoryReference *mf,
                                            TR::Instruction        *prev)
    {
 #if (defined(__VFP_FP__) && !defined(__SOFTFP__))
-   TR_ARMOpCode    opCode(op);
+   TR::InstOpCode    opCode(op);
    if (opCode.isVFPOp())
       {
       mf->fixupVFPOffset(node, cg);
@@ -173,7 +173,7 @@ TR::Instruction *generateTrg1MemInstruction(TR::CodeGenerator      *cg,
    }
 
 TR::Instruction *generateTrg1MemSrc1Instruction(TR::CodeGenerator      *cg,
-                                               TR_ARMOpCodes          op,
+                                               TR::InstOpCode::Mnemonic          op,
                                                TR::Node               *node,
                                                TR::Register           *treg,
                                                TR::MemoryReference *mf,
@@ -187,7 +187,7 @@ TR::Instruction *generateTrg1MemSrc1Instruction(TR::CodeGenerator      *cg,
    }
 
 TR::Instruction *generateTrg1ImmInstruction(TR::CodeGenerator *cg,
-                                           TR_ARMOpCodes     op,
+                                           TR::InstOpCode::Mnemonic     op,
                                            TR::Node          *node,
                                            TR::Register      *treg,
                                            uint32_t          base,
@@ -202,14 +202,14 @@ TR::Instruction *generateTrg1ImmInstruction(TR::CodeGenerator *cg,
    }
 
 TR::Instruction *generateSrc1ImmInstruction(TR::CodeGenerator *cg,
-                                           TR_ARMOpCodes     op,
+                                           TR::InstOpCode::Mnemonic     op,
                                            TR::Node          *node,
                                            TR::Register      *s1reg,
                                            uint32_t          base,
                                            uint32_t          rotate,
                                            TR::Instruction   *prev)
    {
-   TR_ARMOpCode    opCode(op);
+   TR::InstOpCode    opCode(op);
    TR_ARMOperand2 *operand = new (cg->trHeapMemory()) TR_ARMOperand2(base, rotate);
    if (opCode.isVFPOp())
       {
@@ -228,13 +228,13 @@ TR::Instruction *generateSrc1ImmInstruction(TR::CodeGenerator *cg,
    }
 
 TR::Instruction *generateSrc2Instruction(TR::CodeGenerator *cg,
-                                        TR_ARMOpCodes     op,
+                                        TR::InstOpCode::Mnemonic     op,
                                         TR::Node          *node,
                                         TR::Register      *s1reg,
                                         TR::Register      *s2reg,
                                         TR::Instruction   *prev)
    {
-   TR_ARMOpCode    opCode(op);
+   TR::InstOpCode    opCode(op);
    TR_ARMOperand2 *operand = new (cg->trHeapMemory()) TR_ARMOperand2(ARMOp2Reg, s2reg);
    if (opCode.isVFPOp())
       {
@@ -253,7 +253,7 @@ TR::Instruction *generateSrc2Instruction(TR::CodeGenerator *cg,
    }
 
 TR::Instruction *generateTrg1Src1Instruction(TR::CodeGenerator *cg,
-                                            TR_ARMOpCodes     op,
+                                            TR::InstOpCode::Mnemonic     op,
                                             TR::Node          *node,
                                             TR::Register      *treg,
                                             TR_ARMOperand2   *s1op,
@@ -266,19 +266,19 @@ TR::Instruction *generateTrg1Src1Instruction(TR::CodeGenerator *cg,
    }
 
 TR::Instruction *generateTrg1Src1Instruction(TR::CodeGenerator *cg,
-                                            TR_ARMOpCodes     op,
+                                            TR::InstOpCode::Mnemonic     op,
                                             TR::Node          *node,
                                             TR::Register      *treg,
                                             TR::Register      *s1reg,
                                             TR::Instruction   *prev)
    {
-   if (op == ARMOp_fmrs || op == ARMOp_fmsr)
+   if (op == TR::InstOpCode::fmrs || op == TR::InstOpCode::fmsr)
       {
       TR_ARMOperand2 *operand = new (cg->trHeapMemory()) TR_ARMOperand2(0, 0);
       if (prev)
-         return new (cg->trHeapMemory()) TR::ARMTrg1Src2Instruction(prev, op, node, (op==ARMOp_fmrs)?treg:s1reg, (op==ARMOp_fmrs)?s1reg:treg, operand, cg);
+         return new (cg->trHeapMemory()) TR::ARMTrg1Src2Instruction(prev, op, node, (op==TR::InstOpCode::fmrs)?treg:s1reg, (op==TR::InstOpCode::fmrs)?s1reg:treg, operand, cg);
       else
-         return new (cg->trHeapMemory()) TR::ARMTrg1Src2Instruction(op, node, (op==ARMOp_fmrs)?treg:s1reg, (op==ARMOp_fmrs)?s1reg:treg, operand, cg);
+         return new (cg->trHeapMemory()) TR::ARMTrg1Src2Instruction(op, node, (op==TR::InstOpCode::fmrs)?treg:s1reg, (op==TR::InstOpCode::fmrs)?s1reg:treg, operand, cg);
       }
    else
       {
@@ -291,7 +291,7 @@ TR::Instruction *generateTrg1Src1Instruction(TR::CodeGenerator *cg,
    }
 
 TR::Instruction *generateTrg1Src1ImmInstruction(TR::CodeGenerator *cg,
-                                               TR_ARMOpCodes     op,
+                                               TR::InstOpCode::Mnemonic     op,
                                                TR::Node          *node,
                                                TR::Register      *treg,
                                                TR::Register      *s1reg,
@@ -319,7 +319,7 @@ TR::Instruction *generateLoadStartPCInstruction(TR::CodeGenerator *cg,
    }
 
 TR::Instruction *generateTrg1Src2Instruction(TR::CodeGenerator *cg,
-                                            TR_ARMOpCodes     op,
+                                            TR::InstOpCode::Mnemonic     op,
                                             TR::Node          *node,
                                             TR::Register      *treg,
                                             TR::Register      *s1reg,
@@ -333,14 +333,14 @@ TR::Instruction *generateTrg1Src2Instruction(TR::CodeGenerator *cg,
    }
 
 TR::Instruction *generateTrg1Src2Instruction(TR::CodeGenerator *cg,
-                                            TR_ARMOpCodes     op,
+                                            TR::InstOpCode::Mnemonic     op,
                                             TR::Node          *node,
                                             TR::Register      *treg,
                                             TR::Register      *s1reg,
                                             TR::Register      *s2reg,
                                             TR::Instruction   *prev)
    {
-   if (op == ARMOp_fmdrr)
+   if (op == TR::InstOpCode::fmdrr)
       {
       // fmdrr   Dm, Rd, Rn
       TR_ARMOperand2 *toperand = new (cg->trHeapMemory()) TR_ARMOperand2(ARMOp2Reg, treg);
@@ -361,7 +361,7 @@ TR::Instruction *generateTrg1Src2Instruction(TR::CodeGenerator *cg,
 
 #if (defined(__VFP_FP__) && !defined(__SOFTFP__))
 TR::Instruction *generateTrg2Src1Instruction(TR::CodeGenerator *cg,
-                                            TR_ARMOpCodes     op,
+                                            TR::InstOpCode::Mnemonic     op,
                                             TR::Node          *node,
                                             TR::Register      *t1reg,
                                             TR::Register      *t2reg,
@@ -376,7 +376,7 @@ TR::Instruction *generateTrg2Src1Instruction(TR::CodeGenerator *cg,
 #endif
 
 TR::Instruction *generateTrg1Src2MulInstruction(TR::CodeGenerator *cg,
-                                               TR_ARMOpCodes     op,
+                                               TR::InstOpCode::Mnemonic     op,
                                                TR::Node          *node,
                                                TR::Register      *treg,
                                                TR::Register      *s1reg,
@@ -390,7 +390,7 @@ TR::Instruction *generateTrg1Src2MulInstruction(TR::CodeGenerator *cg,
    }
 
 TR::Instruction *generateTrg2Src2MulInstruction(TR::CodeGenerator *cg,
-                                               TR_ARMOpCodes     op,
+                                               TR::InstOpCode::Mnemonic     op,
                                                TR::Node          *node,
                                                TR::Register       *tregHi,
                                                TR::Register      *tregLo,
@@ -413,7 +413,7 @@ TR::Instruction *generateShiftLeftImmediate(TR::CodeGenerator  *cg,
                                            TR::Instruction    *prev)
    {
    TR_ARMOperand2 *operand = new (cg->trHeapMemory()) TR_ARMOperand2(type, srcReg, shiftAmount);
-   return generateTrg1Src1Instruction(cg, ARMOp_mov, node, trgReg, operand, prev);
+   return generateTrg1Src1Instruction(cg, TR::InstOpCode::mov, node, trgReg, operand, prev);
    }
 
 TR::Instruction *generateShiftLeftByRegister(TR::CodeGenerator *cg,
@@ -424,7 +424,7 @@ TR::Instruction *generateShiftLeftByRegister(TR::CodeGenerator *cg,
                                             TR::Instruction   *prev)
    {
    TR_ARMOperand2 *operand = new (cg->trHeapMemory()) TR_ARMOperand2(ARMOp2RegLSLReg, srcReg, shiftRegister);
-   return generateTrg1Src1Instruction(cg, ARMOp_mov, node, trgReg, operand, prev);
+   return generateTrg1Src1Instruction(cg, TR::InstOpCode::mov, node, trgReg, operand, prev);
    }
 
 TR::Instruction *generateShiftRightImmediate(TR::CodeGenerator *cg,
@@ -437,7 +437,7 @@ TR::Instruction *generateShiftRightImmediate(TR::CodeGenerator *cg,
    {
    TR_ARMOperand2Type  type    = (isLogical == true ? ARMOp2RegLSRImmed : ARMOp2RegASRImmed);
    TR_ARMOperand2     *operand = new (cg->trHeapMemory()) TR_ARMOperand2(type, srcReg, shiftAmount);
-   return generateTrg1Src1Instruction(cg, ARMOp_mov, node, trgReg, operand, prev);
+   return generateTrg1Src1Instruction(cg, TR::InstOpCode::mov, node, trgReg, operand, prev);
    }
 
 TR::Instruction *generateShiftRightByRegister(TR::CodeGenerator *cg,
@@ -450,11 +450,11 @@ TR::Instruction *generateShiftRightByRegister(TR::CodeGenerator *cg,
    {
    TR_ARMOperand2Type  type    = (isLogical == true ? ARMOp2RegLSRReg : ARMOp2RegASRReg);
    TR_ARMOperand2     *operand = new (cg->trHeapMemory()) TR_ARMOperand2(type, srcReg, shiftRegister);
-   return generateTrg1Src1Instruction(cg, ARMOp_mov, node, trgReg, operand, prev);
+   return generateTrg1Src1Instruction(cg, TR::InstOpCode::mov, node, trgReg, operand, prev);
    }
 
 TR::Instruction *generateLabelInstruction(TR::CodeGenerator *cg,
-                                         TR_ARMOpCodes     op,
+                                         TR::InstOpCode::Mnemonic     op,
                                          TR::Node          *node,
                                          TR::LabelSymbol    *sym,
                                          TR::Instruction   *prev,
@@ -468,7 +468,7 @@ TR::Instruction *generateLabelInstruction(TR::CodeGenerator *cg,
    }
 
 TR::Instruction *generateLabelInstruction(TR::CodeGenerator                   *cg,
-                                         TR_ARMOpCodes                       op,
+                                         TR::InstOpCode::Mnemonic                       op,
                                          TR::Node                            *node,
                                          TR::LabelSymbol                      *sym,
                                          TR::RegisterDependencyConditions *cond,
@@ -487,9 +487,9 @@ TR::Instruction *generateConditionalBranchInstruction(TR::CodeGenerator    *cg,
                                                      TR::Instruction      *prev)
    {
    if (prev)
-      return new (cg->trHeapMemory()) TR::ARMConditionalBranchInstruction(prev, ARMOp_b, node, sym, cc, cg);
+      return new (cg->trHeapMemory()) TR::ARMConditionalBranchInstruction(prev, TR::InstOpCode::b, node, sym, cc, cg);
    else
-      return new (cg->trHeapMemory()) TR::ARMConditionalBranchInstruction(ARMOp_b, node, sym, cc, cg);
+      return new (cg->trHeapMemory()) TR::ARMConditionalBranchInstruction(TR::InstOpCode::b, node, sym, cc, cg);
    }
 
 TR::Instruction *generateConditionalBranchInstruction(TR::CodeGenerator                   *cg,
@@ -500,13 +500,13 @@ TR::Instruction *generateConditionalBranchInstruction(TR::CodeGenerator         
                                                      TR::Instruction                     *prev)
    {
    if (prev)
-      return new (cg->trHeapMemory()) TR::ARMConditionalBranchInstruction(prev, ARMOp_b, node, cond, sym, cc, cg);
+      return new (cg->trHeapMemory()) TR::ARMConditionalBranchInstruction(prev, TR::InstOpCode::b, node, cond, sym, cc, cg);
    else
-      return new (cg->trHeapMemory()) TR::ARMConditionalBranchInstruction(ARMOp_b, node, cond, sym, cc, cg);
+      return new (cg->trHeapMemory()) TR::ARMConditionalBranchInstruction(TR::InstOpCode::b, node, cond, sym, cc, cg);
    }
 
 TR::ARMControlFlowInstruction *generateControlFlowInstruction(TR::CodeGenerator                   *cg,
-                                                             TR_ARMOpCodes                       op,
+                                                             TR::InstOpCode::Mnemonic                       op,
                                                              TR::Node                            *node,
                                                              TR::RegisterDependencyConditions *cond)
    {
@@ -526,9 +526,9 @@ TR::Instruction *generatePreIncLoadInstruction(TR::CodeGenerator *cg,
    TR::MemoryReference *updateMR = new (cg->trHeapMemory()) TR::MemoryReference(baseReg, offset, cg);
    updateMR->setImmediatePreIndexed(); // write the updated EA back into baseReg
    if (prev)
-      return new (cg->trHeapMemory()) TR::ARMTrg1MemInstruction(prev, ARMOp_ldr, node, treg, updateMR, cg);
+      return new (cg->trHeapMemory()) TR::ARMTrg1MemInstruction(prev, TR::InstOpCode::ldr, node, treg, updateMR, cg);
    else
-      return new (cg->trHeapMemory()) TR::ARMTrg1MemInstruction(ARMOp_ldr, node, treg, updateMR, cg);
+      return new (cg->trHeapMemory()) TR::ARMTrg1MemInstruction(TR::InstOpCode::ldr, node, treg, updateMR, cg);
    }
 
 #ifdef J9_PROJECT_SPECIFIC

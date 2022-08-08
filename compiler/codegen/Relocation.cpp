@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -58,43 +58,53 @@ TR::RelocationDebugInfo* TR::Relocation::getDebugInfo()
    {
    return this->_genData;
    }
+
+void TR::LabelRelocation::assertLabelDefined()
+   {
+   TR_ASSERT_FATAL(
+      _label->getCodeLocation() != NULL,
+      "cannot relocate reference to undefined label: %s (%p)\n",
+      _label->getName(TR::comp()->getDebug()),
+      _label);
+   }
+
 void TR::LabelRelative8BitRelocation::apply(TR::CodeGenerator *codeGen)
    {
-   AOTcgDiag2(codeGen->comp(), "TR::LabelRelative8BitRelocation::apply cursor=" POINTER_PRINTF_FORMAT " label=" POINTER_PRINTF_FORMAT "\n", getUpdateLocation(), getLabel());
+   assertLabelDefined();
    codeGen->apply8BitLabelRelativeRelocation((int32_t *)getUpdateLocation(), getLabel());
    }
 
 void TR::LabelRelative12BitRelocation::apply(TR::CodeGenerator *codeGen)
    {
-   AOTcgDiag2(codeGen->comp(), "TR::LabelRelative12BitRelocation::apply cursor=" POINTER_PRINTF_FORMAT " label=" POINTER_PRINTF_FORMAT "\n", getUpdateLocation(), getLabel());
+   assertLabelDefined();
    codeGen->apply12BitLabelRelativeRelocation((int32_t *)getUpdateLocation(), getLabel(), isCheckDisp());
    }
 
 void TR::LabelRelative16BitRelocation::apply(TR::CodeGenerator *codeGen)
    {
-   AOTcgDiag2(codeGen->comp(), "TR::LabelRelative16BitRelocation::apply cursor=" POINTER_PRINTF_FORMAT " label=" POINTER_PRINTF_FORMAT "\n", getUpdateLocation(), getLabel());
-   if(getAddressDifferenceDivisor() == 1)
-   codeGen->apply16BitLabelRelativeRelocation((int32_t *)getUpdateLocation(), getLabel());
+   assertLabelDefined();
+   if (getAddressDifferenceDivisor() == 1)
+      codeGen->apply16BitLabelRelativeRelocation((int32_t *)getUpdateLocation(), getLabel());
    else
-     codeGen->apply16BitLabelRelativeRelocation((int32_t *)getUpdateLocation(), getLabel(), getAddressDifferenceDivisor(), isInstructionOffset());
+      codeGen->apply16BitLabelRelativeRelocation((int32_t *)getUpdateLocation(), getLabel(), getAddressDifferenceDivisor(), isInstructionOffset());
    }
 
 void TR::LabelRelative24BitRelocation::apply(TR::CodeGenerator *codeGen)
    {
-   AOTcgDiag2(codeGen->comp(), "TR::LabelRelative24BitRelocation::apply cursor=" POINTER_PRINTF_FORMAT " label=" POINTER_PRINTF_FORMAT "\n", getUpdateLocation(), getLabel());
+   assertLabelDefined();
    codeGen->apply24BitLabelRelativeRelocation((int32_t *)getUpdateLocation(), getLabel());
    }
 
 void TR::LabelRelative32BitRelocation::apply(TR::CodeGenerator *codeGen)
    {
-   AOTcgDiag2(codeGen->comp(), "TR::LabelRelative32BitRelocation::apply cursor=" POINTER_PRINTF_FORMAT " label=" POINTER_PRINTF_FORMAT "\n", getUpdateLocation(), getLabel());
+   assertLabelDefined();
    codeGen->apply32BitLabelRelativeRelocation((int32_t *)getUpdateLocation(), getLabel());
    }
 
 void TR::LabelAbsoluteRelocation::apply(TR::CodeGenerator *codeGen)
    {
    intptr_t *cursor = (intptr_t *)getUpdateLocation();
-   AOTcgDiag2(codeGen->comp(), "TR::LabelAbsoluteRelocation::apply cursor=" POINTER_PRINTF_FORMAT " label=" POINTER_PRINTF_FORMAT "\n", cursor, getLabel());
+   assertLabelDefined();
    *cursor = (intptr_t)getLabel()->getCodeLocation();
    }
 
@@ -124,7 +134,7 @@ void
 TR::InstructionLabelRelative16BitRelocation::apply(TR::CodeGenerator* cg)
    {
    uint8_t* p = getUpdateLocation();
-
+   assertLabelDefined();
    *reinterpret_cast<int16_t*>(p) = static_cast<int16_t>(getLabel()->getCodeLocation() - p) / _divisor;
    }
 
@@ -154,7 +164,7 @@ void
 TR::InstructionLabelRelative32BitRelocation::apply(TR::CodeGenerator* cg)
    {
    uint8_t* p = getUpdateLocation();
-
+   assertLabelDefined();
    *reinterpret_cast<int32_t*>(p) = static_cast<int32_t>(getLabel()->getCodeLocation() - p) / _divisor;
    }
 
@@ -164,9 +174,8 @@ uint8_t TR::ExternalRelocation::collectModifier()
    uint8_t * relocatableMethodCodeStart = (uint8_t *)comp->getRelocatableMethodCodeStart();
    uint8_t * updateLocation = getUpdateLocation();
 
-   int32_t distanceFromStartOfBuffer = updateLocation - relocatableMethodCodeStart;
-   int32_t distanceFromStartOfMethod = updateLocation - comp->cg()->getCodeStart();
-   AOTcgDiag2(comp, "TR::ExternalRelocation::collectModifier distance from start of buffer=%x, from start of method=%x\n", distanceFromStartOfBuffer, distanceFromStartOfMethod);
+   int32_t distanceFromStartOfBuffer = static_cast<int32_t>(updateLocation - relocatableMethodCodeStart);
+   int32_t distanceFromStartOfMethod = static_cast<int32_t>(updateLocation - comp->cg()->getCodeStart());
 
    if (distanceFromStartOfBuffer < MIN_SHORT_OFFSET || distanceFromStartOfBuffer > MAX_SHORT_OFFSET)
       return RELOCATION_TYPE_WIDE_OFFSET;
@@ -178,30 +187,16 @@ void TR::ExternalRelocation::addExternalRelocation(TR::CodeGenerator *codeGen)
    {
    TR::AheadOfTimeCompile::interceptAOTRelocation(this);
 
-   TR::Compilation *comp = codeGen->comp();
-   AOTcgDiag0(comp, "TR::ExternalRelocation::addExternalRelocation\n");
-
    TR_LinkHead<TR::IteratedExternalRelocation>& aot = codeGen->getAheadOfTimeCompile()->getAOTRelocationTargets();
    uint32_t narrowSize = getNarrowSize();
    uint32_t wideSize = getWideSize();
    flags8_t modifier(collectModifier());
    TR::IteratedExternalRelocation *r;
 
-   AOTcgDiag1(comp, "target=" POINTER_PRINTF_FORMAT "\n", _targetAddress);
-   if (_targetAddress2)
-      AOTcgDiag1(comp, "target2=" POINTER_PRINTF_FORMAT "\n", _targetAddress2);
    for (r = aot.getFirst();
         r != 0;
         r = r->getNext())
       {
-      if (r->getTargetAddress2())
-         AOTcgDiag6(comp, "r=" POINTER_PRINTF_FORMAT " full=%x target=" POINTER_PRINTF_FORMAT " target2=" POINTER_PRINTF_FORMAT ", kind=%x modifier=%x\n",
-            r, r->full(), r->getTargetAddress(), r->getTargetAddress2(), r->getTargetKind(), r->getModifierValue());
-      else
-         AOTcgDiag5(comp, "r=" POINTER_PRINTF_FORMAT " full=%x target=" POINTER_PRINTF_FORMAT " kind=%x modifier=%x\n",
-            r, r->full(), r->getTargetAddress(), r->getTargetKind(), r->getModifierValue());
-      AOTcgDiag2(comp, "#sites=%x size=%x\n", r->getNumberOfRelocationSites(), r->getSizeOfRelocationData());
-
       if (r->full() == false                        &&
           r->getTargetAddress()  == _targetAddress  &&
           r->getTargetAddress2() == _targetAddress2 &&
@@ -230,46 +225,26 @@ void TR::ExternalRelocation::addExternalRelocation(TR::CodeGenerator *codeGen)
          r->setSizeOfRelocationData(r->getSizeOfRelocationData() +
                             (r->needsWideOffsets()?wideSize:narrowSize));
          _relocationRecord = r;
-         if (r->getTargetAddress2())
-            AOTcgDiag6(comp, "r=" POINTER_PRINTF_FORMAT " full=%x target=" POINTER_PRINTF_FORMAT " target2=" POINTER_PRINTF_FORMAT " kind=%x modifier=%x\n",
-               r, r->full(), r->getTargetAddress(), r->getTargetAddress2(), r->getTargetKind(), r->getModifierValue());
-         else
-            AOTcgDiag5(comp, "r=" POINTER_PRINTF_FORMAT " full=%x target=" POINTER_PRINTF_FORMAT " kind=%x modifier=%x\n",
-               r, r->full(), r->getTargetAddress(), r->getTargetKind(), r->getModifierValue());
-         AOTcgDiag2(comp, "#sites=%x size=%x\n", r->getNumberOfRelocationSites(), r->getSizeOfRelocationData());
+
          return;
          }
       }
+
    TR::IteratedExternalRelocation *temp =   _targetAddress2 ?
       new (codeGen->trHeapMemory()) TR::IteratedExternalRelocation(_targetAddress, _targetAddress2, _kind, modifier, codeGen) :
       new (codeGen->trHeapMemory()) TR::IteratedExternalRelocation(_targetAddress, _kind, modifier, codeGen);
 
    aot.add(temp);
-   if (_targetAddress2)
-      AOTcgDiag6(comp, "temp=" POINTER_PRINTF_FORMAT " full=%x target=" POINTER_PRINTF_FORMAT " target2=" POINTER_PRINTF_FORMAT " kind=%x modifier=%x\n",
-         temp, temp->full(), temp->getTargetAddress(), temp->getTargetAddress2(), temp->getTargetKind(), temp->getModifierValue());
-   else
-      AOTcgDiag5(comp, "temp=" POINTER_PRINTF_FORMAT " full=%x target=" POINTER_PRINTF_FORMAT " kind=%x modifier=%x\n",
-         temp, temp->full(), temp->getTargetAddress(), temp->getTargetKind(), temp->getModifierValue());
-   AOTcgDiag2(comp, "#sites=%x size=%x\n", temp->getNumberOfRelocationSites(), temp->getSizeOfRelocationData());
+
    temp->setNumberOfRelocationSites(temp->getNumberOfRelocationSites()+1);
    temp->setSizeOfRelocationData(temp->getSizeOfRelocationData() +
                           (temp->needsWideOffsets()?wideSize:narrowSize));
    _relocationRecord = temp;
-   if (_targetAddress2)
-      AOTcgDiag6(comp, "temp=" POINTER_PRINTF_FORMAT " full=%x target=" POINTER_PRINTF_FORMAT " target2=" POINTER_PRINTF_FORMAT " kind=%x modifier=%x\n",
-         temp, temp->full(), temp->getTargetAddress(), temp->getTargetAddress2(), temp->getTargetKind(), temp->getModifierValue());
-   else
-      AOTcgDiag5(comp, "temp=" POINTER_PRINTF_FORMAT " full=%x target=" POINTER_PRINTF_FORMAT " kind=%x modifier=%x\n",
-         temp, temp->full(), temp->getTargetAddress(), temp->getTargetKind(), temp->getModifierValue());
-   AOTcgDiag2(comp, "#sites=%x size=%x\n", temp->getNumberOfRelocationSites(), temp->getSizeOfRelocationData());
-
    }
 
 void TR::ExternalRelocation::apply(TR::CodeGenerator *codeGen)
    {
    TR::Compilation *comp = codeGen->comp();
-   AOTcgDiag1(comp, "TR::ExternalRelocation::apply updateLocation=" POINTER_PRINTF_FORMAT " \n", getUpdateLocation());
    uint8_t * relocatableMethodCodeStart = (uint8_t *)comp->getRelocatableMethodCodeStart();
    getRelocationRecord()->addRelocationEntry((uint32_t)(getUpdateLocation() - relocatableMethodCodeStart));
    }
@@ -314,7 +289,6 @@ TR::ExternalOrderedPair32BitRelocation::ExternalOrderedPair32BitRelocation(
                  TR::CodeGenerator                *codeGen) :
    TR::ExternalRelocation(), _update2Location(location2)
    {
-   AOTcgDiag0(codeGen->comp(), "TR::ExternalOrderedPair32BitRelocation::ExternalOrderedPair32BitRelocation\n");
    setUpdateLocation(location1);
    setTargetAddress(target);
    setTargetKind(k);
@@ -330,7 +304,8 @@ uint8_t TR::ExternalOrderedPair32BitRelocation::collectModifier()
    TR_ExternalRelocationTargetKind kind = getTargetKind();
 
    if (comp->target().cpu.isPower() &&
-          (kind == TR_ArrayCopyHelper || kind == TR_ArrayCopyToc || kind == TR_RamMethod || kind == TR_GlobalValue || kind == TR_BodyInfoAddressLoad || kind == TR_DataAddress || kind == TR_DebugCounter))
+          (kind == TR_ArrayCopyHelper || kind == TR_ArrayCopyToc || kind == TR_RamMethod || kind == TR_GlobalValue || kind == TR_BodyInfoAddressLoad || kind == TR_DataAddress
+           || kind == TR_DebugCounter || kind == TR_BlockFrequency || kind == TR_RecompQueuedFlag))
       {
       TR::Instruction *instr = (TR::Instruction *)getUpdateLocation();
       TR::Instruction *instr2 = (TR::Instruction *)getLocation2();
@@ -343,9 +318,9 @@ uint8_t TR::ExternalOrderedPair32BitRelocation::collectModifier()
       updateLocation2 = getLocation2();
       }
 
-   int32_t iLoc = updateLocation - relocatableMethodCodeStart;
-   int32_t iLoc2 = updateLocation2 - relocatableMethodCodeStart;
-   AOTcgDiag0(comp, "TR::ExternalOrderedPair32BitRelocation::collectModifier\n");
+   int32_t iLoc = static_cast<int32_t>(updateLocation - relocatableMethodCodeStart);
+   int32_t iLoc2 = static_cast<int32_t>(updateLocation2 - relocatableMethodCodeStart);
+
    if ( (iLoc < MIN_SHORT_OFFSET  || iLoc > MAX_SHORT_OFFSET ) || (iLoc2 < MIN_SHORT_OFFSET || iLoc2 > MAX_SHORT_OFFSET ) )
       return RELOCATION_TYPE_WIDE_OFFSET | RELOCATION_TYPE_ORDERED_PAIR;
 
@@ -356,13 +331,13 @@ uint8_t TR::ExternalOrderedPair32BitRelocation::collectModifier()
 void TR::ExternalOrderedPair32BitRelocation::apply(TR::CodeGenerator *codeGen)
    {
    TR::Compilation *comp = codeGen->comp();
-   AOTcgDiag0(comp, "TR::ExternalOrderedPair32BitRelocation::apply\n");
 
    TR::IteratedExternalRelocation *rec = getRelocationRecord();
    uint8_t *codeStart = (uint8_t *)comp->getRelocatableMethodCodeStart();
    TR_ExternalRelocationTargetKind kind = getRelocationRecord()->getTargetKind();
    if (comp->target().cpu.isPower() &&
-      (kind == TR_ArrayCopyHelper || kind == TR_ArrayCopyToc || kind == TR_RamMethodSequence || kind == TR_GlobalValue || kind == TR_BodyInfoAddressLoad || kind == TR_DataAddress || kind == TR_DebugCounter))
+      (kind == TR_ArrayCopyHelper || kind == TR_ArrayCopyToc || kind == TR_RamMethodSequence || kind == TR_GlobalValue || kind == TR_BodyInfoAddressLoad || kind == TR_DataAddress
+       || kind == TR_DebugCounter || kind == TR_BlockFrequency || kind == TR_RecompQueuedFlag))
       {
       TR::Instruction *instr = (TR::Instruction *)getUpdateLocation();
       TR::Instruction *instr2 = (TR::Instruction *)getLocation2();
@@ -371,8 +346,8 @@ void TR::ExternalOrderedPair32BitRelocation::apply(TR::CodeGenerator *codeGen)
       }
    else
       {
-      rec->addRelocationEntry(getUpdateLocation() - codeStart);
-      rec->addRelocationEntry(getLocation2() - codeStart);
+      rec->addRelocationEntry(static_cast<uint32_t>(getUpdateLocation() - codeStart));
+      rec->addRelocationEntry(static_cast<uint32_t>(getLocation2() - codeStart));
       }
    }
 
@@ -487,6 +462,9 @@ const char *TR::ExternalRelocation::_externalRelocationTargetKindNames[TR_NumExt
    "TR_InlinedSpecialMethod (105)",
    "TR_InlinedAbstractMethod (106)",
    "TR_Breakpoint (107)",
+   "TR_InlinedMethodPointer (108)",
+   "TR_VMINLMethod (109)",
+   "TR_ValidateJ2IThunkFromMethod (110)",
    };
 
 uintptr_t TR::ExternalRelocation::_globalValueList[TR_NumGlobalValueItems] =
@@ -525,7 +503,6 @@ TR::IteratedExternalRelocation::IteratedExternalRelocation(uint8_t *target, TR_E
         _full(false),
         _kind(k)
       {
-      AOTcgDiag0(TR::comp(), "TR::IteratedExternalRelocation::IteratedExternalRelocation\n");
       }
 
 TR::IteratedExternalRelocation::IteratedExternalRelocation(uint8_t *target, uint8_t *target2, TR_ExternalRelocationTargetKind k, flags8_t modifier, TR::CodeGenerator *codeGen)
@@ -541,19 +518,16 @@ TR::IteratedExternalRelocation::IteratedExternalRelocation(uint8_t *target, uint
         _full(false),
         _kind(k)
       {
-      AOTcgDiag0(TR::comp(), "TR::IteratedExternalRelocation::IteratedExternalRelocation\n");
       }
 
 void TR::IteratedExternalRelocation::initializeRelocation(TR::CodeGenerator *codeGen)
    {
-   AOTcgDiag0(TR::comp(), "TR::IteratedExternalRelocation::initializeRelocation\n");
    _relocationDataCursor = codeGen->getAheadOfTimeCompile()->initializeAOTRelocationHeader(this);
    }
 
 void TR::IteratedExternalRelocation::addRelocationEntry(uint32_t locationOffset)
    {
    TR::Compilation *comp = TR::comp();
-   AOTcgDiag2(comp, "TR::IteratedExternalRelocation::addRelocationEntry _relocationDataCursor=" POINTER_PRINTF_FORMAT ", locationOffset=%x\n", _relocationDataCursor, locationOffset);
    if (!needsWideOffsets())
       {
       *(uint16_t *)_relocationDataCursor = (uint16_t)locationOffset;

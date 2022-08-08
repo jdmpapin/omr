@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -26,7 +26,7 @@ omr_add_executable(omrsigtest
 )
 
 #TODO: hack for windows. These libraries should be linked on dependants
-if(OMR_HOST_OS STREQUAL "win")
+if(OMR_OS_WINDOWS)
 	target_link_libraries(omrsigtest
 		ws2_32
 		shell32
@@ -34,10 +34,6 @@ if(OMR_HOST_OS STREQUAL "win")
 		psapi
 		pdh
 	)
-endif()
-
-if(OMR_HOST_OS STREQUAL "zos")
-	target_link_libraries(omrsigtest j9a2e)
 endif()
 
 target_include_directories(omrsigtest
@@ -87,4 +83,4 @@ endif()
 
 set_property(TARGET omrsigtest PROPERTY FOLDER fvtest)
 
-add_test(NAME sigtest COMMAND omrsigtest --gtest_output=xml:${CMAKE_CURRENT_BINARY_DIR}/omrsigtest-results.xml)
+omr_add_test(NAME sigtest COMMAND $<TARGET_FILE:omrsigtest> --gtest_output=xml:${CMAKE_CURRENT_BINARY_DIR}/omrsigtest-results.xml)

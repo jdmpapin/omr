@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -125,6 +125,7 @@ TR::RealRegister *OMR::ARM64::Machine::findBestFreeRegister(TR::Instruction *cur
          last  = TR::RealRegister::LastAssignableGPR;
          break;
       case TR_FPR:
+      case TR_VRF:
          first = maskI = TR::RealRegister::FirstFPR;
          last  = TR::RealRegister::LastFPR;
          break;
@@ -208,17 +209,11 @@ TR::RealRegister *OMR::ARM64::Machine::freeBestRegister(TR::Instruction *current
    {
    TR::Register *candidates[NUM_ARM64_MAXR];
    TR::CodeGenerator *cg = self()->cg();
-   TR::Compilation *comp = cg->comp();
-   TR::Machine *machine = cg->machine();
-   TR::MemoryReference *tmemref;
-   TR_BackingStore *location;
    TR::RealRegister *best;
    TR::Instruction *cursor;
    TR::Node *currentNode = currentInstruction->getNode();
    TR_RegisterKinds rk = (virtualRegister == NULL) ? TR_GPR : virtualRegister->getKind();
    int numCandidates = 0;
-   int32_t dataSize = 0;
-   TR::InstOpCode::Mnemonic loadOp;
 
    cg->traceRegisterAssignment("FREE BEST REGISTER FOR %R", virtualRegister);
 
@@ -242,6 +237,7 @@ TR::RealRegister *OMR::ARM64::Machine::freeBestRegister(TR::Instruction *current
             last = TR::RealRegister::LastGPR;
             break;
          case TR_FPR:
+         case TR_VRF:
             first = maskI = TR::RealRegister::FirstFPR;
             last = TR::RealRegister::LastFPR;
             break;
@@ -265,7 +261,7 @@ TR::RealRegister *OMR::ARM64::Machine::freeBestRegister(TR::Instruction *current
       for (int i = first; i <= last; i++)
          {
          uint32_t iInterfere = interference & (1 << (i - maskI));
-         TR::RealRegister *realReg = machine->getRealRegister(static_cast<TR::RealRegister::RegNum>(i));
+         TR::RealRegister *realReg = self()->getRealRegister(static_cast<TR::RealRegister::RegNum>(i));
          TR::Register *tempReg;
 
          if (realReg->getState() == TR::RealRegister::Assigned)
@@ -312,18 +308,27 @@ TR::RealRegister *OMR::ARM64::Machine::freeBestRegister(TR::Instruction *current
       best = toRealRegister(candidates[0]->getAssignedRegister());
       }
 
-   TR::Register *registerToSpill = candidates[0];
+   self()->spillRegister(currentInstruction, candidates[0]);
+   return best;
+   }
+
+void OMR::ARM64::Machine::spillRegister(TR::Instruction *currentInstruction, TR::Register *virtReg)
+   {
+   TR::Register *registerToSpill = virtReg;
+   TR::CodeGenerator *cg = self()->cg();
+   TR::Compilation *comp = cg->comp();
    TR_Debug *debugObj = cg->getDebug();
+   TR_RegisterKinds rk = virtReg->getKind();
+   TR::Node *currentNode = currentInstruction->getNode();
+
    const bool containsInternalPointer = registerToSpill->containsInternalPointer();
    const bool containsCollectedReference = registerToSpill->containsCollectedReference();
 
-   location = registerToSpill->getBackingStorage();
+   TR_BackingStore *location = registerToSpill->getBackingStorage();
    switch (rk)
       {
       case TR_GPR:
-         if (!comp->getOption(TR_DisableOOL) &&
-            (cg->isOutOfLineColdPath() || cg->isOutOfLineHotPath()) &&
-            registerToSpill->getBackingStorage())
+         if ((cg->isOutOfLineColdPath() || cg->isOutOfLineHotPath()) && registerToSpill->getBackingStorage())
             {
             // reuse the spill slot
             if (debugObj)
@@ -345,9 +350,8 @@ TR::RealRegister *OMR::ARM64::Machine::freeBestRegister(TR::Instruction *current
             }
          break;
       case TR_FPR:
-         if (!comp->getOption(TR_DisableOOL) &&
-            (cg->isOutOfLineColdPath() || cg->isOutOfLineHotPath()) &&
-            registerToSpill->getBackingStorage())
+      case TR_VRF:
+         if ((cg->isOutOfLineColdPath() || cg->isOutOfLineHotPath()) && registerToSpill->getBackingStorage())
             {
             // reuse the spill slot
             if (debugObj)
@@ -356,7 +360,7 @@ TR::RealRegister *OMR::ARM64::Machine::freeBestRegister(TR::Instruction *current
             }
          else
             {
-            location = cg->allocateSpill(8, false, NULL);
+            location = cg->allocateSpill((rk == TR_FPR) ? 8 : 16, false, NULL);
             if (debugObj)
                cg->traceRegisterAssignment("\nSpilling FPR %R to (%p)\n", registerToSpill, location);
             }
@@ -368,47 +372,44 @@ TR::RealRegister *OMR::ARM64::Machine::freeBestRegister(TR::Instruction *current
 
    registerToSpill->setBackingStorage(location);
 
-   tmemref = new (cg->trHeapMemory()) TR::MemoryReference(currentNode, location->getSymbolReference(), cg);
+   TR::MemoryReference *tmemref = TR::MemoryReference::createWithSymRef(cg, currentNode, location->getSymbolReference());
 
-   if (!comp->getOption(TR_DisableOOL))
+   if (!cg->isOutOfLineColdPath())
       {
-      if (!cg->isOutOfLineColdPath())
-         {
-         // the spilledRegisterList contains all registers that are spilled before entering
-         // the OOL cold path, post dependencies will be generated using this list
-         cg->getSpilledRegisterList()->push_front(registerToSpill);
+      // the spilledRegisterList contains all registers that are spilled before entering
+      // the OOL cold path, post dependencies will be generated using this list
+      cg->getSpilledRegisterList()->push_front(registerToSpill);
 
-         // OOL cold path: depth = 3, hot path: depth = 2,  main line: depth = 1
-         // if the spill is outside of the OOL cold/hot path, we need to protect the spill slot
-         // if we reverse spill this register inside the OOL cold/hot path
-         if (!cg->isOutOfLineHotPath())
-            {// main line
-            location->setMaxSpillDepth(1);
-            }
-         else
-            {
-            // hot path
-            // do not overwrite main line spill depth
-            if (location->getMaxSpillDepth() != 1)
-               {
-               location->setMaxSpillDepth(2);
-               }
-            }
-         if (debugObj)
-            cg->traceRegisterAssignment("OOL: adding %R to the spilledRegisterList, maxSpillDepth = %d ",
-                                          registerToSpill, location->getMaxSpillDepth());
+      // OOL cold path: depth = 3, hot path: depth = 2,  main line: depth = 1
+      // if the spill is outside of the OOL cold/hot path, we need to protect the spill slot
+      // if we reverse spill this register inside the OOL cold/hot path
+      if (!cg->isOutOfLineHotPath())
+         {// main line
+         location->setMaxSpillDepth(1);
          }
       else
          {
-         // do not overwrite mainline and hot path spill depth
-         // if this spill is inside OOL cold path, we do not need to protecting the spill slot
-         // because the post condition at OOL entry does not expect this register to be spilled
-         if (location->getMaxSpillDepth() != 1 &&
-             location->getMaxSpillDepth() != 2 )
+         // hot path
+         // do not overwrite main line spill depth
+         if (location->getMaxSpillDepth() != 1)
             {
-            location->setMaxSpillDepth(3);
-            cg->traceRegisterAssignment("OOL: In OOL cold path, spilling %R not adding to spilledRegisterList", registerToSpill);
+            location->setMaxSpillDepth(2);
             }
+         }
+      if (debugObj)
+         cg->traceRegisterAssignment("OOL: adding %R to the spilledRegisterList, maxSpillDepth = %d ",
+                                       registerToSpill, location->getMaxSpillDepth());
+      }
+   else
+      {
+      // do not overwrite mainline and hot path spill depth
+      // if this spill is inside OOL cold path, we do not need to protecting the spill slot
+      // because the post condition at OOL entry does not expect this register to be spilled
+      if (location->getMaxSpillDepth() != 1 &&
+            location->getMaxSpillDepth() != 2 )
+         {
+         location->setMaxSpillDepth(3);
+         cg->traceRegisterAssignment("OOL: In OOL cold path, spilling %R not adding to spilledRegisterList", registerToSpill);
          }
       }
 
@@ -418,7 +419,7 @@ TR::RealRegister *OMR::ARM64::Machine::freeBestRegister(TR::Instruction *current
                   best->getAssignedRegister()->getRegisterName(comp),
                   best->getRegisterName(comp));
       }
-
+   TR::InstOpCode::Mnemonic loadOp;
    switch (rk)
       {
       case TR_GPR:
@@ -427,18 +428,22 @@ TR::RealRegister *OMR::ARM64::Machine::freeBestRegister(TR::Instruction *current
       case TR_FPR:
          loadOp = TR::InstOpCode::vldrimmd;
          break;
+      case TR_VRF:
+         loadOp = TR::InstOpCode::vldrimmq;
+         break;
       default:
          TR_ASSERT(false, "Unsupported RegisterKind.");
          break;
       }
-   generateTrg1MemInstruction(cg, loadOp, currentNode, best, tmemref, currentInstruction);
 
-   cg->traceRegFreed(registerToSpill, best);
+   TR::RealRegister *realReg = toRealRegister(virtReg->getAssignedRegister());
+   generateTrg1MemInstruction(cg, loadOp, currentNode, realReg, tmemref, currentInstruction);
 
-   best->setAssignedRegister(NULL);
-   best->setState(TR::RealRegister::Free);
+   cg->traceRegFreed(registerToSpill, realReg);
+
+   realReg->setAssignedRegister(NULL);
+   realReg->setState(TR::RealRegister::Free);
    registerToSpill->setAssignedRegister(NULL);
-   return best;
    }
 
 TR::RealRegister *OMR::ARM64::Machine::reverseSpillState(TR::Instruction *currentInstruction,
@@ -485,118 +490,53 @@ TR::RealRegister *OMR::ARM64::Machine::reverseSpillState(TR::Instruction *curren
                   targetRegister->getRegisterName(comp));
       }
 
-   tmemref = new (self()->cg()->trHeapMemory()) TR::MemoryReference(currentNode, location->getSymbolReference(), self()->cg());
+   tmemref = TR::MemoryReference::createWithSymRef(self()->cg(), currentNode, location->getSymbolReference());
 
-   if (comp->getOption(TR_DisableOOL))
+   switch (rk)
       {
-      switch (rk)
-         {
-         case TR_GPR:
-            dataSize = TR::Compiler->om.sizeofReferenceAddress();
-            storeOp = TR::InstOpCode::strimmx;
-            break;
-         case TR_FPR:
-            dataSize = 8;
-            storeOp = TR::InstOpCode::vstrimmd;
-            break;
-         default:
-            TR_ASSERT(false, "Unsupported RegisterKind.");
-            break;
-         }
-         self()->cg()->freeSpill(location, dataSize, 0);
-         generateMemSrc1Instruction(self()->cg(), storeOp, currentNode, tmemref, targetRegister, currentInstruction);
+      case TR_GPR:
+         dataSize = TR::Compiler->om.sizeofReferenceAddress();
+         break;
+      case TR_FPR:
+         dataSize = 8;
+         break;
+      case TR_VRF:
+         dataSize = 16;
+         break;
+      default:
+         TR_ASSERT(false, "Unsupported RegisterKind.");
+         break;
       }
-   else
+   if (self()->cg()->isOutOfLineColdPath())
       {
-      switch (rk)
+      bool isOOLentryReverseSpill = false;
+      if (currentInstruction->isLabel())
          {
-         case TR_GPR:
-            dataSize = TR::Compiler->om.sizeofReferenceAddress();
-            break;
-         case TR_FPR:
-            dataSize = 8;
-            break;
-         default:
-            TR_ASSERT(false, "Unsupported RegisterKind.");
-            break;
-         }
-      if (self()->cg()->isOutOfLineColdPath())
-         {
-         bool isOOLentryReverseSpill = false;
-         if (currentInstruction->isLabel())
+         if (((TR::ARM64LabelInstruction*)currentInstruction)->getLabelSymbol()->isStartOfColdInstructionStream())
             {
-            if (((TR::ARM64LabelInstruction*)currentInstruction)->getLabelSymbol()->isStartOfColdInstructionStream())
-               {
-               // indicates that we are at OOL entry point post conditions. Since
-               // we are now exiting the OOL cold path (going reverse order)
-               // and we called reverseSpillState(), the main line path
-               // expects the Virt reg to be assigned to a real register
-               // we can now safely unlock the protected backing storage
-               // This prevents locking backing storage for future OOL blocks
-               isOOLentryReverseSpill = true;
-               }
-            }
-         // OOL: only free the spill slot if the register was spilled in the same or less dominant path
-         // ex: spilled in cold path, reverse spill in hot path or main line
-         // we have to spill this register again when we reach OOL entry point due to post
-         // conditions. We want to guarantee that the same spill slot will be protected and reused.
-         // maxSpillDepth: 3:cold path, 2:hot path, 1:main line
-         // Also free the spill if maxSpillDepth==0, which will be the case if the reverse spill also occured on the hot path.
-         // If the reverse spill occured on both paths then this is the last chance we have to free the spill slot.
-         if (location->getMaxSpillDepth() == 3 || location->getMaxSpillDepth() == 0 || isOOLentryReverseSpill)
-            {
-            if (location->getMaxSpillDepth() != 0)
-               location->setMaxSpillDepth(0);
-            else if (debugObj)
-               self()->cg()->traceRegisterAssignment("\nOOL: reverse spill %s in less dominant path (%d / 3), reverse spill on both paths indicated, free spill slot (%p)\n",
-                                             debugObj->getName(spilledRegister), location->getMaxSpillDepth(), location);
-            self()->cg()->freeSpill(location, dataSize, 0);
-
-            if (!self()->cg()->isFreeSpillListLocked())
-               {
-               spilledRegister->setBackingStorage(NULL);
-               }
-            }
-         else
-            {
-            if (debugObj)
-               self()->cg()->traceRegisterAssignment("\nOOL: reverse spill %s in less dominant path (%d / 3), protect spill slot (%p)\n",
-                                             debugObj->getName(spilledRegister), location->getMaxSpillDepth(), location);
+            // indicates that we are at OOL entry point post conditions. Since
+            // we are now exiting the OOL cold path (going reverse order)
+            // and we called reverseSpillState(), the main line path
+            // expects the Virt reg to be assigned to a real register
+            // we can now safely unlock the protected backing storage
+            // This prevents locking backing storage for future OOL blocks
+            isOOLentryReverseSpill = true;
             }
          }
-      else if (self()->cg()->isOutOfLineHotPath())
+      // OOL: only free the spill slot if the register was spilled in the same or less dominant path
+      // ex: spilled in cold path, reverse spill in hot path or main line
+      // we have to spill this register again when we reach OOL entry point due to post
+      // conditions. We want to guarantee that the same spill slot will be protected and reused.
+      // maxSpillDepth: 3:cold path, 2:hot path, 1:main line
+      // Also free the spill if maxSpillDepth==0, which will be the case if the reverse spill also occured on the hot path.
+      // If the reverse spill occured on both paths then this is the last chance we have to free the spill slot.
+      if (location->getMaxSpillDepth() == 3 || location->getMaxSpillDepth() == 0 || isOOLentryReverseSpill)
          {
-         // the spilledRegisterList contains all registers that are spilled before entering
-         // the OOL path (in backwards RA). Post dependencies will be generated using this list.
-         // Any registers reverse spilled before entering OOL should be removed from the spilled list
-         if (debugObj)
-            self()->cg()->traceRegisterAssignment("\nOOL: removing %s from the spilledRegisterList\n", debugObj->getName(spilledRegister));
-         self()->cg()->getSpilledRegisterList()->remove(spilledRegister);
-
-         // Reset maxSpillDepth here so that in the cold path we know to free the spill
-         // and so that the spill is not included in future GC points in the hot path while it is protected
-         location->setMaxSpillDepth(0);
-         if (location->getMaxSpillDepth() == 2)
-            {
-            self()->cg()->freeSpill(location, dataSize, 0);
-            if (!self()->cg()->isFreeSpillListLocked())
-               {
-               spilledRegister->setBackingStorage(NULL);
-               }
-            }
-         else
-            {
-            if (debugObj)
-               self()->cg()->traceRegisterAssignment("\nOOL: reverse spilling %s in less dominant path (%d / 2), protect spill slot (%p)\n",
-                                             debugObj->getName(spilledRegister), location->getMaxSpillDepth(), location);
-            }
-         }
-      else // main line
-         {
-         if (debugObj)
-            self()->cg()->traceRegisterAssignment("\nOOL: removing %s from the spilledRegisterList)\n", debugObj->getName(spilledRegister));
-         self()->cg()->getSpilledRegisterList()->remove(spilledRegister);
-         location->setMaxSpillDepth(0);
+         if (location->getMaxSpillDepth() != 0)
+            location->setMaxSpillDepth(0);
+         else if (debugObj)
+            self()->cg()->traceRegisterAssignment("\nOOL: reverse spill %s in less dominant path (%d / 3), reverse spill on both paths indicated, free spill slot (%p)\n",
+                                          debugObj->getName(spilledRegister), location->getMaxSpillDepth(), location);
          self()->cg()->freeSpill(location, dataSize, 0);
 
          if (!self()->cg()->isFreeSpillListLocked())
@@ -604,20 +544,70 @@ TR::RealRegister *OMR::ARM64::Machine::reverseSpillState(TR::Instruction *curren
             spilledRegister->setBackingStorage(NULL);
             }
          }
-      switch (rk)
+      else
          {
-         case TR_GPR:
-            storeOp = TR::InstOpCode::strimmx;
-            break;
-         case TR_FPR:
-            storeOp = TR::InstOpCode::vstrimmd;
-            break;
-         default:
-            TR_ASSERT(false, "Unsupported RegisterKind.");
-            break;
+         if (debugObj)
+            self()->cg()->traceRegisterAssignment("\nOOL: reverse spill %s in less dominant path (%d / 3), protect spill slot (%p)\n",
+                                          debugObj->getName(spilledRegister), location->getMaxSpillDepth(), location);
          }
-         generateMemSrc1Instruction(self()->cg(), storeOp, currentNode, tmemref, targetRegister, currentInstruction);
       }
+   else if (self()->cg()->isOutOfLineHotPath())
+      {
+      // the spilledRegisterList contains all registers that are spilled before entering
+      // the OOL path (in backwards RA). Post dependencies will be generated using this list.
+      // Any registers reverse spilled before entering OOL should be removed from the spilled list
+      if (debugObj)
+         self()->cg()->traceRegisterAssignment("\nOOL: removing %s from the spilledRegisterList\n", debugObj->getName(spilledRegister));
+      self()->cg()->getSpilledRegisterList()->remove(spilledRegister);
+
+      // Reset maxSpillDepth here so that in the cold path we know to free the spill
+      // and so that the spill is not included in future GC points in the hot path while it is protected
+      location->setMaxSpillDepth(0);
+      if (location->getMaxSpillDepth() == 2)
+         {
+         self()->cg()->freeSpill(location, dataSize, 0);
+         if (!self()->cg()->isFreeSpillListLocked())
+            {
+            spilledRegister->setBackingStorage(NULL);
+            }
+         }
+      else
+         {
+         if (debugObj)
+            self()->cg()->traceRegisterAssignment("\nOOL: reverse spilling %s in less dominant path (%d / 2), protect spill slot (%p)\n",
+                                          debugObj->getName(spilledRegister), location->getMaxSpillDepth(), location);
+         }
+      }
+   else // main line
+      {
+      if (debugObj)
+         self()->cg()->traceRegisterAssignment("\nOOL: removing %s from the spilledRegisterList)\n", debugObj->getName(spilledRegister));
+      self()->cg()->getSpilledRegisterList()->remove(spilledRegister);
+      location->setMaxSpillDepth(0);
+      self()->cg()->freeSpill(location, dataSize, 0);
+
+      if (!self()->cg()->isFreeSpillListLocked())
+         {
+         spilledRegister->setBackingStorage(NULL);
+         }
+      }
+   switch (rk)
+      {
+      case TR_GPR:
+         storeOp = TR::InstOpCode::strimmx;
+         break;
+      case TR_FPR:
+         storeOp = TR::InstOpCode::vstrimmd;
+         break;
+      case TR_VRF:
+         storeOp = TR::InstOpCode::vstrimmq;
+         break;
+      default:
+         TR_ASSERT(false, "Unsupported RegisterKind.");
+         break;
+      }
+   generateMemSrc1Instruction(self()->cg(), storeOp, currentNode, tmemref, targetRegister, currentInstruction);
+      
    return targetRegister;
    }
 
@@ -647,7 +637,7 @@ TR::RealRegister *OMR::ARM64::Machine::assignOneRegister(TR::Instruction *curren
             cg->setRegisterAssignmentFlag(TR_RegisterSpilled);
             assignedRegister = self()->freeBestRegister(currentInstruction, virtualRegister, NULL);
             }
-         if (!comp->getOption(TR_DisableOOL) && cg->isOutOfLineColdPath())
+         if (cg->isOutOfLineColdPath())
             {
             cg->getFirstTimeLiveOOLRegisterList()->push_front(virtualRegister);
             }
@@ -679,15 +669,16 @@ static void registerCopy(TR::Instruction *precedingInstruction,
                          TR::CodeGenerator *cg)
    {
    TR::Node *node = precedingInstruction->getNode();
-   TR::RealRegister *zeroReg;
    switch (rk)
       {
       case TR_GPR:
-         zeroReg = cg->machine()->getRealRegister(TR::RealRegister::xzr);
-         generateTrg1Src2Instruction(cg, TR::InstOpCode::orrx, node, targetReg, zeroReg, sourceReg, precedingInstruction); /* mov (register) */
+         generateMovInstruction(cg, node, targetReg, sourceReg, true, precedingInstruction);
          break;
       case TR_FPR:
          generateTrg1Src1Instruction(cg, TR::InstOpCode::fmovd, node, targetReg, sourceReg, precedingInstruction);
+         break;
+      case TR_VRF:
+         generateTrg1Src2Instruction(cg, TR::InstOpCode::vorr16b, node, targetReg, sourceReg, sourceReg, precedingInstruction);
          break;
       default:
          TR_ASSERT(false, "Unsupported RegisterKind.");
@@ -700,7 +691,6 @@ static void registerExchange(TR::Instruction *precedingInstruction,
                              TR_RegisterKinds rk,
                              TR::RealRegister *targetReg,
                              TR::RealRegister *sourceReg,
-                             TR::RealRegister *middleReg,
                              TR::CodeGenerator *cg)
    {
    // middleReg is not used if rk==TR_GPR.
@@ -714,9 +704,9 @@ static void registerExchange(TR::Instruction *precedingInstruction,
       }
    else
       {
-      registerCopy(precedingInstruction, rk, targetReg, middleReg, cg);
-      registerCopy(precedingInstruction, rk, sourceReg, targetReg, cg);
-      registerCopy(precedingInstruction, rk, middleReg, sourceReg, cg);
+      generateTrg1Src2Instruction(cg, TR::InstOpCode::veor16b, node, targetReg, targetReg, sourceReg, precedingInstruction);
+      generateTrg1Src2Instruction(cg, TR::InstOpCode::veor16b, node, sourceReg, targetReg, sourceReg, precedingInstruction);
+      generateTrg1Src2Instruction(cg, TR::InstOpCode::veor16b, node, targetReg, targetReg, sourceReg, precedingInstruction);
       }
    }
 
@@ -762,7 +752,7 @@ void OMR::ARM64::Machine::coerceRegisterAssignment(TR::Instruction *currentInstr
             }
          else
             {
-            if (!comp->getOption(TR_DisableOOL) && self()->cg()->isOutOfLineColdPath())
+            if (self()->cg()->isOutOfLineColdPath())
                {
                self()->cg()->getFirstTimeLiveOOLRegisterList()->push_front(virtualRegister);
                }
@@ -780,8 +770,6 @@ void OMR::ARM64::Machine::coerceRegisterAssignment(TR::Instruction *currentInstr
       TR::RealRegister *spareReg = NULL;
       TR::Register *currentTargetVirtual = targetRegister->getAssignedRegister();
 
-      bool needTemp = (rk == TR_FPR); // xor is unavailable for register exchange
-
       if (targetRegister->getState() == TR::RealRegister::Blocked)
          {
 #ifdef DEBUG
@@ -789,7 +777,16 @@ void OMR::ARM64::Machine::coerceRegisterAssignment(TR::Instruction *currentInstr
             diagnostic(", which is blocked and assigned to %s",
                        currentTargetVirtual->getRegisterName(comp));
 #endif
-         if (!currentAssignedRegister || needTemp)
+         if (currentAssignedRegister)
+            {
+            self()->cg()->traceRegAssigned(currentTargetVirtual, currentAssignedRegister);
+            registerExchange(currentInstruction, rk, targetRegister, currentAssignedRegister, self()->cg());
+            currentAssignedRegister->setState(TR::RealRegister::Blocked);
+            currentAssignedRegister->setAssignedRegister(currentTargetVirtual);
+            currentTargetVirtual->setAssignedRegister(currentAssignedRegister);
+            // For Non-GPR, spareReg remains FREE.
+            }
+         else
             {
             spareReg = self()->findBestFreeRegister(currentInstruction, rk, false, currentTargetVirtual);
             self()->cg()->setRegisterAssignmentFlag(TR_IndirectCoercion);
@@ -800,19 +797,6 @@ void OMR::ARM64::Machine::coerceRegisterAssignment(TR::Instruction *currentInstr
                spareReg = self()->freeBestRegister(currentInstruction, currentTargetVirtual);
                virtualRegister->unblock();
                }
-            }
-
-         if (currentAssignedRegister)
-            {
-            self()->cg()->traceRegAssigned(currentTargetVirtual, currentAssignedRegister);
-            registerExchange(currentInstruction, rk, targetRegister, currentAssignedRegister, spareReg, self()->cg());
-            currentAssignedRegister->setState(TR::RealRegister::Blocked);
-            currentAssignedRegister->setAssignedRegister(currentTargetVirtual);
-            currentTargetVirtual->setAssignedRegister(currentAssignedRegister);
-            // For Non-GPR, spareReg remains FREE.
-            }
-         else
-            {
             self()->cg()->traceRegAssigned(currentTargetVirtual, spareReg);
             registerCopy(currentInstruction, rk, targetRegister, spareReg, self()->cg());
             spareReg->setState(TR::RealRegister::Blocked);
@@ -827,7 +811,7 @@ void OMR::ARM64::Machine::coerceRegisterAssignment(TR::Instruction *currentInstr
                }
             else
                {
-               if (!comp->getOption(TR_DisableOOL) && self()->cg()->isOutOfLineColdPath())
+               if (self()->cg()->isOutOfLineColdPath())
                   {
                   self()->cg()->getFirstTimeLiveOOLRegisterList()->push_front(virtualRegister);
                   }
@@ -841,34 +825,20 @@ void OMR::ARM64::Machine::coerceRegisterAssignment(TR::Instruction *currentInstr
             diagnostic(", which is assigned to %s",
                        currentTargetVirtual->getRegisterName(comp));
 #endif
-         if (!currentAssignedRegister || needTemp)
-            spareReg = self()->findBestFreeRegister(currentInstruction, rk, false, currentTargetVirtual);
 
          self()->cg()->setRegisterAssignmentFlag(TR_IndirectCoercion);
          if (currentAssignedRegister)
             {
-            if (!needTemp || (spareReg != NULL))
-               {
-               self()->cg()->traceRegAssigned(currentTargetVirtual, currentAssignedRegister);
-               registerExchange(currentInstruction, rk, targetRegister,
-                                currentAssignedRegister, spareReg, self()->cg());
-               currentAssignedRegister->setState(TR::RealRegister::Assigned);
-               currentAssignedRegister->setAssignedRegister(currentTargetVirtual);
-               currentTargetVirtual->setAssignedRegister(currentAssignedRegister);
-               // spareReg is still FREE.
-               }
-            else
-               {
-               self()->freeBestRegister(currentInstruction, currentTargetVirtual, targetRegister);
-               self()->cg()->traceRegAssigned(currentTargetVirtual, currentAssignedRegister);
-               self()->cg()->setRegisterAssignmentFlag(TR_RegisterSpilled);
-               registerCopy(currentInstruction, rk, currentAssignedRegister, targetRegister, self()->cg());
-               currentAssignedRegister->setState(TR::RealRegister::Free);
-               currentAssignedRegister->setAssignedRegister(NULL);
-               }
+            self()->cg()->traceRegAssigned(currentTargetVirtual, currentAssignedRegister);
+            registerExchange(currentInstruction, rk, targetRegister,
+                              currentAssignedRegister, self()->cg());
+            currentAssignedRegister->setState(TR::RealRegister::Assigned);
+            currentAssignedRegister->setAssignedRegister(currentTargetVirtual);
+            currentTargetVirtual->setAssignedRegister(currentAssignedRegister);
             }
          else
             {
+            spareReg = self()->findBestFreeRegister(currentInstruction, rk, false, currentTargetVirtual);
             if (spareReg == NULL)
                {
                self()->cg()->setRegisterAssignmentFlag(TR_RegisterSpilled);
@@ -891,7 +861,7 @@ void OMR::ARM64::Machine::coerceRegisterAssignment(TR::Instruction *currentInstr
                }
             else
                {
-               if (!comp->getOption(TR_DisableOOL) && self()->cg()->isOutOfLineColdPath())
+               if (self()->cg()->isOutOfLineColdPath())
                   {
                   self()->cg()->getFirstTimeLiveOOLRegisterList()->push_front(virtualRegister);
                   }
@@ -912,6 +882,26 @@ void OMR::ARM64::Machine::coerceRegisterAssignment(TR::Instruction *currentInstr
    targetRegister->setAssignedRegister(virtualRegister);
    virtualRegister->setAssignedRegister(targetRegister);
    self()->cg()->traceRegAssigned(virtualRegister, targetRegister);
+   }
+
+void OMR::ARM64::Machine::spillAllVectorRegisters(TR::Instruction  *currentInstruction)
+   {
+   int32_t first = TR::RealRegister::FirstFPR;
+   int32_t last  = TR::RealRegister::LastFPR;
+   TR::Node *node = currentInstruction->getNode();
+
+   for (int32_t i = first; i <= last; i++)
+      {
+      TR::Register *virtReg = NULL;
+      TR::RealRegister *realReg = self()->getRealRegister(static_cast<TR::RealRegister::RegNum>(i));
+
+      if ((realReg->getState() == TR::RealRegister::Assigned) &&
+          (virtReg = realReg->getAssignedRegister()) &&
+          (virtReg->getKind() == TR_VRF))
+         {
+         self()->spillRegister(currentInstruction, virtReg);
+         }
+      }
    }
 
 void OMR::ARM64::Machine::initializeRegisterFile()
@@ -1467,7 +1457,7 @@ void
 OMR::ARM64::Machine::takeRegisterStateSnapShot()
    {
    int32_t i;
-   for (i = TR::RealRegister::FirstGPR; i < TR::RealRegister::NumRegisters - 1; i++)
+   for (i = TR::RealRegister::FirstGPR; i <= TR::RealRegister::LastAssignableFPR; i++)
       {
       _registerStatesSnapShot[i] = _registerFile[i]->getState();
       _assignedRegisterSnapShot[i] = _registerFile[i]->getAssignedRegister();
@@ -1481,7 +1471,7 @@ void
 OMR::ARM64::Machine::restoreRegisterStateFromSnapShot()
    {
    int32_t i;
-   for (i = TR::RealRegister::FirstGPR; i < TR::RealRegister::NumRegisters - 1; i++) // Skipping SpilledReg
+   for (i = TR::RealRegister::FirstGPR; i <= TR::RealRegister::LastAssignableFPR; i++)
       {
       _registerFile[i]->setWeight(_registerWeightSnapShot[i]);
       _registerFile[i]->setFlags(_registerFlagsSnapShot[i]);
@@ -1537,14 +1527,14 @@ OMR::ARM64::Machine::restoreRegisterStateFromSnapShot()
       }
    }
 
-TR::RegisterDependencyConditions *OMR::ARM64::Machine::createDepCondForLiveGPRs(TR::list<TR::Register*> *spilledRegisterList)
+TR::RegisterDependencyConditions *OMR::ARM64::Machine::createCondForLiveAndSpilledGPRs(TR::list<TR::Register*> *spilledRegisterList)
    {
    int32_t i, c=0;
    // Calculate number of register dependencies required. This step is not really necessary, but
    // it is space conscious
    //
    TR::Compilation *comp = self()->cg()->comp();
-   for (i = TR::RealRegister::FirstGPR; i < TR::RealRegister::NumRegisters - 1; i++)
+   for (i = TR::RealRegister::FirstGPR; i <= TR::RealRegister::LastAssignableFPR; i++)
       {
       TR::RealRegister *realReg = self()->getRealRegister(static_cast<TR::RealRegister::RegNum>(i));
 
@@ -1564,7 +1554,7 @@ TR::RegisterDependencyConditions *OMR::ARM64::Machine::createDepCondForLiveGPRs(
    if (c)
       {
       deps = new (self()->cg()->trHeapMemory()) TR::RegisterDependencyConditions(0, c, self()->cg()->trMemory());
-      for (i = TR::RealRegister::FirstGPR; i < TR::RealRegister::NumRegisters - 1; i++)
+      for (i = TR::RealRegister::FirstGPR; i <= TR::RealRegister::LastAssignableFPR; i++)
          {
          TR::RealRegister *realReg = self()->getRealRegister(static_cast<TR::RealRegister::RegNum>(i));
          if (realReg->getState() == TR::RealRegister::Assigned)

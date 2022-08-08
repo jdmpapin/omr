@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2020 IBM Corp. and others
+ * Copyright (c) 2019, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -34,6 +34,7 @@
 #include "il/LabelSymbol.hpp"
 #include "infra/Assert.hpp"
 
+class TR_VirtualGuardSite;
 namespace TR { class SymbolReference; }
 
 #define RISCV_INSTRUCTION_LENGTH 4
@@ -793,7 +794,7 @@ class BtypeInstruction : public StypeInstruction
        TR::Instruction          *precedingInstruction,
        TR::CodeGenerator        *cg
        )
-     : StypeInstruction(op, n, s1reg, s2reg, 0, cg),
+     : StypeInstruction(op, n, s1reg, s2reg, 0, precedingInstruction, cg),
        _symbol(sym),
        _estimatedBinaryLocation(0)
      {
@@ -994,6 +995,7 @@ class JtypeInstruction : public UtypeInstruction
    // Only one of the following can be used at time!
    TR::SymbolReference *_symbolReference;
    TR::LabelSymbol *_symbol;
+   TR::Snippet *_snippet;
 
    public:
 
@@ -1003,11 +1005,12 @@ class JtypeInstruction : public UtypeInstruction
          uintptr_t        imm,
          TR::RegisterDependencyConditions *cond,
          TR::SymbolReference *sr,
-         TR::Snippet       *s, // unused for now
+         TR::Snippet       *s,
          TR::CodeGenerator *codeGen)
       : UtypeInstruction(op, n, 0, treg, cond, codeGen),
         _symbolReference(sr),
-        _symbol(nullptr)
+        _symbol(nullptr),
+        _snippet(s)
       {
       }
 
@@ -1022,7 +1025,8 @@ class JtypeInstruction : public UtypeInstruction
          TR::CodeGenerator *codeGen)
       : UtypeInstruction(op, n, 0, treg, cond, precedingInstruction, codeGen),
         _symbolReference(sr),
-        _symbol(nullptr)
+        _symbol(nullptr),
+        _snippet(s)
       {
       }
 
@@ -1055,6 +1059,21 @@ class JtypeInstruction : public UtypeInstruction
          TR::Node          *n,
          TR::Register      *treg,
          TR::LabelSymbol   *label,
+         TR::Snippet       *snippet,
+         TR::RegisterDependencyConditions *cond,
+         TR::CodeGenerator *codeGen)
+
+      : UtypeInstruction(op, n, 0, treg, cond, codeGen),
+        _symbolReference(nullptr),
+        _symbol(label),
+        _snippet(snippet)
+      {
+      }
+
+   JtypeInstruction(TR::InstOpCode::Mnemonic op,
+         TR::Node          *n,
+         TR::Register      *treg,
+         TR::LabelSymbol   *label,
          TR::Instruction   *precedingInstruction,
          TR::CodeGenerator *codeGen)
       : UtypeInstruction(op, n, 0, treg, precedingInstruction, codeGen),
@@ -1074,6 +1093,22 @@ class JtypeInstruction : public UtypeInstruction
       : UtypeInstruction(op, n, 0, treg, cond, precedingInstruction, codeGen),
         _symbolReference(nullptr),
         _symbol(label)
+      {
+      }
+
+   JtypeInstruction(TR::InstOpCode::Mnemonic op,
+         TR::Node          *n,
+         TR::Register      *treg,
+         TR::LabelSymbol   *label,
+         TR::Snippet       *snippet,
+         TR::RegisterDependencyConditions *cond,
+         TR::Instruction   *precedingInstruction,
+         TR::CodeGenerator *codeGen)
+
+      : UtypeInstruction(op, n, 0, treg, cond, precedingInstruction, codeGen),
+        _symbolReference(nullptr),
+        _symbol(label),
+        _snippet(snippet)
       {
       }
 
@@ -1100,6 +1135,13 @@ class JtypeInstruction : public UtypeInstruction
       TR_ASSERT(false, "Should not be used with J-type instructions, use setLabelSymbol()!");
       return 0;
       }
+
+   /**
+    * @brief Gets snippet associated with this instruction (if any).
+    *
+    * @return snippet
+    */
+   TR::Snippet *getSnippet() { return _snippet;}
 
    /**
     * @brief Generates binary encoding of the instruction
@@ -1355,6 +1397,46 @@ public:
     */
    virtual uint8_t *generateBinaryEncoding();
    };
+
+#ifdef J9_PROJECT_SPECIFIC
+class VGNOPInstruction : public TR::LabelInstruction
+   {
+   private:
+   TR_VirtualGuardSite *_site;
+
+   public:
+   VGNOPInstruction(TR::Node                       *node,
+                                 TR_VirtualGuardSite              *site,
+                                 TR::RegisterDependencyConditions *cond,
+                                 TR::LabelSymbol                  *sym,
+                                 TR::CodeGenerator                *cg)
+      : TR::LabelInstruction(TR::InstOpCode::vgnop, node, sym, cond, cg),
+        _site(site)
+      {
+      }
+
+   VGNOPInstruction(TR::Node                       *node,
+                                 TR_VirtualGuardSite              *site,
+                                 TR::RegisterDependencyConditions *cond,
+                                 TR::LabelSymbol                  *sym,
+                                 TR::Instruction                  *precedingInstruction,
+                                 TR::CodeGenerator                *cg)
+      : TR::LabelInstruction(TR::InstOpCode::vgnop, node, sym, cond, precedingInstruction, cg),
+        _site(site)
+      {
+      }
+
+   virtual Kind getKind() { return IsVirtualGuardNOP; }
+
+   void setSite(TR_VirtualGuardSite *site) { _site = site; }
+   TR_VirtualGuardSite * getSite() { return _site; }
+
+   virtual uint8_t *generateBinaryEncoding();
+   virtual int32_t estimateBinaryLength(int32_t currentEstimate);
+   virtual bool     isVirtualGuardNOPInstruction() {return true;}
+   };
+#endif
+
 
 
 } // namespace TR

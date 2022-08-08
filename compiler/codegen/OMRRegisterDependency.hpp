@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -31,16 +31,204 @@
    namespace OMR { typedef OMR::RegisterDependencyConditions RegisterDependencyConditionsConnector; }
 #endif
 
+#ifndef OMR_REGISTER_DEPENDENCY_GROUP_CONNECTOR
+#define OMR_REGISTER_DEPENDENCY_GROUP_CONNECTOR
+   namespace OMR { class RegisterDependencyGroup; }
+   namespace OMR { typedef OMR::RegisterDependencyGroup RegisterDependencyGroupConnector; }
+#endif
+
 #include "env/TRMemory.hpp"
+#include "codegen/CodeGenerator.hpp"
 #include "codegen/RegisterDependencyStruct.hpp"
 
 namespace OMR
 {
 
+class OMR_EXTENSIBLE RegisterDependencyGroup
+   {
+   public:
+
+   TR_ALLOC_WITHOUT_NEW(TR_Memory::RegisterDependencyGroup)
+
+   RegisterDependencyGroup()
+#if defined(OMR_ARCH_S390)
+      : _numUses(0)
+#elif defined(__GNUC__) && !defined(__clang__) /* defined(OMR_ARCH_S390) */
+      : _unused('\0')
+#endif /* defined(OMR_ARCH_S390) */
+      {}
+
+   TR::RegisterDependencyGroup *self();
+
+   void *operator new(size_t s, int32_t numDependencies, TR_Memory *m)
+      {
+      TR_ASSERT(numDependencies >= 0, "Number of dependencies must be non-negative");
+      s += numDependencies * sizeof(TR::RegisterDependency);
+#if defined(__clang__) || !defined(__GNUC__)
+      s -= NUM_DEFAULT_DEPENDENCIES * sizeof(TR::RegisterDependency);
+#endif /* defined(__clang__) || !defined(__GNUC__) */
+      return m->allocateHeapMemory(s, TR_MemoryBase::RegisterDependencyGroup);
+      }
+
+   void operator delete(void *p, int32_t numDependencies, TR_Memory *m) {}
+
+   TR::RegisterDependency *getRegisterDependency(uint32_t index)
+      {
+      return &_dependencies[index];
+      }
+
+   void clearDependencyInfo(uint32_t index)
+      {
+      _dependencies[index].setRegister(NULL);
+      _dependencies[index].assignFlags(0);
+      _dependencies[index].setRealRegister(TR::RealRegister::NoReg);
+      }
+
+   void setDependencyInfo(uint32_t index, TR::Register *vr, TR::RealRegister::RegNum rr, uint8_t flag)
+      {
+      _dependencies[index].setRegister(vr);
+      _dependencies[index].assignFlags(flag);
+      _dependencies[index].setRealRegister(rr);
+      }
+
+   bool containsVirtualRegister(TR::Register *r, uint32_t numberOfRegisters)
+      {
+      for (auto i = 0U; i < numberOfRegisters; ++i)
+         {
+         if (_dependencies[i].getRegister() == r)
+            return true;
+         }
+
+      return false;
+      }
+
+   TR::Register *searchForRegister(TR::RealRegister::RegNum rr, uint32_t numberOfRegisters)
+      {
+      for (auto i = 0U;  i < numberOfRegisters; ++i)
+         {
+         if (_dependencies[i].getRealRegister() == rr)
+            return _dependencies[i].getRegister();
+         }
+
+      return NULL;
+      }
+
+   TR::Register *searchForRegister(TR::Register* vr, uint8_t flag, uint32_t numberOfRegisters, TR::CodeGenerator *cg)
+      {
+      for (auto i = 0U; i < numberOfRegisters; ++i)
+         {
+         if (_dependencies[i].getRegister() == vr && (_dependencies[i].getFlags() & flag))
+            return _dependencies[i].getRegister();
+         }
+
+      return NULL;
+      }
+
+   TR::Register *searchForRegister(TR::RealRegister::RegNum rr, uint8_t flag, uint32_t numberOfRegisters, TR::CodeGenerator *cg)
+      {
+      for (auto i = 0U; i < numberOfRegisters; ++i)
+         {
+         if (_dependencies[i].getRealRegister() == rr && (_dependencies[i].getFlags() & flag))
+            return _dependencies[i].getRegister();
+         }
+
+      return NULL;
+      }
+
+   int32_t searchForRegisterPos(TR::Register* vr, uint8_t flag, uint32_t numberOfRegisters, TR::CodeGenerator *cg)
+      {
+      for (auto i = 0U; i < numberOfRegisters; ++i)
+         {
+         if (_dependencies[i].getRegister() == vr && (_dependencies[i].getFlags() & flag))
+            return i;
+         }
+
+      return -1;
+      }
+
+   void setRealRegisterForDependency(int32_t index, TR::RealRegister::RegNum regNum)
+      {
+      _dependencies[index].setRealRegister(regNum);
+      }
+
+   void blockRegisters(uint32_t numberOfRegisters, TR::CodeGenerator *cg = NULL)
+      {
+      for (auto i = 0U; i < numberOfRegisters; ++i)
+         {
+         if (_dependencies[i].getRegister())
+            {
+            _dependencies[i].getRegister()->block();
+            }
+         }
+      }
+
+   void unblockRegisters(uint32_t numberOfRegisters, TR::CodeGenerator *cg = NULL)
+      {
+      for (auto i = 0U; i < numberOfRegisters; ++i)
+         {
+         if (_dependencies[i].getRegister())
+            {
+            _dependencies[i].getRegister()->unblock();
+            }
+         }
+      }
+
+   void stopUsingDepRegs(uint32_t numberOfRegisters, TR::Register *ret1, TR::Register *ret2, TR::CodeGenerator *cg)
+      {
+      for (auto i = 0U; i < numberOfRegisters; ++i)
+         {
+         auto depReg = _dependencies[i].getRegister();
+         if (depReg != ret1 && depReg != ret2)
+            {
+            cg->stopUsingRegister(depReg);
+            }
+         }
+      }
+
+   void stopUsingDepRegs(uint32_t numberOfRegisters, int numRetReg, TR::Register **retReg, TR::CodeGenerator *cg)
+      {
+      for (auto i = 0U; i < numberOfRegisters; ++i)
+         {
+         TR::Register *depReg = _dependencies[i].getRegister();
+         bool found = false;
+         for (int j = 0; j < numRetReg; j++)
+            if (depReg == retReg[j])
+               found = true;
+         if (!found)
+            cg->stopUsingRegister(depReg);
+         }
+      }
+
+   protected:
+
+#if defined(OMR_ARCH_S390)
+   int8_t _numUses;
+#elif defined(__GNUC__) && !defined(__clang__) /* defined(OMR_ARCH_S390) */
+   /* a flexible array cannot be the only member of a class */
+   private:
+   char _unused;
+   protected:
+#endif /* defined(OMR_ARCH_S390) */
+
+#if defined(__GNUC__) && !defined(__clang__)
+   TR::RegisterDependency _dependencies[];
+#else /* defined(__GNUC__) && !defined(__clang__) */
+   /*
+    * Only GCC appears to support extending a classs with a flexible array member,
+    * so, for other compilers, we declare the length to be 1 and adjust accordingly
+    * in the new operator.
+    */
+   private:
+   static const size_t NUM_DEFAULT_DEPENDENCIES = 1;
+   protected:
+   TR::RegisterDependency _dependencies[NUM_DEFAULT_DEPENDENCIES];
+#endif /* defined(__GNUC__) && !defined(__clang__) */
+   };
+
 class RegisterDependencyConditions
    {
    protected:
-   RegisterDependencyConditions() {};
+   RegisterDependencyConditions() {}
 
    public:
    TR_ALLOC(TR_Memory::RegisterDependencyConditions)
@@ -120,7 +308,7 @@ class RegisterDependencyMap
       TR_ASSERT(&deps[index] == dep, "Dependency pointer/index mismatch!");
       addDependency(dep->getRealRegister(), dep->getRegister()->getAssignedRealRegister(), index);
       }
-   
+
    /** \brief
     *     Gets the dependency whose source (virtual register) is currently assigned to \param regNum.
     *
@@ -144,7 +332,7 @@ class RegisterDependencyMap
     *     The real register target to look for.
     *
     *  \return
-    *     The dependency whose target (real register) is \param regNum if such a dependency exists; <c>NULL</c> 
+    *     The dependency whose target (real register) is \param regNum if such a dependency exists; <c>NULL</c>
     *     otherwise.
     */
    TR::RegisterDependency* getDependencyWithTarget(TR::RealRegister::RegNum regNum)
@@ -219,4 +407,4 @@ class RegisterDependencyMap
    };
 }
 
-#endif
+#endif /* OMR_REGISTER_DEPENDENCY_INCL */

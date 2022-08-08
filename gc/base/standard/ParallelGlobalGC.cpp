@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -827,16 +827,16 @@ MM_ParallelGlobalGC::compactRequiredBeforeHeapContraction(MM_EnvironmentBase *en
 	/* Note: We know based on the collector that this is a single contiguous area */
 	lengthLastFree = env->_cycleState->_activeSubSpace->getAvailableContractionSize(env, allocDescription);
 	
-	/* If chunk at end of heap is free then check its at least 10% of 
+	/* If chunk at end of heap is free then check its at least minimumContractionRatio percent of the
 	 * requested contraction amount
 	 */
-	if (lengthLastFree > 0 ) {
+	if (lengthLastFree > 0) {
 		uintptr_t minContractSize = (contractionSize / MINIMUM_CONTRACTION_RATIO_DIVISOR)
-								 * MINIMUM_CONTRACTION_RATIO_MULTIPLIER;
-								 
-		if (lengthLastFree > minContractSize ) {						 
+								 * _extensions->minimumContractionRatio;
+
+		if (lengthLastFree > minContractSize) {
 			return false;
-		}	
+		}
 	}
 
 compactionReqd:
@@ -1012,7 +1012,7 @@ MM_ParallelGlobalGC::mainThreadRestartAllocationCaches(MM_EnvironmentBase *env)
 		 * into the STW thread scan phase.
 		 */  
 		walkEnv->setThreadScanned(false);
-
+		walkEnv->setAllocationColor(GC_UNMARK);
 		walkEnv->_objectAllocationInterface->restartCache(env);
 	}
 }
@@ -1419,7 +1419,8 @@ globalGCHookAFCycleStart(J9HookInterface** hook, uintptr_t eventNum, void* event
 	OMR_VMThread *omrVMThread = event->currentThread;
 	MM_GCExtensionsBase *extensions = MM_GCExtensionsBase::getExtensions(omrVMThread->_vm);
 	OMRPORT_ACCESS_FROM_OMRVMTHREAD(omrVMThread);
-	
+
+	extensions->heap->getResizeStats()->resetExcludeCurrentGCTimeFromStats();
 	extensions->heap->getResizeStats()->setThisAFStartTime(omrtime_hires_clock());
 	extensions->heap->getResizeStats()->setLastTimeOutsideGC();
 	extensions->heap->getResizeStats()->setGlobalGCCountAtAF(extensions->globalGCStats.gcCount);
@@ -1436,7 +1437,11 @@ globalGCHookAFCycleEnd(J9HookInterface** hook, uintptr_t eventNum, void* eventDa
 	if((event->subSpaceType == MEMORY_TYPE_NEW) && ((extensions->heap->getResizeStats()->getGlobalGCCountAtAF()) == (extensions->globalGCStats.gcCount))){
 		return;
 	}
-		
+
+	if (extensions->heap->getResizeStats()->getExcludeCurrentGCTimeFromStats()) {
+		return;
+	}
+
 	/* ..and remember time of last AF end */
 	extensions->heap->getResizeStats()->setLastAFEndTime(omrtime_hires_clock());
 	
@@ -1529,12 +1534,32 @@ MM_ParallelGlobalGC::isMarked(void *objectPtr)
 }
 
 void
+MM_ParallelGlobalGC::checkColorAndMark(MM_EnvironmentBase* env, omrobjectptr_t objectPtr)
+{
+#if defined(OMR_GC_REALTIME)
+	if (_extensions->isSATBBarrierActive()) {
+		Assert_MM_true(GC_MARK == env->getAllocationColor());
+		_markingScheme->markObject(env, objectPtr, true);
+	}
+#endif /* defined(OMR_GC_REALTIME) */
+}
+
+void
 MM_ParallelGlobalGC::completeExternalConcurrentCycle(MM_EnvironmentBase *env)
 {
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
 	if (_extensions->isConcurrentScavengerEnabled()) {
 		/* ParallelGlobalGC or ConcurrentGC (STW phase) cannot start before Concurrent Scavenger cycle is in progress */
 		_extensions->scavenger->completeConcurrentCycle(env);
+
+		/* Push thread local buffers to the global list.
+		 * This is important to do because some threads can miss to flush their Ownable buffers. The scheduler may dispatch different threads for different phases of CS,
+		 * Ownable buffers are only flushed during final phase. Hence, threads that don't participate in the final phase (but built lists in prior phases) may still have buffers which need to
+		 * be flushed. Typically, this isn't an issue because all thread local buffers will be flushed when we acquire exclusive for global. However, we're already past that point now.
+		 *
+		 * TODO: This is a temporary workaround, it is Scavengers responsibility to ensure all buffers are flushed by the time we complete a cycle.
+		 */
+		GC_OMRVMInterface::flushNonAllocationCaches(env);
 	}
 #endif /* OMR_GC_CONCURRENT_SCAVENGER */
 }

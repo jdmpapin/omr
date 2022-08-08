@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -681,8 +681,7 @@ TR::PPCSystemLinkage::createPrologue(
    if (savedFirst <= TR::RealRegister::LastGPR)
       {
       if (cg()->comp()->target().cpu.is(OMR_PROCESSOR_PPC_GP) || cg()->comp()->target().is64Bit() ||
-          (!comp()->getOption(TR_OptimizeForSpace) &&
-           TR::RealRegister::LastGPR - savedFirst <= 3))
+          (TR::RealRegister::LastGPR - savedFirst <= 3))
          for (regIndex=TR::RealRegister::LastGPR; regIndex>=savedFirst; regIndex=(TR::RealRegister::RegNum)((uint32_t)regIndex-1))
             {
             argSize = argSize - TR::Compiler->om.sizeofReferenceAddress();
@@ -748,7 +747,6 @@ TR::PPCSystemLinkage::createPrologue(
 void
 TR::PPCSystemLinkage::createEpilogue(TR::Instruction *cursor)
    {
-   int32_t blockNumber = cursor->getNext()->getBlockIndex();
    TR::Machine *machine = cg()->machine();
    const TR::PPCLinkageProperties &properties = getProperties();
    TR::ResolvedMethodSymbol *bodySymbol = comp()->getJittedMethodSymbol();
@@ -784,8 +782,7 @@ TR::PPCSystemLinkage::createEpilogue(TR::Instruction *cursor)
    if (savedFirst <= TR::RealRegister::LastGPR)
       {
       if (cg()->comp()->target().cpu.is(OMR_PROCESSOR_PPC_GP) || cg()->comp()->target().is64Bit() ||
-          (!comp()->getOption(TR_OptimizeForSpace) &&
-           TR::RealRegister::LastGPR - savedFirst <= 3))
+          (TR::RealRegister::LastGPR - savedFirst <= 3))
          for (regIndex=TR::RealRegister::LastGPR; regIndex>=savedFirst; regIndex=(TR::RealRegister::RegNum)((uint32_t)regIndex-1))
             {
             saveSize = saveSize - TR::Compiler->om.sizeofReferenceAddress();
@@ -934,10 +931,6 @@ int32_t TR::PPCSystemLinkage::buildArgs(TR::Node *callNode,
             numFloatArgs++;
             break;
 
-         case TR::VectorDouble:
-            // TODO : finish implementation
-            numVectorArgs++;
-            break;
          case TR::Aggregate:
             {
             size_t size = child->getSymbolReference()->getSymbol()->getSize();
@@ -952,6 +945,14 @@ int32_t TR::PPCSystemLinkage::buildArgs(TR::Node *callNode,
             }
             break;
          default:
+            if (child->getDataType().isVector() &&
+                child->getDataType().getVectorElementType() == TR::Double)
+               {
+               // TODO : finish implementation
+               numVectorArgs++;
+               break;
+               }
+
             TR_ASSERT(false, "Argument type %s is not supported\n", child->getDataType().toString());
          }
       }
@@ -1289,7 +1290,10 @@ int32_t TR::PPCSystemLinkage::buildArgs(TR::Node *callNode,
 
             }    // end of for loop
             break;
-         case TR::VectorDouble:
+
+         default:
+            if (!childType.isVector() || childType.getVectorElementType() != TR::Double)
+               break;
             argRegister = pushThis(child);
             TR::Register * argReg;
             argReg = argRegister;
@@ -1363,13 +1367,6 @@ int32_t TR::PPCSystemLinkage::buildArgs(TR::Node *callNode,
 
    int32_t floatRegsUsed = (numFloatArgs>properties.getNumFloatArgRegs())?properties.getNumFloatArgRegs():numFloatArgs;
 
-
-   bool isHelper = false;
-   if (callNode->getSymbolReference()->getReferenceNumber() == TR_PPCVectorLogDouble)
-      {
-      isHelper = true;
-      }
-
    if (liveVMX || liveVSXScalar || liveVSXVector)
       {
       for (i=(TR::RealRegister::RegNum)((uint32_t)TR::RealRegister::LastFPR+1); i<=TR::RealRegister::LastVSR; i++)
@@ -1381,11 +1378,10 @@ int32_t TR::PPCSystemLinkage::buildArgs(TR::Node *callNode,
                continue;
             }
 
-         if (!properties.getPreserved((TR::RealRegister::RegNum)i) || !isHelper)
+         if (!properties.getPreserved((TR::RealRegister::RegNum)i))
             {
             TR::addDependency(dependencies, NULL, (TR::RealRegister::RegNum)i, TR_VSX_SCALAR, cg());
             }
-
          }
       }
 
@@ -1439,13 +1435,14 @@ void TR::PPCSystemLinkage::buildDirectCall(TR::Node *callNode,
             {
             //For Little Endian, load target's Global Entry Point into r12, TOC will be restored at branch target.
             TR::Register *geReg = dependencies->searchPreConditionRegister(TR::RealRegister::gr12);
-            if (!cg()->comp()->getOption(TR_DisableTOC))
+
+            if (!cg()->comp()->getOption(TR_DisableTOC) && !cg()->comp()->compilePortableCode())
                generateTrg1MemInstruction(cg(),TR::InstOpCode::Op_load, callNode, geReg,
                   TR::MemoryReference::createWithDisplacement(cg(), cg()->getTOCBaseRegister(),
                        (refNum-1)*TR::Compiler->om.sizeofReferenceAddress(),
                        TR::Compiler->om.sizeofReferenceAddress()));
             else
-               loadAddressConstant(cg(), callNode, (int64_t)runtimeHelperValue((TR_RuntimeHelper)refNum), geReg);
+               loadAddressConstant(cg(), callNode, (int64_t)runtimeHelperValue((TR_RuntimeHelper)refNum), geReg, NULL, false, TR_AbsoluteHelperAddress);
             }
          }
 
@@ -1507,14 +1504,17 @@ TR::Register *TR::PPCSystemLinkage::buildDirectDispatch(TR::Node *callNode)
          returnRegister = dependencies->searchPostConditionRegister(
                              pp.getFloatReturnRegister());
          break;
-      case TR::vcall:
-         returnRegister = dependencies->searchPostConditionRegister(
-                             pp.getVectorReturnRegister());
-         break;
       case TR::call:
          returnRegister = NULL;
          break;
       default:
+         if (callNode->getOpCode().isVectorOpCode() &&
+             callNode->getOpCode().getVectorOperation() == TR::vcall)
+             {
+             returnRegister = dependencies->searchPostConditionRegister(
+                              pp.getVectorReturnRegister());
+             break;
+             }
          returnRegister = NULL;
          TR_ASSERT(0, "Unknown direct call Opcode.");
       }
@@ -1731,4 +1731,3 @@ intptr_t TR::PPCSystemLinkage::entryPointFromInterpretedMethod()
    {
    return reinterpret_cast<intptr_t>(cg()->getCodeStart());
    }
-

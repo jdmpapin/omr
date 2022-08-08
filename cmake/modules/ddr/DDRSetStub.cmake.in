@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2019, 2020 IBM Corp. and others
+# Copyright (c) 2019, 2022 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -92,7 +92,10 @@ function(process_source_files src_files)
 	set(annotated_files)
 
 	# build up the command line to the preprocessor
-	set(BASE_ARGS )
+	set(BASE_ARGS)
+	if("@CMAKE_C_COMPILER_ID@" STREQUAL "MSVC")
+		list(APPEND BASE_ARGS "-nologo")
+	endif()
 	foreach(incdir IN LISTS OPT_INCLUDE_DIRS)
 		list(APPEND BASE_ARGS "-I${incdir}")
 	endforeach()
@@ -137,15 +140,31 @@ function(process_source_files src_files)
 				-Doutput_file=${stub_file}
 				"${path_tool_opt}"
 				-P ${DDR_SUPPORT_DIR}/GenerateStub.cmake
-				VERBATIM
+			COMMENT ""
+			VERBATIM
 		)
 
 		set(pp_command "@CMAKE_C_COMPILER@")
+		if("@CMAKE_C_COMPILER_IS_XLCLANG@")
+			# XLClang seems to have trouble with *.h and *.hpp files here, claiming:
+			# "error: invalid argument '-std=gnu++0x' not allowed with 'C/ObjC'"
+			# Adding this option to the command alleviates this issue.
+			list(APPEND pp_command "-xc++")
+		endif()
+		if("@OMR_OS_ZOS@" AND "@OMR_ENV_DATA64@")
+			# we need to set 64 bit code generation to ensure that limits.h macros are set correctly.
+			list(APPEND pp_command "-Wc,lp64")
+		endif()
+		if("@OMR_OS_WINDOWS@" AND extension MATCHES "\.hpp$")
+			# Visual Studio needs to be told that .hpp files as C++ code.
+			list(APPEND pp_command "/TP")
+		endif()
 		list(APPEND pp_command ${BASE_ARGS} "-E" "${stub_file}")
 		add_custom_command(
 			OUTPUT "${annt_file}"
 			DEPENDS "${stub_file}"
-			COMMAND ${pp_command} | awk "/^\$/ { next } /^DDRFILE_BEGIN /,/^DDRFILE_END / { print \"@\" $0 }" > ${annt_file}
+			COMMAND ${pp_command} | awk "/^DDRFILE_BEGIN /,/^DDRFILE_END / { gsub(/[\\t\\r ]*$/, \"\"); if (NF != 0) { print \"@\" $0 } }" > ${annt_file}
+			COMMENT ""
 			VERBATIM
 		)
 	endforeach()
@@ -254,15 +273,15 @@ if(ZOS)
 		# Empty exclude regex, just include everything
 		file(GLOB_RECURSE target_files "${OBJECT_SEARCH_ROOT}/*.dbg")
 	else()
-		file(GLOB_RECURSE dbg_files  RELATIVE "${OBJECT_SEARCH_ROOT}" "${OBJECT_SEARCH_ROOT}/*.dbg")
+		file(GLOB_RECURSE dbg_files RELATIVE "${OBJECT_SEARCH_ROOT}" "${OBJECT_SEARCH_ROOT}/*.dbg")
 		foreach(item IN LISTS dbg_files)
 			if(NOT "${item}" MATCHES "${OBJECT_EXCLUDE_REGEX}")
 				list(APPEND target_files "${OBJECT_SEARCH_ROOT}/${item}")
 			endif()
 		endforeach()
 	endif()
-
 endif()
+
 # now we generate our own list of binaries, so that they can be parsed if we are a subset
 omr_join("\n" binaries_list
 	${target_files}

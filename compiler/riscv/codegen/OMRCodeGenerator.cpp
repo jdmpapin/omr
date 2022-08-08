@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2020 IBM Corp. and others
+ * Copyright (c) 2019, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -72,6 +72,8 @@ OMR::RV::CodeGenerator::initialize()
 
    cg->getLinkage()->initRVRealRegisterLinkage();
 
+   cg->setSupportsVirtualGuardNOPing();
+
    _numberBytesReadInaccessible = 0;
    _numberBytesWriteInaccessible = 0;
 
@@ -101,7 +103,7 @@ OMR::RV::CodeGenerator::initialize()
    // Calculate inverse of getGlobalRegister function
    //
    TR_GlobalRegisterNumber grn;
-   int i;
+   uint16_t i;
 
    TR_GlobalRegisterNumber globalRegNumbers[TR::RealRegister::NumRegisters];
    for (i = 0; i < cg->getNumberOfGlobalGPRs(); i++)
@@ -152,67 +154,6 @@ OMR::RV::CodeGenerator::endInstructionSelection()
    if (_returnTypeInfoInstruction != NULL)
       {
       _returnTypeInfoInstruction->setSourceImmediate(static_cast<uint32_t>(self()->comp()->getReturnInfo()));
-      }
-   }
-
-void
-OMR::RV::CodeGenerator::doRegisterAssignment(TR_RegisterKinds kindsToAssign)
-   {
-   // Registers are assigned in backward direction
-
-   TR::Compilation *comp = self()->comp();
-
-   TR::Instruction *instructionCursor = self()->getAppendInstruction();
-
-   if (!comp->getOption(TR_DisableOOL))
-      {
-      TR::list<TR::Register*> *spilledRegisterList = new (self()->trHeapMemory()) TR::list<TR::Register*>(getTypedAllocator<TR::Register*>(comp->allocator()));
-      self()->setSpilledRegisterList(spilledRegisterList);
-      }
-
-   if (self()->getDebug())
-      self()->getDebug()->startTracingRegisterAssignment();
-
-   while (instructionCursor)
-      {
-      TR::Instruction *prevInstruction = instructionCursor->getPrev();
-
-      self()->tracePreRAInstruction(instructionCursor);
-
-      self()->setCurrentBlockIndex(instructionCursor->getBlockIndex());
-
-      instructionCursor->assignRegisters(TR_GPR);
-
-      // Maintain Internal Control Flow Depth
-      // Track internal control flow on labels
-      if (instructionCursor->isLabel())
-         {
-         TR::LabelInstruction *li = (TR::LabelInstruction *)instructionCursor;
-
-         if (li->getLabelSymbol() != NULL)
-            {
-            if (li->getLabelSymbol()->isStartInternalControlFlow())
-               {
-               self()->decInternalControlFlowNestingDepth();
-               }
-            if (li->getLabelSymbol()->isEndInternalControlFlow())
-               {
-               self()->incInternalControlFlowNestingDepth();
-               }
-            }
-         }
-
-      self()->freeUnlatchedRegisters();
-      self()->buildGCMapsForInstructionAndSnippet(instructionCursor);
-
-      self()->tracePostRAInstruction(instructionCursor);
-
-      instructionCursor = prevInstruction;
-      }
-
-   if (self()->getDebug())
-      {
-      self()->getDebug()->stopTracingRegisterAssignment();
       }
    }
 
@@ -398,6 +339,14 @@ void OMR::RV::CodeGenerator::buildRegisterMapForInstruction(TR_GCStackMap *map)
    }
 
 
+bool
+OMR::RV::CodeGenerator::directCallRequiresTrampoline(intptr_t targetAddress, intptr_t sourceAddress)
+   {
+   return
+      !self()->comp()->target().cpu.isTargetWithinUnconditionalBranchImmediateRange(targetAddress, sourceAddress) ||
+      self()->comp()->getOption(TR_StressTrampolines);
+   }
+
 TR_GlobalRegisterNumber OMR::RV::CodeGenerator::pickRegister(TR_RegisterCandidate *regCan,
                                                           TR::Block **barr,
                                                           TR_BitVector &availRegs,
@@ -492,4 +441,15 @@ int64_t OMR::RV::CodeGenerator::getSmallestPosConstThatMustBeMaterialized()
    {
    TR_ASSERT(0, "Not Implemented on AArch64");
    return 0;
+   }
+
+bool OMR::RV::CodeGenerator::isILOpCodeSupported(TR::ILOpCodes o)
+   {
+   switch(o)
+      {
+      case TR::a2i:
+         return false;
+      default:
+         return OMR::CodeGenerator::isILOpCodeSupported(o);
+      }
    }

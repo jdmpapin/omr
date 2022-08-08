@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -95,6 +95,15 @@ char *feGetEnv(const char *s)
 #include "control/Options.hpp"
 #include "control/Options_inlines.hpp"
 
+#if defined(LINUX)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
+#elif defined(OSX)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winvalid-offsetof"
+#elif defined(AIXPPC) || defined(J9ZOS390)
+#pragma report(disable, "CCN6281")
+#endif
 
 TR::OptionTable OMR::Options::_feOptions[] =
    {
@@ -114,6 +123,13 @@ TR::OptionTable OMR::Options::_feOptions[] =
    {0}
    };
 
+#if defined(LINUX)
+#pragma GCC diagnostic pop
+#elif defined(OSX)
+#pragma clang diagnostic pop
+#elif defined(AIXPPC) || defined(J9ZOS390)
+#pragma report(enable, "CCN6281")
+#endif
 
 #include "control/Recompilation.hpp"
 

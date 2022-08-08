@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -415,8 +415,8 @@ void TR_VirtualGuardTailSplitter::transformLinear(TR::Block *first, TR::Block *l
       if (_cfg->getStructure())
          {
          next->getStructureOf()->getParent()->asRegion()->
-            addSubNode(new (_cfg->structureRegion()) TR_StructureSubGraphNode
-                       (new (_cfg->structureRegion()) TR_BlockStructure(comp(), clone->getNumber(), clone)));
+            addSubNode(new (_cfg->structureMemoryRegion()) TR_StructureSubGraphNode
+                       (new (_cfg->structureMemoryRegion()) TR_BlockStructure(comp(), clone->getNumber(), clone)));
          }
 
       if (trace())
@@ -916,7 +916,7 @@ TR_InnerPreexistence::GuardInfo::GuardInfo(TR::Compilation * comp, TR::Block *bl
    {
    TR::Node *guardNode = block->getLastRealTreeTop()->getNode();
    TR::Node * callNode = guardNode->getVirtualCallNodeForGuard();
-   TR_ASSERT(callNode->getOpCode().isIndirect(), "Guarded calls must be indirect");
+   TR_ASSERT_FATAL(callNode->getOpCode().isIndirect(), "Guarded calls must be indirect");
 
    _argVNs = new (comp->trStackMemory()) TR_BitVector(20, comp->trMemory(), stackAlloc, growable);
    _innerSubTree = new (comp->trStackMemory()) TR_BitVector(numInlinedSites, comp->trMemory(), stackAlloc, notGrowable);

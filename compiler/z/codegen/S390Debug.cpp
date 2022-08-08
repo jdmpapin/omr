@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -158,7 +158,7 @@ TR_Debug::printz(TR::FILE *pOutFile, TR::Instruction * instr)
       }
 
    //  dump the inst's pre deps
-   if (instr->getOpCodeValue() != TR::InstOpCode::ASSOCREGS && _comp->cg()->getCodeGeneratorPhase() <= TR::CodeGenPhase::BinaryEncodingPhase)
+   if (instr->getOpCodeValue() != TR::InstOpCode::assocreg && _comp->cg()->getCodeGeneratorPhase() <= TR::CodeGenPhase::BinaryEncodingPhase)
       dumpDependencies(pOutFile, instr, true, false);
 
    switch (instr->getKind())
@@ -335,6 +335,7 @@ TR_Debug::printz(TR::FILE *pOutFile, TR::Instruction * instr)
       case TR::Instruction::IsVRRg:
       case TR::Instruction::IsVRRh:
       case TR::Instruction::IsVRRi:
+      case TR::Instruction::IsVRRk:
             print(pOutFile, (TR::S390VRRInstruction *) instr);
          break;
       case TR::Instruction::IsVRSa:
@@ -352,10 +353,10 @@ TR_Debug::printz(TR::FILE *pOutFile, TR::Instruction * instr)
       case TR::Instruction::IsNotExtended:
       case TR::Instruction::IsE:
          {
-         // ASSOCREGS piggy backs on a vanilla TR::Instruction
-         // if (instr->getOpCodeValue() == TR::InstOpCode::ASSOCREGS) break;
+         // assocreg piggy backs on a vanilla TR::Instruction
+         // if (instr->getOpCodeValue() == TR::InstOpCode::assocreg) break;
 
-         if ((instr->getOpCodeValue() == TR::InstOpCode::ASSOCREGS) && /*(debug("traceMsg90RA"))*/
+         if ((instr->getOpCodeValue() == TR::InstOpCode::assocreg) && /*(debug("traceMsg90RA"))*/
              (_comp->getOption(TR_TraceRA)))
             {
             if (_comp->cg()->getCodeGeneratorPhase() < TR::CodeGenPhase::BinaryEncodingPhase)
@@ -371,7 +372,7 @@ TR_Debug::printz(TR::FILE *pOutFile, TR::Instruction * instr)
       }
 
    //  dump the inst's post deps
-   if (instr->getOpCodeValue() != TR::InstOpCode::ASSOCREGS && _comp->cg()->getCodeGeneratorPhase() <= TR::CodeGenPhase::BinaryEncodingPhase)
+   if (instr->getOpCodeValue() != TR::InstOpCode::assocreg && _comp->cg()->getCodeGeneratorPhase() <= TR::CodeGenPhase::BinaryEncodingPhase)
       dumpDependencies(pOutFile, instr, false, true);
    }
 
@@ -471,7 +472,7 @@ TR_Debug::printInstructionComment(TR::FILE *pOutFile, int32_t tabStops, TR::Inst
 void
 TR_Debug::printAssocRegDirective(TR::FILE *pOutFile, TR::Instruction * instr)
    {
-   TR_S390RegisterDependencyGroup * depGroup = instr->getDependencyConditions()->getPostConditions();
+   TR::RegisterDependencyGroup * depGroup = instr->getDependencyConditions()->getPostConditions();
 
    printPrefix(pOutFile, instr);
    trfprintf(pOutFile, "%s", instr->getOpCode().getMnemonicName());
@@ -681,7 +682,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::S390LabelInstruction * instr)
    const char * symbolName = getName(label);
    printPrefix(pOutFile, instr);
 
-   if (instr->getOpCodeValue() == TR::InstOpCode::LABEL)
+   if (instr->getOpCodeValue() == TR::InstOpCode::label)
       {
          {
          trfprintf(pOutFile, symbolName);
@@ -760,7 +761,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::S390BranchInstruction * instr)
 
 
    TR::LabelSymbol * label = instr->getLabelSymbol();
-   TR_ASSERT(instr->getOpCodeValue() != TR::InstOpCode::LABEL,  "assertion failure");
+   TR_ASSERT(instr->getOpCodeValue() != TR::InstOpCode::label,  "assertion failure");
 
    trfprintf(pOutFile, "%-*s", OPCODE_SPACING, instr->getOpCode().getMnemonicName());
    trfprintf(pOutFile, "%s(0x%1x), ", brCondName, mask );
@@ -794,7 +795,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::S390BranchOnCountInstruction * instr)
    printPrefix(pOutFile, instr);
 
    TR::LabelSymbol * label = instr->getLabelSymbol();
-   TR_ASSERT(instr->getOpCodeValue() != TR::InstOpCode::LABEL, "assertion failure");
+   TR_ASSERT(instr->getOpCodeValue() != TR::InstOpCode::label, "assertion failure");
    trfprintf(pOutFile, "%-*s", OPCODE_SPACING, instr->getOpCode().getMnemonicName());
    print(pOutFile, instr->getRegisterOperand(1));
    trfprintf(pOutFile, ",");
@@ -815,7 +816,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::S390BranchOnIndexInstruction * instr)
    printPrefix(pOutFile, instr);
 
    TR::LabelSymbol * label = instr->getLabelSymbol();
-   TR_ASSERT(instr->getOpCodeValue() != TR::InstOpCode::LABEL, "assertion failure");
+   TR_ASSERT(instr->getOpCodeValue() != TR::InstOpCode::label, "assertion failure");
    trfprintf(pOutFile, "%-*s", OPCODE_SPACING, instr->getOpCode().getMnemonicName());
    print(pOutFile, instr->getRegisterOperand(1));
    trfprintf(pOutFile, ",");
@@ -882,7 +883,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::S390PseudoInstruction * instr)
       trfprintf(pOutFile, ", Debug Counter Bump");
       }
 
-   if (instr->getOpCodeValue() == TR::InstOpCode::FENCE)
+   if (instr->getOpCodeValue() == TR::InstOpCode::fence)
       {
       if (instr->getFenceNode() != NULL)
          {
@@ -2277,7 +2278,7 @@ TR_Debug::getName(TR::RealRegister * reg, TR_RegisterSizes size)
    if (!reg) return "<null>";
 
    TR::RealRegister::RegNum regNum = reg->getRegisterNumber();
-   bool isVRF = (size == TR_VectorReg &&
+   bool isVRF = (size == TR_VectorReg128 &&
                  regNum >= TR::RealRegister::FirstVRF &&
                  regNum <= TR::RealRegister::LastVRF);
 
@@ -2534,7 +2535,7 @@ TR_Debug::printS390RegisterDependency(TR::FILE *pOutFile, TR::Register * virtReg
    }
 
 void
-TR_Debug::printRegisterDependencies(TR::FILE *pOutFile, TR_S390RegisterDependencyGroup * rgd, int numberOfRegisters)
+TR_Debug::printRegisterDependencies(TR::FILE *pOutFile, TR::RegisterDependencyGroup * rgd, int numberOfRegisters)
    {
    if (pOutFile == NULL || rgd == NULL)
       {
@@ -2754,7 +2755,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::S390VRIInstruction * instr)
       {
       if (i != 1)
          trfprintf(pOutFile, ",");
-      print(pOutFile, instr->getRegisterOperand(i), TR_VectorReg);
+      print(pOutFile, instr->getRegisterOperand(i), TR_VectorReg128);
       }
 
    switch(instr->getKind())
@@ -2830,7 +2831,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::S390VRRInstruction * instr)
       bool isGPR = (instr->getKind() == TR::Instruction::IsVRRf && (i == 2 || i == 3)) ||
               (instr->getKind() == TR::Instruction::IsVRRi && (i == 1));
 
-      print(pOutFile, instr->getRegisterOperand(i), (isGPR)?TR_WordReg:TR_VectorReg);
+      print(pOutFile, instr->getRegisterOperand(i), (isGPR)?TR_WordReg:TR_VectorReg128);
       }
 
    if (instr->getPrintM3())
@@ -2861,7 +2862,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::S390VStorageInstruction * instr)
    bool secondRegIsGPR = (instKind == TR::Instruction::IsVRSb) || (instKind == TR::Instruction::IsVRSd);
 
    // 1st register operand
-   print(pOutFile, instr->getRegisterOperand(1), (firstRegIsGPR)?TR_WordReg:TR_VectorReg);
+   print(pOutFile, instr->getRegisterOperand(1), (firstRegIsGPR)?TR_WordReg:TR_VectorReg128);
 
    // 2nd register operand, if any
    trfprintf(pOutFile, ",");
@@ -2869,7 +2870,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::S390VStorageInstruction * instr)
        instKind != TR::Instruction::IsVRV &&
        instKind != TR::Instruction::IsVSI)
       {
-      print(pOutFile, instr->getRegisterOperand(2),(secondRegIsGPR)?TR_WordReg:TR_VectorReg);
+      print(pOutFile, instr->getRegisterOperand(2),(secondRegIsGPR)?TR_WordReg:TR_VectorReg128);
       trfprintf(pOutFile, ",");
       }
 

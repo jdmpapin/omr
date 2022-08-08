@@ -1,5 +1,5 @@
 <!--
-Copyright (c) 2016, 2019 IBM Corp. and others
+Copyright (c) 2016, 2021 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -55,7 +55,6 @@ Build Status
 | Windows x86-64 | [![Windows x86-64 Status](https://ci.eclipse.org/omr/job/Build-win_x86-64/badge/icon)](https://ci.eclipse.org/omr/job/Build-win_x86-64/) |
 | Linux x86 | [![Build Status](https://ci.eclipse.org/omr/job/Build-linux_x86/badge/icon)](https://ci.eclipse.org/omr/job/Build-linux_x86/) |
 | Linux x86-64 | [![Linux x86-64 Status](https://ci.eclipse.org/omr/job/Build-linux_x86-64/badge/icon)](https://ci.eclipse.org/omr/job/Build-linux_x86-64/) |
-| Linux x86-64 Compressed Pointers | [![Build Status](https://ci.eclipse.org/omr/job/Build-linux_x86-64_cmprssptrs/badge/icon)](https://ci.eclipse.org/omr/job/Build-linux_x86-64_cmprssptrs/) |
 | Linux AArch64 (ARM 64-bit) | [![Build-linux_aarch64 Status](https://ci.eclipse.org/omr/job/Build-linux_aarch64/badge/icon)](https://ci.eclipse.org/omr/job/Build-linux_aarch64/) |
 | Linux ARM 32-bit | [![Build-linux_arm Status](https://ci.eclipse.org/omr/job/Build-linux_arm/badge/icon)](https://ci.eclipse.org/omr/job/Build-linux_arm/) |
 | OSX x86-64 | [![Build Status](https://ci.eclipse.org/omr/job/Build-osx_x86-64/badge/icon)](https://ci.eclipse.org/omr/job/Build-osx_x86-64/) |
@@ -81,7 +80,7 @@ Who is using Eclipse OMR?
 =========================
 
 * The most comprehensive consumer of the Eclipse OMR technology is the [Eclipse
-  OpenJ9 Virtual Machine](https://github.com/eclipse/openj9): a high
+  OpenJ9 Virtual Machine](https://github.com/eclipse-openj9/openj9): a high
   performance, scalable, enterprise class Java Virtual Machine implementation
   representing hundreds of person years of effort, built on top of the core
   technologies provided by Eclipse OMR.
@@ -122,10 +121,10 @@ Contributing
 ============
 
 If you would like to contribute to OMR, check out the [contributing guide][contrib] for more information.
-We also have curated a set of [beginner issues][beg] for newcommers to tackle.
+We also have curated a set of [good first issues][beg] for newcomers to tackle.
 
 [contrib]: CONTRIBUTING.md
-[beg]: https://github.com/eclipse/omr/issues?q=is%3Aopen+is%3Aissue+label%3Abeginner
+[beg]: https://github.com/eclipse/omr/issues?q=is%3Aopen+is%3Aissue+label%3A%22good%20first%20issue%22
 
 How Do I Use it?
 ================
@@ -144,7 +143,7 @@ source tree. For more detailed instructions please read [BuildingWithCMake.md](d
     # Create a build directory and cd into it
     mkdir build
     cd build
-    
+
     # Generate the build system using cmake
     cmake ..
 
@@ -164,7 +163,7 @@ You can easily switch this to the version of Visual Studio you would like to use
     # Create a build directory and cd into it
     mkdir build
     cd build
-    
+
     #generate the build system using cmake
     cmake -G "Visual Studio 11 2012 Win64" ..
 

@@ -308,6 +308,8 @@ public:
 
 	virtual bool isMarked(void *objectPtr);
 
+	virtual void checkColorAndMark(MM_EnvironmentBase* env, omrobjectptr_t objectPtr);
+
 	/**
 	 * Return reference to Marking Scheme
 	 */
@@ -329,6 +331,8 @@ public:
 	 * that an Exclusive VM Access is to be requested so that VM access can be released
 	 */	
 	virtual void notifyAcquireExclusiveVMAccess(MM_EnvironmentBase *env);
+
+	virtual void workStackOverflow() {}
 
 	MM_ParallelGlobalGC(MM_EnvironmentBase *env)
 		: MM_GlobalCollector()

@@ -1,5 +1,5 @@
 <!--
-Copyright (c) 2020, 2020 IBM Corp. and others
+Copyright (c) 2020, 2021 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -83,8 +83,8 @@ wizard.
 Before you can make any code contributions to the Eclipse OMR GitHub repository
 you must sign the Eclipse Contributor Agreement (ECA).  This is a simple process
 outlined in the [Contribution Guidelines](../CONTRIBUTING.md#legal-considerations).
-This step is important because each of your commits must be signed off by the
-same email you used to sign the ECA.
+This step is important because the email of the author of each commit 
+must match the email you used to sign the ECA.
 
 ---
 
@@ -107,7 +107,7 @@ simply go into the project directory and enter any of the above commands
 with the project-specific name/email to use and excluding the `--global`
 argument.
 
-Please note that the email associated with the commits you make in OMR must
+Please note that the email associated with the author of the commits you make in OMR must
 be the email you used for signing the
 [ECA - Eclipse Foundation Contributor Agreement](http://www.eclipse.org/legal/ECA.php).
 Therefore, you must either configure the global `user.email` or the OMR
@@ -176,7 +176,7 @@ updating their own copies. For OMR, the main repository is
 Every contributor to the OMR project needs to have their own **fork** on
 GitHub.
 
-![](./images/distributed-vcs-model.svg)  
+![](./images/distributed-vcs-model.svg)
 *Figure 1: Distributed VCS model with contributors having their own copies (forks) of OMR*
 
 A fork is simply a copy of a repository in your own GitHub account that
@@ -186,7 +186,7 @@ and pushing your changes to your fork. You will then have to open a pull
 request to merge your changes into the main OMR repository. Figure 2 below
 outlines the process.
 
-![](./images/omr-dev-workflow.svg)  
+![](./images/omr-dev-workflow.svg)
 *Figure 2: OMR development workflow*
 
 In the diagram above, there are 3 copies of the repository. The `yourgithub/omr`
@@ -210,10 +210,10 @@ The Eclipse OMR project makes use of [Issues](https://github.com/eclipse/omr/iss
 mainly for keeping track of tasks, bugs, and discussions out in the open.
 
 Issues can be categorized using coloured labels (eg, `compiler`,
-`beginner`,`backlog`, `help wanted`). If you are making your first
+`good first issue`,`backlog`, `help wanted`). If you are making your first
 contribution to Eclipse OMR, it is a good idea to tackle an issue labelled
-`beginner` before taking on more challenging tasks. Clicking on `Labels` drop
-down menu and selecting `beginner` label will show you issues with that label.
+`good first issue` before taking on more challenging tasks. Clicking on `Labels` drop
+down menu and selecting `good first issue` label will show you issues with that label.
 
 ### Create a fork
 
@@ -225,7 +225,7 @@ repository page on GitHub.
 Now that you have created a fork, you too have a copy of the OMR
 repository in your GitHub account like the other contributors!
 
-![](./images/addition-of-a-fork.svg)  
+![](./images/addition-of-a-fork.svg)
 *Figure 3: New fork created*
 
 ### Clone your fork locally
@@ -256,7 +256,7 @@ nothing to commit, working tree clean
 This indicates that you are currently on master branch, and no changes
 were made in this branch that you can commit.
 
-![](./images/branch1.svg)  
+![](./images/branch1.svg)
 *Figure 4: The master branch*
 
 Branching allows splitting the chain of commits made in a repository. The branch
@@ -270,7 +270,7 @@ To create a new branch, enter the following command:
 git branch new-branch
 ```
 
-![](./images/branch2.svg)  
+![](./images/branch2.svg)
 *Figure 5: Creating a new branch*
 
 You will now have a new branch named `new-branch`, and since you created
@@ -294,7 +294,7 @@ Adding new commits to your branches will leave `master` untouched. Using
 branches, you can create multiple chain of commits independently, as the
 diagram below demonstrates with an additional branch `another-branch`:
 
-![](./images/branch3.svg)  
+![](./images/branch3.svg)
 *Figure 6: Multiple branches with their independent chain of commits*
 
 To see the current branches in your local repository, simply enter `git branch`,
@@ -346,7 +346,6 @@ The guidelines are changed to:
   message.
 
 Issue: #124
-Signed-off-by: Robert Young <rwy0717@gmail.com>
 ```
 
 The first line in the commit message is the commit heading, and should
@@ -354,16 +353,11 @@ summarize what this commit is doing. After a blank line comes the body of
 the commit message containing more details about what this commit is
 about. You can be as descriptive of the changes as you wish.
 
-Next, you may include the Issue in OMR that this commit addresses,
-followed by signing off the commit.
+Next, you may include the Issue in OMR that this commit addresses.
 
 Tips: `git commit -a` combines the 2 commands:
 1. `git add -u`
 2. `git commit`
-
-You can also generate the `Signed-off-by:` information in your commit message
-from your `user.name` and `user.email` settings using the `-s` flag in your
-`git commit` command.
 
 ### Push branch to your fork
 
@@ -447,7 +441,7 @@ on your `new-branch` branch. You created `new-branch` basing it on the `master`
 branch you got when you first cloned your fork. Let's suppose you added the
 commits `b1` and `b2` to `new-branch`. It would look something like this:
 
-![](./images/rebase1.svg)  
+![](./images/rebase1.svg)
 *Figure 7: Commits added in your `new-branch`*
 
 Given the number of contributors to the Eclipse OMR project, it is likely that
@@ -456,14 +450,14 @@ you created `new-branch` off of) branch being out of sync with `eclipse/omr`'s
 master branch that you are trying to merge your changes into.
 
 
-![](./images/rebase2.svg)  
+![](./images/rebase2.svg)
 *Figure 8: Outdated base*
 
 The goal of rebasing is to apply your commits on top of the current version of the
 branch you are trying to merge your changes into (in this case, `master` branch of
 `eclipse/omr`).
 
-![](./images/rebase3.svg)  
+![](./images/rebase3.svg)
 *Figure 9: Resulting chain of commits after rebase*
 
 Rebasing is also useful when you are trying to resolve **merge conflicts**.

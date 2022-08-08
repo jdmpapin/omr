@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -53,7 +53,7 @@
 #include "runtime/Runtime.hpp"
 #include "x/codegen/DataSnippet.hpp"
 #include "x/codegen/X86Instruction.hpp"
-#include "x/codegen/X86Ops.hpp"
+#include "codegen/InstOpCode.hpp"
 
 class TR_OpaqueClassBlock;
 class TR_ScratchRegisterManager;
@@ -189,7 +189,15 @@ OMR::X86::MemoryReference::MemoryReference(
          // We can't do this when the access is unresolved.
          //
          TR::Node *base = rootLoadOrStore->getFirstChild();
+
+         // Use the register evaluated from the loadaddr as the base object
+         // in a memory reference rather than accessing directly from the
+         // stack.
+         //
+         static bool useLoadAddrRegisterForLocalObjectMemRef = feGetEnv("TR_useLoadAddrRegisterForLocalObjectMemRef") ? true : false;
+
          if (!isUnresolved &&
+             !useLoadAddrRegisterForLocalObjectMemRef &&
              base->getOpCodeValue() == TR::loadaddr &&
              base->getSymbol()->isLocalObject())
             {
@@ -292,7 +300,7 @@ OMR::X86::MemoryReference::setUnresolvedDataSnippet(TR::UnresolvedDataSnippet *s
 TR::X86DataSnippet*
 OMR::X86::MemoryReference::getDataSnippet()
    {
-   return (self()->hasUnresolvedDataSnippet() || self()->hasUnresolvedVirtualCallSnippet()) ? NULL : (TR::X86DataSnippet*)_dataSnippet;
+   return self()->hasUnresolvedDataSnippet() ? NULL : (TR::X86DataSnippet*)_dataSnippet;
    }
 
 
@@ -791,9 +799,9 @@ OMR::X86::MemoryReference::evaluate(TR::Node * node, TR::CodeGenerator * cg, TR:
          //Sign extension in the 64-bit case
          TR::Instruction *instr = NULL;
          if (node->getSize() == 4)
-            instr = generateRegRegInstruction(MOVSXReg8Reg4, node, reg, reg, cg);
+            instr = generateRegRegInstruction(TR::InstOpCode::MOVSXReg8Reg4, node, reg, reg, cg);
          else if (node->getSize() == 2)
-            instr = generateRegRegInstruction(MOVSXReg8Reg2, node, reg, reg, cg);
+            instr = generateRegRegInstruction(TR::InstOpCode::MOVSXReg8Reg2, node, reg, reg, cg);
 
          if (cg->comp()->getOption(TR_TraceCG))
             traceMsg(cg->comp(), "Add a sign extension instruction to 64-bit in Upcasting Mode %x\n", instr);
@@ -804,7 +812,7 @@ OMR::X86::MemoryReference::evaluate(TR::Node * node, TR::CodeGenerator * cg, TR:
          //Sign extension in the 32-bit case
          TR::Instruction *instr = NULL;
          if (node->getSize() == 2)
-            instr = generateRegRegInstruction(MOVSXReg4Reg2, node, reg, reg, cg);
+            instr = generateRegRegInstruction(TR::InstOpCode::MOVSXReg4Reg2, node, reg, reg, cg);
 
          if (cg->comp()->getOption(TR_TraceCG))
             traceMsg(cg->comp(), "Add a sign extension instruction to 32-bit in Upcasting Mode %x\n", instr);
@@ -849,7 +857,7 @@ OMR::X86::MemoryReference::consolidateRegisters(
       }
 
    TR::MemoryReference  *interimMemoryReference = generateX86MemoryReference(_baseRegister, _indexRegister, _stride, cg);
-   generateRegMemInstruction(LEARegMem(), node, tempTargetRegister, interimMemoryReference, cg);
+   generateRegMemInstruction(TR::InstOpCode::LEARegMem(), node, tempTargetRegister, interimMemoryReference, cg);
    self()->decNodeReferenceCounts(cg);
    _baseRegister  = tempTargetRegister;
    _baseNode      = NULL;
@@ -1632,6 +1640,20 @@ OMR::X86::MemoryReference::generateBinaryEncoding(
 
          displacement = self()->getDisplacement();
          TR_ASSERT(IS_32BIT_SIGNED(displacement), "64-bit displacement should have been replaced in TR_AMD64MemoryReference::generateBinaryEncoding");
+
+         uint8_t divisor = 16;
+         divisor = containingInstruction->getOpCode().info().isEvex256() ? 32 : divisor;
+         divisor = containingInstruction->getOpCode().info().isEvex512() ? 64 : divisor;
+
+         if (!isForceWideDisplacement() && containingInstruction->getOpCode().info().isEvex() && displacement % divisor == 0 && IS_8BIT_SIGNED(displacement / divisor))
+            {
+            displacement /= divisor;
+            }
+         else if (containingInstruction->getOpCode().info().isEvex())
+            {
+            setForceWideDisplacement();
+            }
+
          base->setRMRegisterFieldInModRM(cursor++);
          immediateCursor = cursor;
 
@@ -1693,6 +1715,20 @@ OMR::X86::MemoryReference::generateBinaryEncoding(
          immediateCursor = cursor;
 
          TR_ASSERT(IS_32BIT_SIGNED(displacement), "64-bit displacement should have been replaced in TR_AMD64MemoryReference::generateBinaryEncoding");
+
+         uint8_t divisor = 16;
+         divisor = containingInstruction->getOpCode().info().isEvex256() ? 32 : divisor;
+         divisor = containingInstruction->getOpCode().info().isEvex512() ? 64 : divisor;
+
+         if (!isForceWideDisplacement() && containingInstruction->getOpCode().info().isEvex() && displacement % divisor == 0 && IS_8BIT_SIGNED(displacement / divisor))
+            {
+            displacement /= divisor;
+            }
+         else if (containingInstruction->getOpCode().info().isEvex())
+            {
+            setForceWideDisplacement();
+            }
+
          if (displacement >= -128 &&
              displacement <= 127  &&
              !self()->isForceWideDisplacement())

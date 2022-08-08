@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -540,67 +540,6 @@ OMR::Power::CodeGenerator::mulDecompositionCostIsJustified(
       }
    }
 
-void OMR::Power::CodeGenerator::doRegisterAssignment(TR_RegisterKinds kindsToAssign)
-   {
-   TR::Instruction *prevInstruction;
-
-   // gprs, fprs, and ccrs are all assigned in backward direction
-
-   TR::Instruction *instructionCursor = self()->getAppendInstruction();
-
-   TR::Block *currBlock = NULL;
-   TR::Instruction * currBBEndInstr = instructionCursor;
-
-   if (!self()->comp()->getOption(TR_DisableOOL))
-      {
-      TR::list<TR::Register*> *spilledRegisterList = new (self()->trHeapMemory()) TR::list<TR::Register*>(getTypedAllocator<TR::Register*>(self()->comp()->allocator()));
-      self()->setSpilledRegisterList(spilledRegisterList);
-      }
-
-   if (self()->getDebug())
-      self()->getDebug()->startTracingRegisterAssignment();
-
-   while (instructionCursor)
-      {
-      prevInstruction = instructionCursor->getPrev();
-
-      self()->tracePreRAInstruction(instructionCursor);
-
-      self()->setCurrentBlockIndex(instructionCursor->getBlockIndex());
-
-      instructionCursor->assignRegisters(TR_GPR);
-
-      // Maintain Internal Control Flow Depth
-      // Track internal control flow on labels
-      if (instructionCursor->isLabel())
-         {
-         TR::PPCLabelInstruction *li = (TR::PPCLabelInstruction *)instructionCursor;
-
-         if (li->getLabelSymbol() != NULL)
-            {
-            if (li->getLabelSymbol()->isStartInternalControlFlow())
-               {
-               self()->decInternalControlFlowNestingDepth();
-               }
-            if (li->getLabelSymbol()->isEndInternalControlFlow())
-               {
-               self()->incInternalControlFlowNestingDepth();
-               }
-            }
-         }
-
-      self()->freeUnlatchedRegisters();
-      self()->buildGCMapsForInstructionAndSnippet(instructionCursor);
-
-      self()->tracePostRAInstruction(instructionCursor);
-
-      instructionCursor = prevInstruction;
-      }
-
-   if (self()->getDebug())
-      self()->getDebug()->stopTracingRegisterAssignment();
-   }
-
 TR::Instruction *OMR::Power::CodeGenerator::generateNop(TR::Node *n, TR::Instruction *preced, TR_NOPKind nopKind)
    {
    TR::InstOpCode::Mnemonic nop;
@@ -813,24 +752,21 @@ void OMR::Power::CodeGenerator::doBinaryEncoding()
 
    // Create exception table entries for outlined instructions.
    //
-   if (!self()->comp()->getOption(TR_DisableOOL))
+   auto oiIterator = self()->getPPCOutOfLineCodeSectionList().begin();
+   while (oiIterator != self()->getPPCOutOfLineCodeSectionList().end())
       {
-      auto oiIterator = self()->getPPCOutOfLineCodeSectionList().begin();
-      while (oiIterator != self()->getPPCOutOfLineCodeSectionList().end())
-         {
-         uint32_t startOffset = (*oiIterator)->getFirstInstruction()->getBinaryEncoding() - self()->getCodeStart();
-         uint32_t endOffset   = (*oiIterator)->getAppendInstruction()->getBinaryEncoding() - self()->getCodeStart();
+      uint32_t startOffset = (*oiIterator)->getFirstInstruction()->getBinaryEncoding() - self()->getCodeStart();
+      uint32_t endOffset   = (*oiIterator)->getAppendInstruction()->getBinaryEncoding() - self()->getCodeStart();
 
-         TR::Block * block = (*oiIterator)->getBlock();
-         bool needsETE = (*oiIterator)->getFirstInstruction()->getNode()->getOpCode().hasSymbolReference() &&
-                         (*oiIterator)->getFirstInstruction()->getNode()->getSymbolReference() &&
-                         (*oiIterator)->getFirstInstruction()->getNode()->getSymbolReference()->canCauseGC();
+      TR::Block * block = (*oiIterator)->getBlock();
+      bool needsETE = (*oiIterator)->getFirstInstruction()->getNode()->getOpCode().hasSymbolReference() &&
+                        (*oiIterator)->getFirstInstruction()->getNode()->getSymbolReference() &&
+                        (*oiIterator)->getFirstInstruction()->getNode()->getSymbolReference()->canCauseGC();
 
-         if (needsETE && block && !block->getExceptionSuccessors().empty())
-            block->addExceptionRangeForSnippet(startOffset, endOffset);
+      if (needsETE && block && !block->getExceptionSuccessors().empty())
+         block->addExceptionRangeForSnippet(startOffset, endOffset);
 
-         ++oiIterator;
-         }
+      ++oiIterator;
       }
    }
 
@@ -974,6 +910,11 @@ bool OMR::Power::CodeGenerator::isSnippetMatched(TR::Snippet *snippet, int32_t s
       }
    }
 
+bool OMR::Power::CodeGenerator::supportsInliningOfIsInstance()
+   {
+   return !self()->comp()->getOption(TR_DisableInlineIsInstance);
+   }
+
 bool OMR::Power::CodeGenerator::hasDataSnippets()
    {
    return (_constantData==NULL)?false:true;
@@ -1008,8 +949,7 @@ inline static bool callInTree(TR::TreeTop *treeTop)
        l1OpCode == TR::New             ||
        l1OpCode == TR::newarray        ||
        l1OpCode == TR::anewarray       ||
-       l1OpCode == TR::multianewarray  ||
-       l1OpCode == TR::MergeNew)
+       l1OpCode == TR::multianewarray)
       return(true);
 
    return(node->getNumChildren()!=0 && node->getFirstChild()->getOpCode().isCall() &&
@@ -1135,15 +1075,20 @@ TR_GlobalRegisterNumber OMR::Power::CodeGenerator::pickRegister(TR_RegisterCandi
          lastVolIndex = _lastVolatileGPR;
          break;
 
-      case TR::VectorInt32:
-      case TR::VectorDouble:
-          isVector = true;
-          firstIndex = self()->getFirstGlobalVRF();
-          lastIndex = self()->getLastGlobalVRF();
-          lastVolIndex = lastIndex;  // TODO: preserved VRF's !!
-         break;
-
       default:
+         if (sym->getDataType().isVector())
+            {
+            if (sym->getDataType().getVectorElementType() == TR::Int32 ||
+                sym->getDataType().getVectorElementType() == TR::Double)
+               {
+               isVector = true;
+               firstIndex = self()->getFirstGlobalVRF();
+               lastIndex = self()->getLastGlobalVRF();
+               lastVolIndex = lastIndex;  // TODO: preserved VRF's !!
+               break;
+               }
+            }
+
          firstIndex = _firstGPR;
          lastIndex  = _lastFPR ;
          lastVolIndex = _lastVolatileGPR;
@@ -1587,8 +1532,7 @@ bool OMR::Power::CodeGenerator::isRotateAndMask(TR::Node * node)
              firstOp == TR::iushr) &&
              firstChild->getSecondChild()->getOpCodeValue() == TR::iconst  &&
             firstChild->getSecondChild()->getInt() > 0 &&
-            (firstOp == TR::iushr ||
-             leadingZeroes(secondChild->getInt()) >=
+            (leadingZeroes(secondChild->getInt()) >=
               firstChild->getSecondChild()->getInt())))))
       return true;
    else
@@ -1816,62 +1760,108 @@ OMR::Power::CodeGenerator::freeAndResetTransientLongs()
 
 
 
-bool OMR::Power::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::ILOpCode opcode, TR::DataType dt)
+bool OMR::Power::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::ILOpCode opcode)
    {
+   TR_ASSERT_FATAL(opcode.isVectorOpCode(), "getSupportsOpCodeForAutoSIMD expects vector opcode\n");
+
+   TR::DataType ot = opcode.getVectorResultDataType();
+
+   if (ot.getVectorLength() != TR::VectorLength128) return false;
+
+   TR::DataType et = ot.getVectorElementType();
+
+   TR_ASSERT_FATAL(et == TR::Int8 || et == TR::Int16 || et == TR::Int32 || et == TR::Int64 || et == TR::Float || et == TR::Double,
+                   "Unexpected vector element type\n");
 
    // alignment issues
-   if (!self()->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P8) &&
-       dt != TR::Double &&
-       dt != TR::Int64)
+   if (!cpu->isAtLeast(OMR_PROCESSOR_PPC_P8) &&
+       et != TR::Double &&
+       et != TR::Int64)
       return false;
 
-   if (self()->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P8) &&
-       (opcode.getOpCodeValue() == TR::vadd || opcode.getOpCodeValue() == TR::vsub) &&
-       dt == TR::Int64)
+   if (cpu->isAtLeast(OMR_PROCESSOR_PPC_P8) &&
+       (opcode.getVectorOperation() == TR::vadd || opcode.getVectorOperation() == TR::vsub || opcode.getVectorOperation() == TR::vmul || opcode.getVectorOperation() == TR::vabs || opcode.getVectorOperation() == TR::vmin || opcode.getVectorOperation() == TR::vmax) &&
+       et == TR::Int64)
+      return true;
+
+   if (cpu->isAtLeast(OMR_PROCESSOR_PPC_P8) &&
+       (opcode.getVectorOperation() == TR::vmin || opcode.getVectorOperation() == TR::vmax) &&
+       et == TR::Double)
       return true;
 
    // implemented vector opcodes
-   switch (opcode.getOpCodeValue())
+   switch (opcode.getVectorOperation())
       {
       case TR::vadd:
       case TR::vsub:
       case TR::vmul:
-      case TR::vdiv:
-      case TR::vneg:
-         if (dt == TR::Int32 || dt == TR::Float || dt == TR::Double)
+         if (et == TR::Int8 || et == TR::Int16 || et == TR::Int32 || et == TR::Float || et == TR::Double)
             return true;
          else
             return false;
-      case TR::vrem:
-         return false;
+      case TR::vdiv:
+      case TR::vneg:
+         if (et == TR::Int32 || et == TR::Float || et == TR::Double)
+            return true;
+         else
+            return false;
+      case TR::vabs:
+         if (et == TR::Int8 || et == TR::Int16 || et == TR::Int32 || et == TR::Float || et == TR::Double)
+            return true;
+         else
+            return false;
+      case TR::vsqrt:
+         if (et == TR::Float || et == TR::Double)
+            return true;
+         else
+            return false;
       case TR::vload:
       case TR::vloadi:
       case TR::vstore:
       case TR::vstorei:
-         if (dt == TR::Int32 || dt == TR::Int64 || dt == TR::Float || dt == TR::Double)
+         if (et == TR::Int32 || et == TR::Int64 || et == TR::Float || et == TR::Double)
             return true;
          else
             return false;
       case TR::vxor:
       case TR::vor:
       case TR::vand:
-         if (dt == TR::Int32 || dt == TR::Int64)
+         if (et == TR::Int32 || et == TR::Int64)
             return true;
          else
             return false;
       case TR::vsplats:
-      case TR::getvelem:
-         if (dt == TR::Int32 || dt == TR::Int64 || dt == TR::Float || dt == TR::Double)
+            return true;
+      case TR::vmin:
+      case TR::vmax:
+         if (et == TR::Int8 || et == TR::Int16 || et == TR::Int32 || et == TR::Float)
             return true;
          else
             return false;
-      case TR::vl2vd:
-         return true;
+      case TR::vfma:
+         if (et == TR::Float || et == TR::Double)
+            return true;
+         else
+            return false;
+      case TR::vgetelem:
+            if (et == TR::Int32 || et == TR::Int64 || et == TR::Float || et == TR::Double)
+               return true;
+            else
+               return false;
+      case TR::vconv:
+         if (et == TR::Double &&
+             opcode.getVectorSourceDataType().getVectorElementType() == TR::Int64)
+            return true;
       default:
          return false;
       }
 
    return false;
+   }
+
+bool OMR::Power::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::ILOpCode opcode)
+   {
+   return TR::CodeGenerator::getSupportsOpCodeForAutoSIMD(&self()->comp()->target().cpu, opcode);
    }
 
 bool
@@ -1931,6 +1921,24 @@ OMR::Power::CodeGenerator::addMetaDataForLoadAddressConstantFixed(
 
          TR::DebugCounter::generateRelocation(comp, firstInstruction, node, counter, seqKind);
          return;
+         }
+
+      case TR_BlockFrequency:
+         {
+         TR_RelocationRecordInformation *recordInfo = ( TR_RelocationRecordInformation *)comp->trMemory()->allocateMemory(sizeof(TR_RelocationRecordInformation), heapAlloc);
+         recordInfo->data1 = (uintptr_t)node->getSymbolReference();
+         recordInfo->data2 = (uintptr_t)seqKind;
+         relo = new (self()->trHeapMemory()) TR::BeforeBinaryEncodingExternalRelocation(
+            firstInstruction,
+            (uint8_t *)recordInfo,
+            TR_BlockFrequency, self());
+         break;
+         }
+
+      case TR_AbsoluteHelperAddress:
+         {
+         value = (uintptr_t)node->getSymbolReference();
+         break;
          }
       }
 
@@ -2086,6 +2094,17 @@ OMR::Power::CodeGenerator::addMetaDataForLoadIntConstantFixed(
          }
 
       TR::DebugCounter::generateRelocation(comp, firstInstruction, secondInstruction, node, counter, orderedPairSequence2);
+      }
+   else if (typeAddress == TR_BlockFrequency)
+      {
+      TR_RelocationRecordInformation *recordInfo = ( TR_RelocationRecordInformation *)comp->trMemory()->allocateMemory(sizeof( TR_RelocationRecordInformation), heapAlloc);
+      recordInfo->data1 = (uintptr_t)node->getSymbolReference();
+      recordInfo->data2 = orderedPairSequence2;
+      self()->addExternalRelocation(new (self()->trHeapMemory()) TR::ExternalOrderedPair32BitRelocation((uint8_t *)firstInstruction,
+                                                                                          (uint8_t *)secondInstruction,
+                                                                                          (uint8_t *)recordInfo,
+                                                                                          (TR_ExternalRelocationTargetKind)typeAddress, self()),
+                                                                                          __FILE__, __LINE__, node);
       }
    else if (typeAddress != -1)
       {
@@ -2597,5 +2616,3 @@ TR::Register *addConstantToInteger(TR::Node * node, TR::Register *srcReg, int32_
 
    return addConstantToInteger(node, trgReg, srcReg, value, cg);
    }
-
-

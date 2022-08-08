@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -117,6 +117,7 @@ OMR::Node::Node()
      _visitCount(0),
      _localIndex(0),
      _referenceCount(0),
+     _knownObjectIndex(TR::KnownObjectTable::UNKNOWN),
      _byteCodeInfo(),
      _unionBase(),
      _unionPropertyA()
@@ -138,6 +139,7 @@ OMR::Node::Node(TR::Node *originatingByteCodeNode, TR::ILOpCodes op, uint16_t nu
      _visitCount(0),
      _localIndex(0),
      _referenceCount(0),
+     _knownObjectIndex(TR::KnownObjectTable::UNKNOWN),
      _byteCodeInfo(),
      _unionBase(),
      _unionPropertyA()
@@ -167,6 +169,7 @@ OMR::Node::Node(TR::Node *originatingByteCodeNode, TR::ILOpCodes op, uint16_t nu
    self()->setReferenceCount(0);
    self()->setVisitCount(0);
    self()->setLocalIndex(0);
+   self()->setKnownObjectIndex(TR::KnownObjectTable::UNKNOWN),
    memset( &(_unionA), 0, sizeof( _unionA ) );
    if (self()->getGlobalIndex() == MAX_NODE_COUNT)
       {
@@ -237,6 +240,7 @@ OMR::Node::Node(TR::Node * from, uint16_t numChildren)
      _visitCount(0),
      _localIndex(0),
      _referenceCount(0),
+     _knownObjectIndex(TR::KnownObjectTable::UNKNOWN),
      _byteCodeInfo(),
      _unionBase(),
      _unionPropertyA()
@@ -257,6 +261,7 @@ OMR::Node::Node(TR::Node * from, uint16_t numChildren)
    self()->setReferenceCount(from->getReferenceCount());
    self()->setVisitCount(from->getVisitCount());
    self()->setLocalIndex(from->getLocalIndex());
+   self()->setKnownObjectIndex(from->getKnownObjectIndex());
    _unionA = from->_unionA;
 
    if (self()->getGlobalIndex() == MAX_NODE_COUNT)
@@ -385,8 +390,12 @@ OMR::Node::copyValidProperties(TR::Node *fromNode, TR::Node *toNode)
    // Some parts of the code rely on getDataType, which can assert if
    // toNode's opcode before copying has the HasNoDataType property and
    // fromNode's opcode does not have the HasNoDataType property
+   // Also, copy all children in case the node does not have a data type
+   // and it has to be computed from its children
    UnionPropertyA_Type fromUnionPropertyA_Type = fromNode->getUnionPropertyA_Type();
    UnionPropertyA_Type toUnionPropertyA_Type = toNode->getUnionPropertyA_Type();
+
+   toNode->copyChildren(fromNode);
 
    if (fromUnionPropertyA_Type == toUnionPropertyA_Type)
       {
@@ -438,14 +447,6 @@ OMR::Node::copyValidProperties(TR::Node *fromNode, TR::Node *toNode)
    if (fromConst && toConst)
       toNode->set64bitIntegralValue(fromNode->get64bitIntegralValue());
 
-   // _flags - presently incomplete
-   if ((fromOpCode == TR::bitOpMemND) && (toOpCode == TR::bitOpMem))
-      {
-      if (fromNode->isOrBitOpMem()) toNode->setOrBitOpMem(true);
-      if (fromNode->isAndBitOpMem()) toNode->setAndBitOpMem(true);
-      if (fromNode->isXorBitOpMem()) toNode->setXorBitOpMem(true);
-      }
-
    // TODO: other properties that need to be completed - see below
 #else
    // _unionBase
@@ -469,8 +470,6 @@ OMR::Node::copyValidProperties(TR::Node *fromNode, TR::Node *toNode)
    // _flags
    toNode->setFlags(fromNode->getFlags());  // do not clear hasNodeExtension
 #endif
-
-   toNode->copyChildren(fromNode);
 
    // DONE:
    // OMR::Base
@@ -536,7 +535,6 @@ OMR::Node::recreateWithSymRef(TR::Node *originalNode, TR::ILOpCodes op, TR::Symb
 TR::Node *
 OMR::Node::recreateAndCopyValidPropertiesImpl(TR::Node *originalNode, TR::ILOpCodes op, TR::SymbolReference *newSymRef)
    {
-   TR_ASSERT_FATAL(TR::Node::isNotDeprecatedUnsigned(op), "Trying to use a deprecated unsigned opcode: #%d \n", op);
    TR_ASSERT(originalNode != NULL, "trying to recreate node from a NULL originalNode.");
    if (originalNode->getOpCodeValue() == op)
       {
@@ -600,7 +598,6 @@ OMR::Node::recreateAndCopyValidPropertiesImpl(TR::Node *originalNode, TR::ILOpCo
 TR::Node *
 OMR::Node::createInternal(TR::Node *originatingByteCodeNode, TR::ILOpCodes op, uint16_t numChildren, TR::Node *originalNode)
    {
-   TR_ASSERT_FATAL(TR::Node::isNotDeprecatedUnsigned(op), "Trying to use a deprecated unsigned opcode: #%d \n", op);
    if (!originalNode)
       return new (TR::comp()->getNodePool()) TR::Node(originatingByteCodeNode, op, numChildren);
    else
@@ -610,6 +607,7 @@ OMR::Node::createInternal(TR::Node *originatingByteCodeNode, TR::ILOpCodes op, u
       vcount_t visitCount = originalNode->getVisitCount();
       scount_t localIndex = originalNode->getLocalIndex();
       rcount_t referenceCount = originalNode->getReferenceCount();
+      TR::KnownObjectTable::Index knownObjectIndex = originalNode->getKnownObjectIndex();
       UnionA unionA = originalNode->_unionA;
       const TR_ByteCodeInfo byteCodeInfo = originalNode->getByteCodeInfo();  // copy bytecode info into temporary variable
       //TR::Node * node = new (TR::comp()->getNodePool(), poolIndex) TR::Node(0, op, numChildren);
@@ -620,6 +618,7 @@ OMR::Node::createInternal(TR::Node *originatingByteCodeNode, TR::ILOpCodes op, u
       node->setVisitCount(visitCount);
       node->setLocalIndex(localIndex);
       node->setReferenceCount(referenceCount);
+      node->setKnownObjectIndex(knownObjectIndex);
       node->_unionA = unionA;
 
       return node;
@@ -1505,7 +1504,7 @@ OMR::Node::createConstDead(TR::Node *originatingByteCodeNode, TR::DataType dt, i
    TR::Node *result = NULL;
    const int8_t dead8 = (int8_t)((extraData << 4) | 0xD);
    const int16_t dead16 = (int16_t)((extraData << 8) | 0xDD);
-   const int32_t dead32 = ((extraData << 16) | 0xdead);
+   const int32_t dead32 = static_cast<const int32_t>((extraData << 16) | 0xdead);
    const int64_t dead64 = dead32;
    char buf[20];
    memset(buf, 0, 20);
@@ -1547,7 +1546,6 @@ TR::Node*
 OMR::Node::createCompressedRefsAnchor(TR::Node *firstChild)
    {
    TR::Node *heapBaseKonst = TR::Node::create(firstChild, TR::lconst, 0, 0);
-   heapBaseKonst->setLongInt(TR::Compiler->vm.heapBaseAddress());
    return TR::Node::create(TR::compressedRefs, 2, firstChild, heapBaseKonst);
    }
 
@@ -1572,7 +1570,7 @@ OMR::Node::createAddConstantToAddress(TR::Node * addr, intptr_t value, TR::Node 
       {
       ret = TR::Node::create(parentOfNewNode, TR::aiadd, 2);
       ret->setAndIncChild(0, addr);
-      ret->setAndIncChild(1, TR::Node::create(parentOfNewNode, TR::iconst, 0, value));
+      ret->setAndIncChild(1, TR::Node::create(parentOfNewNode, TR::iconst, 0, static_cast<int32_t>(value)));
       }
 
    ret->setIsInternalPointer(true);
@@ -1586,24 +1584,6 @@ OMR::Node::createLiteralPoolAddress(TR::Node *node, size_t offset)
    return TR::Node::createAddConstantToAddress(NULL, offset);
    }
 
-
-
-TR::Node *
-OMR::Node::createVectorConst(TR::Node *originatingByteCodeNode, TR::DataType dt)
-   {
-   TR::Node *node = TR::Node::createInternal(originatingByteCodeNode, TR::vconst, 0, NULL);
-   node->setDataType(dt);
-   return node;
-   }
-
-// v2v is vector conversion that preserves bit-pattern, effectively a noop that only changes datatype.
-TR::Node *
-OMR::Node::createVectorConversion(TR::Node *src, TR::DataType trgType)
-   {
-   TR::Node *node = TR::Node::createWithoutSymRef(TR::v2v, 1, 1, src);
-   node->setDataType(trgType);
-   return node;
-   }
 
 /**
  * Node constructors and create functions end
@@ -1755,7 +1735,7 @@ TR::Node *
 OMR::Node::duplicateTreeForCodeMotion()
    {
    TR::Node *result = self()->duplicateTree(true);
-   result->resetFlagsForCodeMotion();
+   result->resetFlagsAndPropertiesForCodeMotion();
    return result;
    }
 
@@ -2122,11 +2102,6 @@ OMR::Node::isConstZeroBytes()
          return self()->getFloatBits() == 0;
       case TR::Double:
          return self()->getDoubleBits() == 0;
-      case TR::VectorInt8:
-      case TR::VectorInt16:
-      case TR::VectorInt32:
-      case TR::VectorInt64:
-      case TR::VectorDouble:
       default:
          TR_ASSERT(false, "Unrecognized const node %s can't be checked for zero bytes");
          return false;
@@ -2162,11 +2137,6 @@ OMR::Node::isConstZeroValue()
          TR::Compilation *comp = TR::comp();
          return self()->getDoubleBits() == DOUBLE_POS_ZERO;
          }
-      case TR::VectorInt8:
-      case TR::VectorInt16:
-      case TR::VectorInt32:
-      case TR::VectorInt64:
-      case TR::VectorDouble:
       default:
          TR_ASSERT(false, "Unrecognized constant node can't be checked for zero");
          return false;
@@ -2511,8 +2481,6 @@ OMR::Node::computeIsCollectedReferenceImpl(TR::NodeChecklist &processedNodesColl
                else
                   return recordProcessedNodeResult(receiverNode, TR_maybe, processedNodesCollected, processedNodesNotCollected);
                }
-         case TR::getstack:
-            return recordProcessedNodeResult(receiverNode, TR_no, processedNodesCollected, processedNodesNotCollected);
          default:
             TR_ASSERT(false, "Unsupported opcode %s on node " POINTER_PRINTF_FORMAT, op.getName(), curNode);
             return TR_no;
@@ -2923,7 +2891,7 @@ OMR::Node::containsDoNotPropagateNode(vcount_t vc)
       return true;
       }
 
-   for (size_t i = 0; i < self()->getNumChildren(); i++)
+   for (auto i = 0; i < self()->getNumChildren(); i++)
       {
       if (self()->getChild(i)->containsDoNotPropagateNode(vc))
          {
@@ -3284,45 +3252,63 @@ TR::TreeTop *
 OMR::Node::getVirtualCallTreeForGuard()
    {
    TR::Node *guard = self();
-   TR::TreeTop * callTree = 0;
+   TR::TreeTop * callTree = NULL;
+   TR::Compilation *comp = TR::comp();
+   int32_t guardInlinedSiteIndex = guard->getInlinedSiteIndex();
+
+   if (guardInlinedSiteIndex < 0)
+      {
+      // EscapeAnalysis can create a guard with index -1
+      // in that case, return conservative result
+      return NULL;
+      }
+
+   int32_t guardCallerIndex = comp->getInlinedCallSite(guardInlinedSiteIndex)._byteCodeInfo.getCallerIndex();
+   uint32_t guardCallerByteCodeIndex = comp->getInlinedCallSite(guardInlinedSiteIndex)._byteCodeInfo.getByteCodeIndex();
+
    while (1)
       {
       // Call node is not necessarily the first real tree top in the call block
-      // there may be a stores/loads introduced by the global register allocator.
+      // there may be stores/loads introduced by the global register allocator,
+      // or stores to privitized inliner arguments.
+      //
+      // A call can be indirect or direct(if localVP de-virtualized it).
+      // To make sure it's the right call we compare guard's caller index with
+      // call's inlined site index.
       //
       callTree = guard->getBranchDestination()->getNextRealTreeTop();
-      TR::Node * callNode = 0;
-      //while (callTree->getNode()->getOpCode().isLoadDirectOrReg() ||
-      //       callTree->getNode()->getOpCode().isStoreDirectOrReg())
-      //
+      TR::Node * callNode = callTree->getNode();
+
       while (callTree->getNode()->getOpCodeValue() != TR::BBEnd)
          {
-         callNode = callTree->getNode();
          if ((!callNode->getOpCode().isCall()) &&
              (callNode->getNumChildren() > 0))
             callNode = callTree->getNode()->getFirstChild();
 
-         if ((callNode &&
-              callNode->getOpCode().isCallIndirect()) ||
-             (callTree->getNode()->getOpCodeValue() == TR::Goto))
+         if (callNode->getOpCode().isCall() ||
+             callTree->getNode()->getOpCodeValue() == TR::Goto)
             break;
 
          callTree = callTree->getNextRealTreeTop();
+         callNode = callTree->getNode();
          }
 
-      if (!callNode || !callNode->getOpCode().isCallIndirect())
+      if (callTree->getNode()->getOpCodeValue() == TR::Goto)
          {
-         if (callTree->getNode()->getOpCodeValue() == TR::Goto)
-            {
-            guard = callTree->getNode();
-            continue;
-            }
-
-         //TR_ASSERT(0, "could not find call node for a virtual guard");
+         guard = callTree->getNode();
+         continue;
+         }
+      else if (!callNode->getOpCode().isCall() ||
+               callNode->getInlinedSiteIndex() != guardCallerIndex ||
+               callNode->getByteCodeIndex() != guardCallerByteCodeIndex ||
+               !callNode->isTheVirtualCallNodeForAGuardedInlinedCall())
+         {
          return NULL;
          }
       else
+         {
          break;
+         }
       }
 
    return callTree;
@@ -3361,14 +3347,14 @@ OMR::Node::getOwningMethod()
 
 /** \brief
  *  Used to get the ram method from the Bytecode Info.
- * 
+ *
  *  \param *comp
- *  _compilation of type TR::Compilation 
- *  
- *  @return 
+ *  _compilation of type TR::Compilation
+ *
+ *  @return
  *  Returns the ram method (TR_OpaqueMethodBlock) from function call getOwningMethod(TR::Compilation *comp, TR_ByteCodeInfo &bcInfo)
  */
-TR_OpaqueMethodBlock* 
+TR_OpaqueMethodBlock*
 OMR::Node::getOwningMethod(TR::Compilation *comp)
    {
    return TR::Node::getOwningMethod(comp, self()->getByteCodeInfo());
@@ -3378,37 +3364,26 @@ OMR::Node::getOwningMethod(TR::Compilation *comp)
 
 /** \brief
  *  Used to get the ram method from the Bytecode Info.
- * 
+ *
  *  \param *comp
  *  _compilation of type TR::Compilation
- * 
- *  \param &bcInfo 
- *  _byteCodeInfo of a node of type TR::Node  
- *  
- *  @return 
+ *
+ *  \param &bcInfo
+ *  _byteCodeInfo of a node of type TR::Node
+ *
+ *  @return
  *  Returns the ram method (TR_OpaqueMethodBlock)
  */
-TR_OpaqueMethodBlock* 
+TR_OpaqueMethodBlock*
 OMR::Node::getOwningMethod(TR::Compilation *comp, TR_ByteCodeInfo &bcInfo)
    {
-   TR_OpaqueMethodBlock *method = NULL; 
-  
-   if (comp->compileRelocatableCode()) 
-      { 
-      if (0 <= bcInfo.getCallerIndex()) 
-         method = (TR_OpaqueMethodBlock *)(((TR_AOTMethodInfo *)comp->getInlinedCallSite(bcInfo.getCallerIndex())._vmMethodInfo)->resolvedMethod->getPersistentIdentifier()); 
-      else 
-         method = (TR_OpaqueMethodBlock *)(comp->getCurrentMethod()->getPersistentIdentifier()); 
-      } 
-   else  
-      { 
-      if (0 <= bcInfo.getCallerIndex()) 
-         method = (TR_OpaqueMethodBlock *)(comp->getInlinedCallSite(bcInfo.getCallerIndex())._vmMethodInfo); 
-      else 
-         method = (TR_OpaqueMethodBlock *)(comp->getCurrentMethod()->getNonPersistentIdentifier()); 
-      } 
-  
-   return method; 
+   TR_OpaqueMethodBlock *method = NULL;
+   if (0 <= bcInfo.getCallerIndex())
+      method = comp->getInlinedCallSite(bcInfo.getCallerIndex())._methodInfo;
+   else
+      method = comp->getCurrentMethod()->getPersistentIdentifier();
+
+   return method;
    }
 
 
@@ -3424,8 +3399,7 @@ OMR::Node::getAOTMethod()
       }
    else
       {
-      TR_AOTMethodInfo *aotMethodInfo = (TR_AOTMethodInfo *)c->getInlinedCallSite(index)._methodInfo;
-      return (void*)aotMethodInfo->resolvedMethod;
+      return c->getInlinedResolvedMethod(index);
       }
    }
 
@@ -3649,10 +3623,6 @@ OMR::Node::exceptionsRaised()
          break;
       case TR::ArrayStoreCHK:
          possibleExceptions |= TR::Block:: CanCatchArrayStoreCheck;
-         if (TR::Compiler->om.areValueTypesEnabled())
-            {
-            possibleExceptions |= TR::Block:: CanCatchNullCheck;
-            }
          break;
       case TR::ArrayCHK:
          possibleExceptions |= TR::Block:: CanCatchArrayStoreCheck;
@@ -3682,13 +3652,12 @@ OMR::Node::exceptionsRaised()
       case TR::New:
          possibleExceptions |= TR::Block:: CanCatchNew;
          break;
+      case TR::newvalue:
+         possibleExceptions |= TR::Block:: CanCatchNewvalue;
+         break;
       case TR::newarray:
       case TR::anewarray:
       case TR::multianewarray:
-         possibleExceptions |= TR::Block:: CanCatchArrayNew;
-         break;
-      case TR::MergeNew:
-         possibleExceptions |= TR::Block:: CanCatchNew;
          possibleExceptions |= TR::Block:: CanCatchArrayNew;
          break;
       case TR::monexit:
@@ -4515,7 +4484,7 @@ OMR::Node::getEvaluationPriority(TR::CodeGenerator * codeGen)
       return self()->setEvaluationPriority(codeGen->getEvaluationPriority(self()));
       }
    if ((uintptr_t)(_unionA._register) & 1) // evaluation priority
-      return (uintptr_t)(_unionA._register) >> 1;
+      return static_cast<int32_t>(reinterpret_cast<uintptr_t>(_unionA._register) >> 1);
    else // already evaluated to a register - nonsensical question
       return 0;
    }
@@ -5264,27 +5233,6 @@ OMR::Node::computeDataType()
    if (_unionPropertyA._dataType != TR::NoType)
       return _unionPropertyA._dataType;
 
-   if (self()->getNumChildren() > 0)
-      {
-      // Type erasure for some vector opcodes. They deduce type from children nodes
-      if(_opCode.isVector())
-         {
-         // Vector comparison returning resultant vector should return vector bool int type, WCode ACR 265
-         if (_opCode.isBooleanCompare())
-            _unionPropertyA._dataType = self()->getFirstChild()->getDataType().getVectorIntegralType().getDataType();
-         else if (_opCode.isVectorReduction())
-            _unionPropertyA._dataType = self()->getFirstChild()->getDataType().getVectorElementType().getDataType();
-         else if (_opCode.getOpCodeValue() == TR::vsplats)
-            _unionPropertyA._dataType = self()->getFirstChild()->getDataType().scalarToVector().getDataType();
-         else
-            _unionPropertyA._dataType = self()->getFirstChild()->getDataType().getDataType();
-
-         return _unionPropertyA._dataType;
-         }
-
-      if (_opCode.getOpCodeValue() == TR::getvelem)
-         return _unionPropertyA._dataType = self()->getFirstChild()->getDataType().vectorToScalar().getDataType();
-      }
    TR_ASSERT(false, "Unsupported typeless opcode in node %p\n", self());
    return TR::NoType;
    }
@@ -6766,7 +6714,7 @@ OMR::Node::setArraysetLengthMultipleOfPointerSize(bool v)
 bool
 OMR::Node::isXorBitOpMem()
    {
-   TR_ASSERT(self()->getOpCodeValue() == TR::bitOpMem || self()->getOpCodeValue() == TR::bitOpMemND, "Opcode must be bitOpMem");
+   TR_ASSERT(self()->getOpCodeValue() == TR::bitOpMem, "Opcode must be bitOpMem");
    return _flags.testValue(bitOpMemOPMASK, bitOpMemXOR);
    }
 
@@ -6774,7 +6722,7 @@ void
 OMR::Node::setXorBitOpMem(bool v)
    {
    TR::Compilation * c = TR::comp();
-   TR_ASSERT(self()->getOpCodeValue() == TR::bitOpMem || self()->getOpCodeValue() == TR::bitOpMemND, "Opcode must be bitOpMem");
+   TR_ASSERT(self()->getOpCodeValue() == TR::bitOpMem, "Opcode must be bitOpMem");
    if (performNodeTransformation2(c, "O^O NODE FLAGS: Setting XOR flag on node %p to %d\n", self(), v))
       _flags.setValue(bitOpMemOPMASK, bitOpMemXOR);
    }
@@ -6782,7 +6730,7 @@ OMR::Node::setXorBitOpMem(bool v)
 bool
 OMR::Node::chkXorBitOpMem()
    {
-   return (self()->getOpCodeValue() == TR::bitOpMem || self()->getOpCodeValue() == TR::bitOpMemND)
+   return (self()->getOpCodeValue() == TR::bitOpMem)
       && _flags.testValue(bitOpMemOPMASK, bitOpMemXOR);
    }
 
@@ -6797,7 +6745,7 @@ OMR::Node::printXorBitOpMem()
 bool
 OMR::Node::isOrBitOpMem()
    {
-   TR_ASSERT(self()->getOpCodeValue() == TR::bitOpMem || self()->getOpCodeValue() == TR::bitOpMemND, "Opcode must be bitOpMem");
+   TR_ASSERT(self()->getOpCodeValue() == TR::bitOpMem, "Opcode must be bitOpMem");
    return _flags.testValue(bitOpMemOPMASK, bitOpMemOR);
    }
 
@@ -6805,7 +6753,7 @@ void
 OMR::Node::setOrBitOpMem(bool v)
    {
    TR::Compilation * c = TR::comp();
-   TR_ASSERT(self()->getOpCodeValue() == TR::bitOpMem || self()->getOpCodeValue() == TR::bitOpMemND, "Opcode must be bitOpMem");
+   TR_ASSERT(self()->getOpCodeValue() == TR::bitOpMem, "Opcode must be bitOpMem");
    if (performNodeTransformation2(c, "O^O NODE FLAGS: Setting OR flag on node %p to %d\n", self(), v))
       _flags.setValue(bitOpMemOPMASK, bitOpMemOR);
    }
@@ -6813,7 +6761,7 @@ OMR::Node::setOrBitOpMem(bool v)
 bool
 OMR::Node::chkOrBitOpMem()
    {
-   return (self()->getOpCodeValue() == TR::bitOpMem || self()->getOpCodeValue() == TR::bitOpMemND)
+   return (self()->getOpCodeValue() == TR::bitOpMem)
       && _flags.testValue(bitOpMemOPMASK, bitOpMemOR);
    }
 
@@ -6828,7 +6776,7 @@ OMR::Node::printOrBitOpMem()
 bool
 OMR::Node::isAndBitOpMem()
    {
-   TR_ASSERT(self()->getOpCodeValue() == TR::bitOpMem || self()->getOpCodeValue() == TR::bitOpMemND, "Opcode must be bitOpMem");
+   TR_ASSERT(self()->getOpCodeValue() == TR::bitOpMem, "Opcode must be bitOpMem");
    return _flags.testValue(bitOpMemOPMASK, bitOpMemAND);
    }
 
@@ -6836,7 +6784,7 @@ void
 OMR::Node::setAndBitOpMem(bool v)
    {
    TR::Compilation * c = TR::comp();
-   TR_ASSERT(self()->getOpCodeValue() == TR::bitOpMem || self()->getOpCodeValue() == TR::bitOpMemND, "Opcode must be bitOpMem");
+   TR_ASSERT(self()->getOpCodeValue() == TR::bitOpMem, "Opcode must be bitOpMem");
    if (performNodeTransformation2(c, "O^O NODE FLAGS: Setting AND flag on node %p to %d\n", self(), v))
       _flags.setValue(bitOpMemOPMASK, bitOpMemAND);
    }
@@ -6844,7 +6792,7 @@ OMR::Node::setAndBitOpMem(bool v)
 bool
 OMR::Node::chkAndBitOpMem()
    {
-   return (self()->getOpCodeValue() == TR::bitOpMem || self()->getOpCodeValue() == TR::bitOpMemND)
+   return (self()->getOpCodeValue() == TR::bitOpMem)
       && _flags.testValue(bitOpMemOPMASK, bitOpMemAND);
    }
 
@@ -7140,38 +7088,6 @@ OMR::Node::printSkipSignExtension()
    {
    return self()->skipSignExtension() ? "SkipSignExt " : "";
    }
-
-
-
-bool
-OMR::Node::needsPrecisionAdjustment()
-   {
-   TR_ASSERT(self()->getOpCodeValue() == TR::fRegLoad || self()->getOpCodeValue() == TR::dRegLoad, "Opcode must be FP global reg load");
-   return _flags.testAny(precisionAdjustment);
-   }
-
-void
-OMR::Node::setNeedsPrecisionAdjustment(bool v)
-   {
-   TR::Compilation * c = TR::comp();
-   TR_ASSERT(self()->getOpCodeValue() == TR::fRegLoad || self()->getOpCodeValue() == TR::dRegLoad, "Opcode must be FP global reg load");
-   if (performNodeTransformation2(c, "O^O NODE FLAGS: Setting needsPrecisionAdjustment flag on node %p to %d\n", self(), v))
-      _flags.set(precisionAdjustment, v);
-   }
-
-bool
-OMR::Node::chkNeedsPrecisionAdjustment()
-   {
-   return (self()->getOpCodeValue() == TR::fRegLoad || self()->getOpCodeValue() == TR::dRegLoad) && _flags.testAny(precisionAdjustment);
-   }
-
-const char *
-OMR::Node::printNeedsPrecisionAdjustment()
-   {
-   return self()->chkNeedsPrecisionAdjustment() ? "precisionAdjustment " : "";
-   }
-
-
 
 bool
 OMR::Node::isUseBranchOnCount()
@@ -8116,8 +8032,8 @@ OMR::Node::setHasMonitorClassInNode(bool v)
 bool
 OMR::Node::markedAllocationCanBeRemoved()
    {
-   TR_ASSERT(self()->getOpCodeValue() == TR::New || self()->getOpCodeValue() == TR::newarray || self()->getOpCodeValue() == TR::anewarray,
-             "Opcode must be newarray or anewarray");
+   TR_ASSERT(self()->getOpCodeValue() == TR::New || self()->getOpCodeValue() == TR::newarray ||
+             self()->getOpCodeValue() == TR::anewarray || self()->getOpCodeValue() == TR::newvalue, "Opcode must be new, newarray, anewarray, or newvalue");
    return _flags.testAny(allocationCanBeRemoved);
    }
 
@@ -8125,7 +8041,8 @@ void
 OMR::Node::setAllocationCanBeRemoved(bool v)
    {
    TR::Compilation * c = TR::comp();
-   TR_ASSERT(self()->getOpCodeValue() == TR::New || self()->getOpCodeValue() == TR::newarray || self()->getOpCodeValue() == TR::anewarray, "Opcode must be newarray or anewarray");
+   TR_ASSERT(self()->getOpCodeValue() == TR::New || self()->getOpCodeValue() == TR::newarray ||
+             self()->getOpCodeValue() == TR::anewarray || self()->getOpCodeValue() == TR::newvalue, "Opcode must be new, newarray, anewarray, or newvalue");
    if (performNodeTransformation2(c, "O^O NODE FLAGS: Setting allocationCanBeRemoved flag on node %p to %d\n", self(), v))
       _flags.set(allocationCanBeRemoved, v);
    }
@@ -8133,7 +8050,11 @@ OMR::Node::setAllocationCanBeRemoved(bool v)
 bool
 OMR::Node::chkAllocationCanBeRemoved()
    {
-   return ((self()->getOpCodeValue() == TR::New || self()->getOpCodeValue() == TR::newarray || self()->getOpCodeValue() == TR::anewarray) && _flags.testAny(allocationCanBeRemoved));
+   return ((self()->getOpCodeValue() == TR::New ||
+            self()->getOpCodeValue() == TR::newarray ||
+            self()->getOpCodeValue() == TR::anewarray ||
+            self()->getOpCodeValue() == TR::newvalue)
+           && _flags.testAny(allocationCanBeRemoved));
    }
 
 const char *
@@ -8632,7 +8553,7 @@ OMR::Node::printRequiresConditionCodes()
    }
 
 static void
-resetFlagsForCodeMotionHelper(TR::Node *node, TR::NodeChecklist &visited)
+resetFlagsAndPropertiesForCodeMotionHelper(TR::Node *node, TR::NodeChecklist &visited)
    {
    if (visited.contains(node))
       return;
@@ -8641,7 +8562,7 @@ resetFlagsForCodeMotionHelper(TR::Node *node, TR::NodeChecklist &visited)
 
    int32_t childNum;
    for (childNum = 0; childNum < node->getNumChildren(); childNum++)
-      resetFlagsForCodeMotionHelper(node->getChild(childNum), visited);
+      resetFlagsAndPropertiesForCodeMotionHelper(node->getChild(childNum), visited);
 
    if (node->getOpCodeValue() != TR::loadaddr)
       {
@@ -8668,6 +8589,9 @@ resetFlagsForCodeMotionHelper(TR::Node *node, TR::NodeChecklist &visited)
 
    if (node->chkIsReferenceNonNull())
       node->setReferenceIsNonNull(false);
+
+   if (node->hasKnownObjectIndex())
+      node->setKnownObjectIndex(TR::KnownObjectTable::UNKNOWN);
    }
 
 // Clear out relevant flags set on the node; this will ensure
@@ -8676,10 +8600,10 @@ resetFlagsForCodeMotionHelper(TR::Node *node, TR::NodeChecklist &visited)
 // as well (over the ones that are already reset).
 //
 void
-OMR::Node::resetFlagsForCodeMotion()
+OMR::Node::resetFlagsAndPropertiesForCodeMotion()
    {
    TR::NodeChecklist visited(TR::comp());
-   resetFlagsForCodeMotionHelper(self(), visited);
+   resetFlagsAndPropertiesForCodeMotionHelper(self(), visited);
    }
 
 /**

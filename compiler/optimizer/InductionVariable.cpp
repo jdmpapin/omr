@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -1794,7 +1794,7 @@ void TR_LoopStrider::examineOpCodesForInductionVariableUse(TR::Node* node, TR::N
                }
             else
                {
-               differenceInAdditiveConstantsNode = TR::Node::create(node, TR::iconst, 0, differenceInAdditiveConstants);
+               differenceInAdditiveConstantsNode = TR::Node::create(node, TR::iconst, 0, static_cast<int32_t>(differenceInAdditiveConstants));
                op = replacingNode->getOpCode().isAdd() ? TR::iadd : TR::isub;
                }
             adjustmentNode = TR::Node::create(op, 2, adjustmentNode, differenceInAdditiveConstantsNode);
@@ -1808,7 +1808,7 @@ void TR_LoopStrider::examineOpCodesForInductionVariableUse(TR::Node* node, TR::N
                }
             else
                adjustmentNode = TR::Node::create(node, TR::iconst, 0,
-                  differenceInAdditiveConstants);
+                  static_cast<int32_t>(differenceInAdditiveConstants));
             }
          }
 
@@ -4447,7 +4447,7 @@ void TR_LoopStrider::truncateIVsOnLoopExit(
          // (src -> dest) is a loop exit. Need to insert a conversion "along"
          // it. Note that src definitely has another successor, since it's in
          // loop, so the conversion can never simply be put at the end of src.
-         int preds = dest->getPredecessors().size()
+         auto preds = dest->getPredecessors().size()
             + dest->getExceptionPredecessors().size();
          if (preds > 1)
             {
@@ -6473,7 +6473,7 @@ TR_InductionVariableAnalysis::analyzeExitEdges(TR_RegionStructure *loop,
                }
             }
          else
-            osrInduceExitEdge = _isOSRInduceBlock.get(toNum);
+            osrInduceExitEdge = (_isOSRInduceBlock.get(toNum) != 0);
 
          if (osrInduceExitEdge)
             {
@@ -7169,11 +7169,20 @@ TR_InductionVariableAnalysis::findEntryValueForSymRef(TR_RegionStructure *loop,
    return defValue;
    }
 
+static int32_t getEntryValueMaxDepth()
+   {
+   static const char * ivaMaxDepthString = feGetEnv("TR_IVAEntryValueMaxDepth");
+   if (ivaMaxDepthString)
+      return atoi(ivaMaxDepthString);
+   return 500;
+   }
+
 TR::Node *
 TR_InductionVariableAnalysis::getEntryValue(TR::Block *block,
                                             TR::SymbolReference *symRef,
                                             TR_BitVector *nodesDone,
-                                            TR_Array<TR::Node*> &cachedValues)
+                                            TR_Array<TR::Node*> &cachedValues,
+                                            int32_t depth)
    {
    if (nodesDone->isSet(block->getNumber()))
       return cachedValues[block->getNumber()];
@@ -7231,21 +7240,25 @@ TR_InductionVariableAnalysis::getEntryValue(TR::Block *block,
 
    // Did not find the store in the block
    //
-   TR_PredecessorIterator pit(block);
-   TR::Node *defValue = (TR::Node *)-1;
-   for (TR::CFGEdge *edge = pit.getFirst(); edge; edge = pit.getNext())
+   static const int32_t maxDepth = getEntryValueMaxDepth();
+   TR::Node *defValue = (depth<maxDepth) ? (TR::Node *)-1 : 0;
+   if (defValue)
       {
-      TR::Block *pred = edge->getFrom()->asBlock();
-      TR::Node  *thisDef = getEntryValue(pred, symRef, nodesDone, cachedValues);
-
-      if (!thisDef) { defValue = 0; break; }
-
-      if (defValue == (TR::Node*)-1)
-         defValue = thisDef;
-      else if (!optimizer()->areNodesEquivalent(defValue, thisDef))
+      TR_PredecessorIterator pit(block);
+      for (TR::CFGEdge *edge = pit.getFirst(); edge; edge = pit.getNext())
          {
-         defValue = 0;
-         break;
+         TR::Block *pred = edge->getFrom()->asBlock();
+         TR::Node  *thisDef = getEntryValue(pred, symRef, nodesDone, cachedValues, depth+1);
+
+         if (!thisDef) { defValue = 0; break; }
+
+         if (defValue == (TR::Node*)-1)
+            defValue = thisDef;
+         else if (!optimizer()->areNodesEquivalent(defValue, thisDef))
+            {
+            defValue = 0;
+            break;
+            }
          }
       }
 

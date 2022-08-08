@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -24,23 +24,11 @@
 
 #include <stdint.h>
 #include "il/ILOpCodes.hpp"
-#include "x/codegen/X86Ops.hpp"
+#include "codegen/InstOpCode.hpp"
 
 namespace TR { class CodeGenerator; }
 namespace TR { class Node; }
 namespace TR { class Register; }
-
-// Exponent bias for scaling operands of double precision multiplies and
-// divides in strictfp mode.
-//
-// DOUBLE_EXPONENT_SCALE = -(16383-1023)
-//
-#if !defined(_LONG_LONG) && !defined(LINUX)
-#define DOUBLE_EXPONENT_SCALE 0xc0ce000000000000L
-#else
-#define DOUBLE_EXPONENT_SCALE 0xc0ce000000000000LL
-#endif
-
 
 // Total possible action sets based on the characteristics of the node children.
 //
@@ -89,16 +77,16 @@ class TR_X86FPBinaryArithmeticAnalyser
 
    uint8_t getOpsReversed()       {return (_actionMap[_inputs] & kReverse) ? 1 : 0;}
 
-   TR_X86OpCodes getRegRegOp()   {return getOpsReversed() ? _opCodePackage[_package][kOpReg2Reg1] :
+   TR::InstOpCode::Mnemonic getRegRegOp()   {return getOpsReversed() ? _opCodePackage[_package][kOpReg2Reg1] :
                                                              _opCodePackage[_package][kOpReg1Reg2];}
 
-   TR_X86OpCodes getRegMemOp()   {return getOpsReversed() ? _opCodePackage[_package][kOpReg2Mem1] :
+   TR::InstOpCode::Mnemonic getRegMemOp()   {return getOpsReversed() ? _opCodePackage[_package][kOpReg2Mem1] :
                                                              _opCodePackage[_package][kOpReg1Mem2];}
 
-   TR_X86OpCodes getRegConvSOp() {return getOpsReversed() ? _opCodePackage[_package][kOpReg2ConvS1] :
+   TR::InstOpCode::Mnemonic getRegConvSOp() {return getOpsReversed() ? _opCodePackage[_package][kOpReg2ConvS1] :
                                                              _opCodePackage[_package][kOpReg1ConvS2];}
 
-   TR_X86OpCodes getRegConvIOp() {return getOpsReversed() ? _opCodePackage[_package][kOpReg2ConvI1] :
+   TR::InstOpCode::Mnemonic getRegConvIOp() {return getOpsReversed() ? _opCodePackage[_package][kOpReg2ConvI1] :
                                                              _opCodePackage[_package][kOpReg1ConvI2];}
 
    // Possible actions based on the characteristics of the operands.
@@ -166,13 +154,12 @@ class TR_X86FPBinaryArithmeticAnalyser
                   TR::Node     *secondChild,
                   TR::Register *secondRegister);
 
-   void genericFPAnalyser(TR::Node *root);
    bool isIntToFPConversion(TR::Node *child);
 
    private:
 
    static const uint8_t        _actionMap[NUM_ACTION_SETS];
-   static const TR_X86OpCodes _opCodePackage[kNumFPPackages][kNumFPArithVariants];
+   static const TR::InstOpCode::Mnemonic _opCodePackage[kNumFPPackages][kNumFPArithVariants];
    TR::CodeGenerator *          _cg;
    uint8_t                     _package;
    uint8_t                     _inputs;

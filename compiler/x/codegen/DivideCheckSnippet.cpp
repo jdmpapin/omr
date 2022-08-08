@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -29,8 +29,7 @@
 #include "il/LabelSymbol.hpp"
 #include "ras/Debug.hpp"
 #include "codegen/X86Instruction.hpp"
-#include "x/codegen/X86Ops.hpp"
-#include "x/codegen/X86Ops_inlines.hpp"
+#include "codegen/InstOpCode.hpp"
 #include "env/IO.hpp"
 #include "env/CompilerEnv.hpp"
 
@@ -45,13 +44,13 @@ uint8_t *TR::X86DivideCheckSnippet::emitSnippetBody()
    // CMP realDivisorReg, -1
    //
    uint8_t rexPrefix = cg()->comp()->target().is64Bit() ? realDivisorReg->rexBits(TR::RealRegister::REX_B, false) : 0;
-   buffer = TR_X86OpCode(CMPRegImms(_divOp.isLong())).binary(buffer, rexPrefix);
+   buffer = TR::InstOpCode(TR::InstOpCode::CMPRegImms(_divOp.isLong())).binary(buffer, OMR::X86::Default, rexPrefix);
    realDivisorReg->setRMRegisterFieldInModRM(buffer-1);
    *buffer++ = -1;
 
    // JNE divideLabel
    //
-   buffer = genRestartJump(JNE4, buffer, _divideLabel);
+   buffer = genRestartJump(TR::InstOpCode::JNE4, buffer, _divideLabel);
 
    TR::Machine *machine = cg()->machine();
    if (_divOp.isDiv() && realDividendReg->getRegisterNumber() != TR::RealRegister::eax)
@@ -123,7 +122,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::X86DivideCheckSnippet  * snippet) // TOD
    trfprintf(pOutFile, "cmp\t%s, -1", getName(realDivisorReg)); // TODO: Might be 64-bit register
    bufferPos += cmpSize;
 
-   int32_t size = snippet->estimateRestartJumpLength(JNE4, bufferPos - (uint8_t*)0, snippet->getDivideLabel());
+   int32_t size = snippet->estimateRestartJumpLength(TR::InstOpCode::JNE4, static_cast<int32_t>(bufferPos - (uint8_t*)0), snippet->getDivideLabel());
    printPrefix(pOutFile, NULL, bufferPos, size);
    printLabelInstruction(pOutFile, "jne", snippet->getDivideLabel());
    bufferPos += size;
@@ -177,7 +176,7 @@ uint32_t TR::X86DivideCheckSnippet::getLength(int32_t estimatedSnippetStart)
       if (rexPrefix)
          fixedLength++;
       }
-   uint32_t jumpLength = estimateRestartJumpLength(JNE4,
+   uint32_t jumpLength = estimateRestartJumpLength(TR::InstOpCode::JNE4,
                                                    estimatedSnippetStart + fixedLength + 2,
                                                    _divideLabel);
 

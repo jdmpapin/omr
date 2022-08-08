@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -319,7 +319,6 @@ bool         TR_ResolvedMethod::isPrivate()                                { TR_
 bool         TR_ResolvedMethod::isProtected()                              { TR_UNIMPLEMENTED(); return false; }
 bool         TR_ResolvedMethod::isPublic()                                 { TR_UNIMPLEMENTED(); return false; }
 bool         TR_ResolvedMethod::isFinal()                                  { TR_UNIMPLEMENTED(); return false; }
-bool         TR_ResolvedMethod::isStrictFP()                               { TR_UNIMPLEMENTED(); return false; }
 bool         TR_ResolvedMethod::isInterpreted()                            { TR_UNIMPLEMENTED(); return false; }
 bool         TR_ResolvedMethod::isInterpretedForHeuristics()               { TR_UNIMPLEMENTED(); return false; }
 bool         TR_ResolvedMethod::hasBackwardBranches()                      { TR_UNIMPLEMENTED(); return false; }
@@ -375,6 +374,8 @@ bool         TR_ResolvedMethod::isUnresolvedCallSiteTableEntry(int32_t callSiteI
 void *       TR_ResolvedMethod::callSiteTableEntryAddress(int32_t callSiteIndex)      { TR_UNIMPLEMENTED(); return 0; }
 bool         TR_ResolvedMethod::isUnresolvedMethodTypeTableEntry(int32_t cpIndex) { TR_UNIMPLEMENTED(); return false; }
 void *       TR_ResolvedMethod::methodTypeTableEntryAddress(int32_t cpIndex)      { TR_UNIMPLEMENTED(); return 0; }
+uint32_t     TR_ResolvedMethod::romMethodArgCountAtCallSiteIndex(int32_t callSiteIndex) {TR_UNIMPLEMENTED(); return 0;}
+uint32_t     TR_ResolvedMethod::romMethodArgCountAtCPIndex(int32_t cpIndex) {TR_UNIMPLEMENTED(); return 0;}
 
 TR_OpaqueClassBlock *TR_ResolvedMethod::getDeclaringClassFromFieldOrStatic(TR::Compilation *comp, int32_t cpIndex)  { TR_UNIMPLEMENTED(); return 0; }
 int32_t      TR_ResolvedMethod::classCPIndexOfFieldOrStatic(int32_t)       { TR_UNIMPLEMENTED(); return 0; }
@@ -389,7 +390,7 @@ char *       TR_ResolvedMethod::localName (uint32_t, uint32_t, int32_t&, TR_Memo
 char *       TR_ResolvedMethod::fieldNameChars(int32_t, int32_t &)         { TR_UNIMPLEMENTED(); return 0; }
 char *       TR_ResolvedMethod::fieldSignatureChars(int32_t, int32_t &)    { TR_UNIMPLEMENTED(); return 0; }
 char *       TR_ResolvedMethod::staticSignatureChars(int32_t, int32_t &)   { TR_UNIMPLEMENTED(); return 0; }
-void * &     TR_ResolvedMethod::addressOfClassOfMethod()                   { TR_UNIMPLEMENTED(); }
+void * &     TR_ResolvedMethod::addressOfClassOfMethod()                   { TR_UNIMPLEMENTED(); throw std::exception(); }
 uint32_t     TR_ResolvedMethod::vTableSlot(uint32_t)                       { TR_UNIMPLEMENTED(); return 0; }
 bool         TR_ResolvedMethod::virtualMethodIsOverridden()                { TR_UNIMPLEMENTED(); return false; }
 void         TR_ResolvedMethod::setVirtualMethodIsOverridden()             { TR_UNIMPLEMENTED(); }
@@ -490,8 +491,8 @@ void TR_ResolvedMethod::setOwningMethod(TR_ResolvedMethod*)                     
 TR_ResolvedMethod * TR_ResolvedMethod::getResolvedStaticMethod (TR::Compilation *, int32_t, bool *)           { TR_UNIMPLEMENTED(); return 0; }
 TR_ResolvedMethod * TR_ResolvedMethod::getResolvedSpecialMethod(TR::Compilation *, int32_t, bool *)           { TR_UNIMPLEMENTED(); return 0; }
 TR_ResolvedMethod * TR_ResolvedMethod::getResolvedVirtualMethod(TR::Compilation *, int32_t, bool, bool *)     { TR_UNIMPLEMENTED(); return 0; }
-TR_ResolvedMethod * TR_ResolvedMethod::getResolvedDynamicMethod(TR::Compilation *, int32_t, bool *)           { TR_UNIMPLEMENTED(); return 0; }
-TR_ResolvedMethod * TR_ResolvedMethod::getResolvedHandleMethod (TR::Compilation *, int32_t, bool *)           { TR_UNIMPLEMENTED(); return 0; }
+TR_ResolvedMethod * TR_ResolvedMethod::getResolvedDynamicMethod(TR::Compilation *, int32_t, bool *, bool *)   { TR_UNIMPLEMENTED(); return 0; }
+TR_ResolvedMethod * TR_ResolvedMethod::getResolvedHandleMethod (TR::Compilation *, int32_t, bool *, bool *)   { TR_UNIMPLEMENTED(); return 0; }
 TR_ResolvedMethod * TR_ResolvedMethod::getResolvedHandleMethodWithSignature(TR::Compilation *, int32_t, char *) { TR_UNIMPLEMENTED(); return 0; }
 
 uint32_t
@@ -538,7 +539,7 @@ TR_ResolvedMethod::_genMethodILForPeeking(TR::ResolvedMethodSymbol *, TR::Compil
 
 TR::ResolvedMethodSymbol* TR_ResolvedMethod::findOrCreateJittedMethodSymbol(TR::Compilation *comp)
    {
-   return comp->createJittedMethodSymbol(this);
+   return TR::ResolvedMethodSymbol::createJittedMethodSymbol(comp->trHeapMemory(), this, comp);
    }
 
 void TR_ResolvedMethod::makeParameterList(TR::ResolvedMethodSymbol *methodSym)
@@ -549,13 +550,13 @@ void TR_ResolvedMethod::makeParameterList(TR::ResolvedMethodSymbol *methodSym)
    int32_t ordinal = 0;
 
    uint32_t parmSlots = numberOfParameterSlots();
-   for (int32_t parmIndex = 0; parmIndex < parmSlots; ++parmIndex)
+   for (auto parmIndex = 0U; parmIndex < parmSlots; ++parmIndex)
       {
       parmSymbol = methodSym->comp()->getSymRefTab()->createParameterSymbol(methodSym, slot, parmType(parmIndex));
       parmSymbol->setOrdinal(ordinal++);
 
-      char *s = getParameterTypeSignature(parmIndex);
-      uint32_t len = strlen(s);
+      char *s = getParameterTypeSignature(static_cast<int32_t>(parmIndex));
+      uint32_t len = static_cast<uint32_t>(strlen(s));
       parmSymbol->setTypeSignature(s, len);
 
       la.add(parmSymbol);

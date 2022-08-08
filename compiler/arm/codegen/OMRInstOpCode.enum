@@ -1,0 +1,165 @@
+/*******************************************************************************
+ * Copyright (c) 2021, 2021 IBM Corp. and others
+ *
+ * This program and the accompanying materials are made available under
+ * the terms of the Eclipse Public License 2.0 which accompanies this
+ * distribution and is available at http://eclipse.org/legal/epl-2.0
+ * or the Apache License, Version 2.0 which accompanies this distribution
+ * and is available at https://www.apache.org/licenses/LICENSE-2.0.
+ *
+ * This Source Code may also be made available under the following Secondary
+ * Licenses when the conditions for such availability set forth in the
+ * Eclipse Public License, v. 2.0 are satisfied: GNU General Public License,
+ * version 2 with the GNU Classpath Exception [1] and GNU General Public
+ * License, version 2 with the OpenJDK Assembly Exception [2].
+ *
+ * [1] https://www.gnu.org/software/classpath/license.html
+ * [2] http://openjdk.java.net/legal/assembly-exception.html
+ *
+ * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+ *******************************************************************************/
+
+/*
+ * This file will be included within an enum. Only comments and enumerator
+ * definitions are permitted.
+ */
+
+#include "compiler/codegen/OMRInstOpCode.enum"
+
+   add,              // Add
+   add_r,            // Add with record
+   adc,              // Add with carry
+   adc_r,            // Add with carry with record
+   and_,             // AND
+   and_r,            // AND with record
+   b,                // Unconditional branch
+   bl,               // Branch and link
+   bic,              // Bit clear (NAND)
+   bic_r,            // Bit clear (NAND) with record
+   cmp,              // Compare (rN - op2)
+   cmn,              // Compare negated (rN + op2)
+   eor,              // XOR
+   eor_r,            // XOR with record
+   ldfs,             // Load single word from memory to coprocessor register
+   ldfd,             // Load double word from memory to coprocessor register
+   ldm,              // Load multiple words
+   ldmia,            // Load multiple words, increment after
+   ldr,              // Load dword
+   ldrb,             // Load byte and zero extend
+   ldrsb,            // Load byte and sign extend
+   ldrh,             // Load word and zero extend
+   ldrsh,            // Load word and sign extend
+   mul,              // Multiply
+   mul_r,            // Multiply with record
+   mla,              // Multiply and accumulate
+   mla_r,            // Multiply and accumulate with record
+   smull,            // Multiply Long Signed
+   smull_r,          // Multiply Long Signed with record
+   umull,            // Multiply Long Unsigned
+   umull_r,          // Multiply Long Unsigned with record
+   smlal,            // Multiply Long Signed and accumulate
+   smlal_r,          // Multiply Long Signed and accumulate with record
+   umlal,            // Multiply Long Unsigned and accumulate
+   umlal_r,          // Multiply Long Unsigned and accumulate with record
+   mov,              // Move
+   mov_r,            // Move with record
+   mvn,              // Move negated
+   mvn_r,            // Move negated with record
+   orr,              // OR
+   orr_r,            // OR with record
+   teq,              // Test (XOR)
+   tst,              // Test (AND)
+   sub,              // Subtract
+   sub_r,            // Subtract with record
+   sbc,              // Subtract with carry
+   sbc_r,            // Subtract with carry with record
+   rsb,              // Reverse Subtract
+   rsb_r,            // Reverse Subtract with record
+   rsc,              // Reverse Subtract with carry
+   rsc_r,            // Reverse Subtract with carry with record
+   stfs,             // Store single word from coprocessor register to memory
+   stfd,             // Store double word from coprocessor register to memory
+   str,              // Store dword
+   strb,             // Store byte and zero extend
+   strh,             // Store word and sign extend
+   stm,              // Store multiple words
+   stmdb,            // Store multiple words, decrement before
+   swp,              // Swap dword
+   sxtb,             // Sign extend byte
+   sxth,             // Sign extend halfword
+   uxtb,             // Zero extend byte
+   uxth,             // Zero extend halfword
+   wrtbar,           // Write barrier directive
+   dmb_v6,           // Data memory barrier
+   dmb,              // Data memory barrier on ARMv7A
+   dmb_st,           // Data write memory barrier on ARMv7A
+   ldrex,            // Load exclusive
+   strex,            // Store exclusive(conditional)
+   iflong,           // compare and branch long
+   setblong,         // compare long and set boolean
+   setbool,          // compare and set boolean (int or simple float)
+   setbflt,          // compare float and set boolean (complex float)
+   lcmp,             // compare long and set result -1,0,1
+   flcmpl,           // compare float and set result -1(less,unordered),0(equal),1(greater)
+   flcmpg,           // compare float and set result -1(less),0(equal),1(greater,unordered)
+   idiv,             // integer divide
+   irem,             // integer remainder
+   nop,              // NOP
+// VFP instructions starts here
+   fabsd,            // Absolute value double
+   fabss,            // Absolute value single
+   faddd,            // Add double
+   fadds,            // Add float
+   fcmpd,            // Compare double
+   fcmps,            // Compare float
+   fcmpzd,           // Compare double to 0.0
+   fcmpzs,           // Compare float to 0.0
+   fcpyd,            // Copy/Move double
+   fcpys,            // Copy/Move float
+   fcvtds,           // Convert float to double
+   fcvtsd,           // Convert double to float
+   fdivd,            // Divide double
+   fdivs,            // Divide float
+   fldd,             // VFP load double (coprocessor 11) = LDC cp11
+   fldmd,            // VFP load multiple double
+   fldms,            // VFP load multiple float
+   flds,             // VFP load float (coprocessor 10) = LDC cp10
+   fmacd,            // Multiply and accumulate double
+   fmacs,            // Multiply and accumulate single
+   fmdrr,            // Move to double from two registers
+   fmrrd,            // Move from double to two registers
+   fmrrs,            // Move from single(2) to two registers
+   fmrs,             // Move from single to register
+   fmrx,             // Move from system register to register
+   fmscd,            // Multiply and subtract double
+   fmscs,            // Multiply and subtract single
+   fmsr,             // Move from register to single
+   fmsrr,            // Move from two registers to single(2)
+   fmstat,           // Move floating point flags back
+   fmuld,            // Multiply double
+   fmuls,            // Multiple float
+   fmxr,             // Move to system register to register
+   fnegd,            // Negate double
+   fnegs,            // Negate float
+   fnmacd,           // Negated multiply and accumulate double
+   fnmacs,           // Negated multiply and accumulate single
+   fnmscd,           // Negated multiply and subtract double
+   fnmscs,           // Negated multiply and subtract single
+   fnmuld,           // Negated multiply double
+   fnmuls,           // Negated multiply single
+   fsitod,           // Convert signed integer to double
+   fsitos,           // Convert signed integer to float
+   fsqrtd,           // Square root double
+   fsqrts,           // Square root single
+   fstd,             // VFP store double (coprocessor 11) = STC cp11
+   fstmd,            // VFP store multiple double
+   fstms,            // VFP store multiple float
+   fsts,             // VFP store float (coprocessor 10) = STC cp10
+   fsubd,            // Subtract double
+   fsubs,            // Subtract float
+   ftosizd,          // Convert double to signed integer (Round towards zero)
+   ftosizs,          // Convert float to signed integer (Round towards zero)
+   ftouizd,          // Convert double to unsigned integer (Round towards zero)
+   ftouizs,          // Convert float to unsigned integer (Round towards zero)
+   fuitod,           // Convert unsigned integer to double
+   fuitos,           // Convert unsigned integer to float

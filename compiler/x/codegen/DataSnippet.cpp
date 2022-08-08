@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -100,7 +100,7 @@ uint8_t *TR::X86DataSnippet::emitSnippetBody()
    // align to 16 bytes
    if (getDataSize() % 16 == 0)
       {
-      cursor = (uint8_t*)(((intptr_t)(cursor + 15)) & ((-1)<<4));
+      cursor = (uint8_t *)(((intptr_t)(cursor + 15)) & -(1 << 4));
       }
 
    getSnippetLabel()->setCodeLocation(cursor);
@@ -153,7 +153,7 @@ void TR::X86DataSnippet::print(TR::FILE* pOutFile, TR_Debug* debug)
    uint8_t *bufferPos = getSnippetLabel()->getCodeLocation();
 
    debug->printSnippetLabel(pOutFile, getSnippetLabel(), bufferPos, debug->getName(this));
-   debug->printPrefix(pOutFile, NULL, bufferPos, getDataSize());
+   debug->printPrefix(pOutFile, NULL, bufferPos, static_cast<uint8_t>(getDataSize()));
 
    const char* toString;
    switch (getDataSize())
@@ -173,7 +173,7 @@ void TR::X86DataSnippet::print(TR::FILE* pOutFile, TR_Debug* debug)
       }
    trfprintf(pOutFile, "%s \t%s", toString, hexPrefixString());
 
-   for (int i=getDataSize()-1; i >= 0; i--)
+   for (int32_t i = static_cast<int32_t>(getDataSize()) - 1; i >= 0; i--)
       {
       trfprintf(pOutFile, "%02x", bufferPos[i]);
       }

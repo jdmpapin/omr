@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2015, 2021 IBM Corp. and others
+ * Copyright (c) 2015, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -83,10 +83,10 @@
 #include "omrsimap.h"
 #endif /* defined(J9ZOS390) */
 
-#if defined(LINUXPPC) || (defined(S390) && defined(LINUX) && !defined(J9ZTPF))
+#if defined(LINUXPPC) || (defined(S390) && defined(LINUX) && !defined(J9ZTPF)) || (defined(AARCH64) && defined(LINUX))
 #include "auxv.h"
 #include <strings.h>
-#endif /* defined(LINUXPPC) || (defined(S390) && defined(LINUX) && !defined(J9ZTPF)) */
+#endif /* defined(LINUXPPC) || (defined(S390) && defined(LINUX) && !defined(J9ZTPF)) || (defined(AARCH64) && defined(LINUX)) */
 
 #if (defined(S390))
 #include "omrportpriv.h"
@@ -176,7 +176,9 @@
 #if defined(J9ZOS390)
 #include <sys/ps.h>
 #include <sys/types.h>
+#if !defined(OMR_EBCDIC)
 #include "atoe.h"
+#endif
 
 #if !defined(PATH_MAX)
 /* This is a somewhat arbitrarily selected fixed buffer size. */
@@ -265,6 +267,11 @@ const char * omrsysinfo_get_s390_processor_feature_name(uint32_t feature);
 static intptr_t omrsysinfo_get_riscv_description(struct OMRPortLibrary *portLibrary, OMRProcessorDesc *desc);
 #endif
 
+#if defined(AARCH64) && defined(LINUX)
+static const char *omrsysinfo_get_aarch64_processor_feature_name(uint32_t feature);
+static intptr_t omrsysinfo_get_linux_aarch64_description(struct OMRPortLibrary *portLibrary, OMRProcessorDesc *desc);
+#endif /* defined(AARCH64) && defined(LINUX) */
+
 static const char getgroupsErrorMsgPrefix[] = "getgroups : ";
 
 typedef struct EnvListItem {
@@ -338,7 +345,7 @@ struct {
 
 #if defined(LINUX)
 
-#define OMR_CGROUP_V1_MOUNT_POINT "/sys/fs/cgroup"
+#define OMR_CGROUP_MOUNT_POINT "/sys/fs/cgroup"
 #define ROOT_CGROUP "/"
 #define SYSTEMD_INIT_CGROUP "/init.scope"
 #define OMR_PROC_PID_ONE_CGROUP_FILE "/proc/1/cgroup"
@@ -351,10 +358,60 @@ struct {
  * An example:
  *  7:cpuacct,cpu:/mycgroup
  */
-#define PROC_PID_CGROUP_ENTRY_FORMAT "%d:%[^:]:%s"
+#define PROC_PID_CGROUPV1_ENTRY_FORMAT "%d:%[^:]:%s"
 #define PROC_PID_CGROUP_SYSTEMD_ENTRY_FORMAT "%d::%s"
+/* For cgroup v2, the form is:
+ *  0::<cgroup name>
+ */
+#define PROC_PID_CGROUPV2_ENTRY_FORMAT "0::%s"
 
 #define SINGLE_CGROUP_METRIC 1
+#define MAX_64BIT_INT_LENGTH 20
+/* The metricKeyInFile field in an OMRCgroupMetricInfoElement being set to this
+ * indicates that the file containing this element is in the space-separated format,
+ * i.e.
+ *  VAL0 VAL1 ...\n
+ * All 'OMRCgroupMetricInfoElement's corresponding to values in a file of this format
+ * must have their metricKeyInFile set to CGROUP_METRIC_NO_KEY and OMRCgroupMetricInfoElement
+ * arrays must list metrics in order of appearance in their file.
+ * CGROUP_METRIC_NO_KEY does not apply to newline-separated files.
+ */
+#define CGROUP_METRIC_NO_KEY -1
+
+/* Used for PPG_sysinfoControlFlags global, set bits indicate cgroup v1 availability,
+ * cgroup v2 availability, and process running in container, respectively.
+ */
+#define OMRPORT_SYSINFO_CGROUP_V1_AVAILABLE 0x1
+#define OMRPORT_SYSINFO_CGROUP_V2_AVAILABLE 0x2
+#define OMRPORT_SYSINFO_RUNNING_IN_CONTAINER 0x4
+
+/* Cgroup v1 and v2 memory files */
+#define CGROUP_MEMORY_STAT_FILE "memory.stat"
+
+/* Cgroup v1 memory files */
+#define CGROUP_MEMORY_LIMIT_IN_BYTES_FILE "memory.limit_in_bytes"
+#define CGROUP_MEMORY_USAGE_IN_BYTES_FILE "memory.usage_in_bytes"
+#define CGROUP_MEMORY_SWAP_LIMIT_IN_BYTES_FILE "memory.memsw.limit_in_bytes"
+#define CGROUP_MEMORY_SWAP_USAGE_IN_BYTES_FILE "memory.memsw.usage_in_bytes"
+
+#define CGROUP_MEMORY_STAT_CACHE_METRIC "cache"
+#define CGROUP_MEMORY_STAT_CACHE_METRIC_SZ (sizeof(CGROUP_MEMORY_STAT_CACHE_METRIC)-1)
+
+/* Cgroup v2 memory files */
+#define CGROUP_MEMORY_MAX_FILE "memory.max"
+#define CGROUP_MEMORY_CURRENT_FILE "memory.current"
+#define CGROUP_MEMORY_SWAP_MAX_FILE "memory.swap.max"
+#define CGROUP_MEMORY_SWAP_CURRENT_FILE "memory.swap.current"
+
+#define CGROUP_MEMORY_STAT_FILE_METRIC "file"
+#define CGROUP_MEMORY_STAT_FILE_METRIC_SZ (sizeof(CGROUP_MEMORY_STAT_FILE_METRIC)-1)
+
+/* Cgroup v1 cpu files */
+#define CGROUP_CPU_CFS_QUOTA_US_FILE "cpu.cfs_quota_us"
+#define CGROUP_CPU_CFS_PERIOD_US_FILE "cpu.cfs_period_us"
+
+/* Cgroup v2 cpu files */
+#define CGROUP_CPU_MAX_FILE "cpu.max"
 
 /* Currently 12 subsystems or resource controllers are defined.
  */
@@ -406,15 +463,39 @@ typedef struct OMRCgroupMetricInfoElement {
 	BOOLEAN isValueToBeChecked;
 } OMRCgroupMetricInfoElement;
 
-static struct OMRCgroupMetricInfoElement oomControlMetricElementList[] = {
+static struct OMRCgroupMetricInfoElement oomControlMetricElementListV1[] = {
 	{ "OOM Killer Disabled", "oom_kill_disable", NULL, FALSE },
 	{ "Under OOM", "under_oom", NULL, FALSE }
 };
 
-static struct OMRCgroupMetricInfoElement cpuStatMetricElementList[] = {
+static struct OMRCgroupMetricInfoElement memEventsMetricElementListV2[] = {
+	{ "Approached memory limit count", "max", NULL, FALSE },
+	{ "Reached memory limit count", "oom", NULL, FALSE }
+};
+
+static struct OMRCgroupMetricInfoElement swapEventsMetricElementListV2[] = {
+	{ "Approached swap limit count", "max", NULL, FALSE },
+	{ "Swap alloc failed count", "fail", NULL, FALSE }
+};
+
+static struct OMRCgroupMetricInfoElement cpuStatMetricElementListV1[] = {
 	{ "Period intervals elapsed count", "nr_periods", NULL, FALSE },
 	{ "Throttled count", "nr_throttled", NULL, FALSE },
 	{ "Total throttle time", "throttled_time", "nanoseconds", FALSE }
+};
+
+/* The cpu.max file contains two space separated values in the format
+ *  $QUOTA $PERIOD
+ */
+static struct OMRCgroupMetricInfoElement cpuMaxMetricElementListV2[] = {
+	{ "CPU Quota", (char *)CGROUP_METRIC_NO_KEY, "microseconds", TRUE },
+	{ "CPU Period", (char *)CGROUP_METRIC_NO_KEY, "microseconds", FALSE }
+};
+
+static struct OMRCgroupMetricInfoElement cpuStatMetricElementListV2[] = {
+	{ "Period intervals elapsed count", "nr_periods", NULL, FALSE },
+	{ "Throttled count", "nr_throttled", NULL, FALSE },
+	{ "Total throttle time", "throttled_usec", "microseconds", FALSE }
 };
 
 typedef struct OMRCgroupSubsystemMetricMap {
@@ -423,7 +504,7 @@ typedef struct OMRCgroupSubsystemMetricMap {
 	int32_t metricElementsCount;
 } OMRCgroupSubsystemMetricMap;
 
-static struct OMRCgroupSubsystemMetricMap omrCgroupMemoryMetricMap[] = {
+static struct OMRCgroupSubsystemMetricMap omrCgroupMemoryMetricMapV1[] = {
 	{ "memory.limit_in_bytes", &(OMRCgroupMetricInfoElement){ "Memory Limit", NULL, "bytes", TRUE }, SINGLE_CGROUP_METRIC },
 	{ "memory.memsw.limit_in_bytes", &(OMRCgroupMetricInfoElement){ "Memory + Swap Limit", NULL, "bytes", TRUE }, SINGLE_CGROUP_METRIC },
 	{ "memory.usage_in_bytes", &(OMRCgroupMetricInfoElement){ "Memory Usage", NULL, "bytes", FALSE }, SINGLE_CGROUP_METRIC },
@@ -432,22 +513,53 @@ static struct OMRCgroupSubsystemMetricMap omrCgroupMemoryMetricMap[] = {
 	{ "memory.memsw.max_usage_in_bytes", &(OMRCgroupMetricInfoElement){ "Memory + Swap Max Usage", NULL, "bytes", FALSE }, SINGLE_CGROUP_METRIC },
 	{ "memory.failcnt", &(OMRCgroupMetricInfoElement){ "Memory limit exceeded count", NULL, NULL, FALSE }, SINGLE_CGROUP_METRIC },
 	{ "memory.memsw.failcnt", &(OMRCgroupMetricInfoElement){ "Memory + Swap limit exceeded count", NULL, NULL, FALSE }, SINGLE_CGROUP_METRIC },
-	{ "memory.oom_control", &oomControlMetricElementList[0], sizeof(oomControlMetricElementList)/sizeof(oomControlMetricElementList[0]) }
+	{ "memory.oom_control", &oomControlMetricElementListV1[0], sizeof(oomControlMetricElementListV1)/sizeof(oomControlMetricElementListV1[0]) }
 };
+#define OMR_CGROUP_MEMORY_METRIC_MAP_V1_SIZE sizeof(omrCgroupMemoryMetricMapV1) / sizeof(omrCgroupMemoryMetricMapV1[0])
 
-static struct OMRCgroupSubsystemMetricMap omrCgroupCpuMetricMap[] = {
+static struct OMRCgroupSubsystemMetricMap omrCgroupMemoryMetricMapV2[] = {
+	{ "memory.max", &(OMRCgroupMetricInfoElement){ "Memory Limit", NULL, "bytes", TRUE }, SINGLE_CGROUP_METRIC },
+	{ "memory.swap.max", &(OMRCgroupMetricInfoElement){ "Swap Limit", NULL, "bytes", TRUE }, SINGLE_CGROUP_METRIC },
+	{ "memory.current", &(OMRCgroupMetricInfoElement){ "Memory Usage", NULL, "bytes", FALSE }, SINGLE_CGROUP_METRIC },
+	{ "memory.swap.current", &(OMRCgroupMetricInfoElement){ "Swap Usage", NULL, "bytes", FALSE }, SINGLE_CGROUP_METRIC },
+	{ "memory.events", &memEventsMetricElementListV2[0], sizeof(memEventsMetricElementListV2)/sizeof(memEventsMetricElementListV2[0]) },
+	{ "memory.swap.events", &swapEventsMetricElementListV2[0], sizeof(swapEventsMetricElementListV2)/sizeof(swapEventsMetricElementListV2[0]) }
+};
+#define OMR_CGROUP_MEMORY_METRIC_MAP_V2_SIZE sizeof(omrCgroupMemoryMetricMapV2) / sizeof(omrCgroupMemoryMetricMapV2[0])
+
+static struct OMRCgroupSubsystemMetricMap omrCgroupCpuMetricMapV1[] = {
 	{ "cpu.cfs_period_us", &(OMRCgroupMetricInfoElement){ "CPU Period", NULL, "microseconds", FALSE }, SINGLE_CGROUP_METRIC },
 	{ "cpu.cfs_quota_us", &(OMRCgroupMetricInfoElement){ "CPU Quota", NULL, "microseconds", TRUE }, SINGLE_CGROUP_METRIC },
 	{ "cpu.shares", &(OMRCgroupMetricInfoElement){ "CPU Shares", NULL, NULL, FALSE }, SINGLE_CGROUP_METRIC },
-	{ "cpu.stat", &cpuStatMetricElementList[0], sizeof(cpuStatMetricElementList)/sizeof(cpuStatMetricElementList[0]) }
+	{ "cpu.stat", &cpuStatMetricElementListV1[0], sizeof(cpuStatMetricElementListV1)/sizeof(cpuStatMetricElementListV1[0]) }
 };
+#define OMR_CGROUP_CPU_METRIC_MAP_V1_SIZE sizeof(omrCgroupCpuMetricMapV1) / sizeof(omrCgroupCpuMetricMapV1[0])
 
-static struct OMRCgroupSubsystemMetricMap omrCgroupCpusetMetricMap[] = {
+static struct OMRCgroupSubsystemMetricMap omrCgroupCpuMetricMapV2[] = {
+	{ "cpu.max", &cpuMaxMetricElementListV2[0], sizeof(cpuMaxMetricElementListV2)/sizeof(cpuMaxMetricElementListV2[0]) },
+	{ "cpu.weight", &(OMRCgroupMetricInfoElement){ "CPU Weight relative to procs in same cgroup", NULL, NULL, FALSE }, SINGLE_CGROUP_METRIC },
+	{ "cpu.stat", &cpuStatMetricElementListV2[0], sizeof(cpuStatMetricElementListV2)/sizeof(cpuStatMetricElementListV2[0]) }
+};
+#define OMR_CGROUP_CPU_METRIC_MAP_V2_SIZE sizeof(omrCgroupCpuMetricMapV2) / sizeof(omrCgroupCpuMetricMapV2[0])
+
+static struct OMRCgroupSubsystemMetricMap omrCgroupCpusetMetricMapV1[] = {
 	{ "cpuset.cpu_exclusive", &(OMRCgroupMetricInfoElement){ "CPU exclusive", NULL, NULL, FALSE }, SINGLE_CGROUP_METRIC },
 	{ "cpuset.mem_exclusive", &(OMRCgroupMetricInfoElement){ "Mem exclusive", NULL, NULL, FALSE }, SINGLE_CGROUP_METRIC },
 	{ "cpuset.cpus", &(OMRCgroupMetricInfoElement){ "CPUs", NULL, NULL, FALSE }, SINGLE_CGROUP_METRIC },
 	{ "cpuset.mems", &(OMRCgroupMetricInfoElement){ "Mems", NULL, NULL, FALSE }, SINGLE_CGROUP_METRIC }
 };
+#define OMR_CGROUP_CPUSET_METRIC_MAP_V1_SIZE sizeof(omrCgroupCpusetMetricMapV1) / sizeof(omrCgroupCpusetMetricMapV1[0])
+
+/* cpuset.cpus and cpuset.mems files may be empty, which indicates the same settings
+ * as parent cgroup, or that all cpus are available.
+ */
+static struct OMRCgroupSubsystemMetricMap omrCgroupCpusetMetricMapV2[] = {
+	{ "cpuset.cpus", &(OMRCgroupMetricInfoElement){ "CPUs", NULL, NULL, TRUE }, SINGLE_CGROUP_METRIC },
+	{ "cpuset.mems", &(OMRCgroupMetricInfoElement){ "Mems", NULL, NULL, TRUE }, SINGLE_CGROUP_METRIC },
+	{ "cpuset.cpus.effective", &(OMRCgroupMetricInfoElement){ "Effective CPUs", NULL, NULL, FALSE }, SINGLE_CGROUP_METRIC },
+	{ "cpuset.mems.effective", &(OMRCgroupMetricInfoElement){ "Effective Mems", NULL, NULL, FALSE }, SINGLE_CGROUP_METRIC }
+};
+#define OMR_CGROUP_CPUSET_METRIC_MAP_V2_SIZE sizeof(omrCgroupCpusetMetricMapV2) / sizeof(omrCgroupCpusetMetricMapV2[0])
 
 static uint32_t attachedPortLibraries;
 static omrthread_monitor_t cgroupEntryListMonitor;
@@ -483,17 +595,22 @@ static uint64_t getPhysicalMemory();
 
 #if defined(LINUX) && !defined(OMRZTPF)
 static BOOLEAN isCgroupV1Available(struct OMRPortLibrary *portLibrary);
+static BOOLEAN isCgroupV2Available(void);
 static void freeCgroupEntries(struct OMRPortLibrary *portLibrary, OMRCgroupEntry *cgEntryList);
 static char * getCgroupNameForSubsystem(struct OMRPortLibrary *portLibrary, OMRCgroupEntry *cgEntryList, const char *subsystem);
 static int32_t addCgroupEntry(struct OMRPortLibrary *portLibrary, OMRCgroupEntry **cgEntryList, int32_t hierId, const char *subsystem, const char *cgroupName, uint64_t flag);
-static int32_t readCgroupFile(struct OMRPortLibrary *portLibrary, int pid, BOOLEAN inContainer, OMRCgroupEntry **cgroupEntryList, uint64_t *availableSubsystems);
+static int32_t populateCgroupEntryListV1(struct OMRPortLibrary *portLibrary, int pid, BOOLEAN inContainer, OMRCgroupEntry **cgroupEntryList, uint64_t *availableSubsystems);
+static int32_t populateCgroupEntryListV2(struct OMRPortLibrary *portLibrary, int pid, OMRCgroupEntry **cgroupEntryList, uint64_t *availableSubsystems);
 static OMRCgroupSubsystem getCgroupSubsystemFromFlag(uint64_t subsystemFlag);
 static int32_t getAbsolutePathOfCgroupSubsystemFile(struct OMRPortLibrary *portLibrary, uint64_t subsystemFlag, const char *fileName, char *fullPath, intptr_t *bufferLength);
 static int32_t  getHandleOfCgroupSubsystemFile(struct OMRPortLibrary *portLibrary, uint64_t subsystemFlag, const char *fileName, FILE **subsystemFile);
 static int32_t readCgroupMetricFromFile(struct OMRPortLibrary *portLibrary, uint64_t subsystemFlag, const char *fileName, const char *metricKeyInFile, char **fileContent, char *value);
 static int32_t readCgroupSubsystemFile(struct OMRPortLibrary *portLibrary, uint64_t subsystemFlag, const char *fileName, int32_t numItemsToRead, const char *format, ...);
 static int32_t isRunningInContainer(struct OMRPortLibrary *portLibrary, BOOLEAN *inContainer);
+static int32_t scanCgroupIntOrMax(struct OMRPortLibrary *portLibrary, const char *metricString, uint64_t *val);
+static int32_t readCgroupMemoryFileIntOrMax(struct OMRPortLibrary *portLibrary, const char *fileName, uint64_t *metric);
 static int32_t getCgroupMemoryLimit(struct OMRPortLibrary *portLibrary, uint64_t *limit);
+static int32_t getCgroupSubsystemMetricMap(struct OMRPortLibrary *portLibrary, uint64_t subsystem, const struct OMRCgroupSubsystemMetricMap **subsystemMetricMap, uint32_t *numElements);
 #endif /* defined(LINUX) */
 
 #if defined(LINUX)
@@ -632,6 +749,8 @@ omrsysinfo_get_processor_description(struct OMRPortLibrary *portLibrary, OMRProc
 		rc = omrsysinfo_get_s390_description(portLibrary, desc);
 #elif defined(RISCV)
 		rc = omrsysinfo_get_riscv_description(portLibrary, desc);
+#elif (defined(AARCH64) && defined(LINUX))
+		rc = omrsysinfo_get_linux_aarch64_description(portLibrary, desc);
 #endif
 	}
 
@@ -704,6 +823,8 @@ omrsysinfo_get_processor_feature_name(struct OMRPortLibrary *portLibrary, uint32
 	rc = omrsysinfo_get_s390_processor_feature_name(feature);
 #elif (defined(AIXPPC) || defined(LINUXPPC))
 	rc = omrsysinfo_get_ppc_processor_feature_name(feature);
+#elif (defined(AARCH64) && defined(LINUX))
+	rc = omrsysinfo_get_aarch64_processor_feature_name(feature);
 #endif
 	Trc_PRT_sysinfo_get_processor_feature_name_Exit(rc);
 	return rc;
@@ -1073,7 +1194,7 @@ omrsysinfo_get_aix_ppc_description(struct OMRPortLibrary *portLibrary, OMRProces
 
 #if (defined(S390) || defined(J9ZOS390))
 
-#define LAST_DOUBLE_WORD	2
+#define LAST_DOUBLE_WORD	3
 
 /**
  * @internal
@@ -1104,6 +1225,8 @@ omrsysinfo_test_stfle(struct OMRPortLibrary *portLibrary, uint64_t stfleBit)
 		rc = (0 != (mem->dw2 & (((uint64_t)1) << (127 - stfleBit))));
 	} else if (stfleBit < 192 && *stfleRead >= 2) {
 		rc = (0 != (mem->dw3 & (((uint64_t)1) << (191 - stfleBit))));
+	} else if (stfleBit < 256 && *stfleRead >= 3) {
+		rc = (0 != (mem->dw4 & (((uint64_t)1) << (255 - stfleBit))));
 	}
 
 	return rc;
@@ -1575,6 +1698,21 @@ omrsysinfo_get_s390_description(struct OMRPortLibrary *portLibrary, OMRProcessor
 		}
 	}
 
+   /* zNext facility and processor detection */
+
+	if (omrsysinfo_test_stfle(portLibrary, OMR_FEATURE_S390_VECTOR_PACKED_DECIMAL_ENHANCEMENT_FACILITY_2)) {
+#if defined(J9ZOS390)
+		if (omrsysinfo_get_s390_zos_supports_vector_extension_facility())
+#elif defined(LINUX) && !defined(J9ZTPF) /* defined(J9ZOS390) */
+		if (OMR_ARE_ALL_BITS_SET(auxvFeatures, OMR_HWCAP_S390_VXRS))
+#endif /* defined(LINUX) && !defined(J9ZTPF) */
+		{
+			omrsysinfo_set_feature(desc, OMR_FEATURE_S390_VECTOR_PACKED_DECIMAL_ENHANCEMENT_FACILITY_2);
+
+			desc->processor = OMR_PROCESSOR_S390_ZNEXT;
+		}
+	}
+
 	/* Set Side Effect Facility without setting GP12. This is because
 	 * this GP12-only STFLE bit can also be enabled on zEC12 (GP10)
 	 */
@@ -1659,6 +1797,8 @@ omrsysinfo_get_s390_processor_feature_name(uint32_t feature)
 		return "vec_e2";
 	case OMR_FEATURE_S390_VECTOR_PACKED_DECIMAL_ENHANCEMENT_FACILITY:
 		return "vec_pde";
+	case OMR_FEATURE_S390_VECTOR_PACKED_DECIMAL_ENHANCEMENT_FACILITY_2:
+		return "vec_pde2";
 	default:
 		return "null";
 	}
@@ -1682,6 +1822,152 @@ omrsysinfo_get_riscv_description(struct OMRPortLibrary *portLibrary, OMRProcesso
 	return 0;
 }
 #endif /* defined(RISCV) */
+
+#if defined(AARCH64) && defined(LINUX)
+static const char *
+omrsysinfo_get_aarch64_processor_feature_name(uint32_t feature)
+{
+	switch (feature) {
+	case OMR_FEATURE_ARM64_FP:
+		return "fp";
+	case OMR_FEATURE_ARM64_ASIMD:
+		return "asimd";
+	case OMR_FEATURE_ARM64_EVTSTRM:
+		return "evtstrm";
+	case OMR_FEATURE_ARM64_AES:
+		return "aes";
+	case OMR_FEATURE_ARM64_PMULL:
+		return "pmull";
+	case OMR_FEATURE_ARM64_SHA1:
+		return "sha1";
+	case OMR_FEATURE_ARM64_SHA256:
+		return "sha2";
+	case OMR_FEATURE_ARM64_CRC32:
+		return "crc32";
+	case OMR_FEATURE_ARM64_LSE:
+		return "atomics";
+	case OMR_FEATURE_ARM64_FP16:
+		return "fphp";
+	case OMR_FEATURE_ARM64_ASIMDHP:
+		return "asimdhp";
+	case OMR_FEATURE_ARM64_CPUID:
+		return "cpuid";
+	case OMR_FEATURE_ARM64_RDM:
+		return "asimdrdm";
+	case OMR_FEATURE_ARM64_JSCVT:
+		return "jscvt";
+	case OMR_FEATURE_ARM64_FCMA:
+		return "fcma";
+	case OMR_FEATURE_ARM64_LRCPC:
+		return "lrcpc";
+	case OMR_FEATURE_ARM64_DPB:
+		return "dcpop";
+	case OMR_FEATURE_ARM64_SHA3:
+		return "sha3";
+	case OMR_FEATURE_ARM64_SM3:
+		return "sm3";
+	case OMR_FEATURE_ARM64_SM4:
+		return "sm4";
+	case OMR_FEATURE_ARM64_DOTPROD:
+		return "asimddp"; /* Advanced SIMD Dot Product */
+	case OMR_FEATURE_ARM64_SHA512:
+		return "sha512";
+	case OMR_FEATURE_ARM64_SVE:
+		return "sve";
+	case OMR_FEATURE_ARM64_FHM:
+		return "asimdfhm";
+	case OMR_FEATURE_ARM64_DIT:
+		return "dit";
+	case OMR_FEATURE_ARM64_LSE2:
+		return "uscat"; /* unaligned single copy atomicity */
+	case OMR_FEATURE_ARM64_LRCPC2:
+		return "ilrcpc"; /* immediate variants of LRCPC */
+	case OMR_FEATURE_ARM64_FLAGM:
+		return "flagm";
+	case OMR_FEATURE_ARM64_SSBS:
+		return "ssbs";
+	case OMR_FEATURE_ARM64_SB:
+		return "sb";
+	case OMR_FEATURE_ARM64_PAUTH:
+		return "paca"; /* pointer authentication code to the address */
+	case OMR_FEATURE_ARM64_PACG:
+		return "pacg"; /* pointer authentication code generic */
+	case OMR_FEATURE_ARM64_DPB2:
+		return "dcpodp"; /* data cache point of deep persistence */
+	case OMR_FEATURE_ARM64_SVE2:
+		return "sve2";
+	case OMR_FEATURE_ARM64_SVE_AES:
+		return "sveaes";
+	case OMR_FEATURE_ARM64_SVE_PMULL128:
+		return "svepmull";
+	case OMR_FEATURE_ARM64_SVE_BITPERM:
+		return "svebitperm";
+	case OMR_FEATURE_ARM64_SVE_SHA3:
+		return "svesha3";
+	case OMR_FEATURE_ARM64_SVE_SM4:
+		return "svesm4";
+	case OMR_FEATURE_ARM64_FLAGM2:
+		return "flagm2";
+	case OMR_FEATURE_ARM64_FRINTTS:
+		return "frint";	
+	case OMR_FEATURE_ARM64_SVE_I8MM:
+		return "svei8mm";
+	case OMR_FEATURE_ARM64_F32MM:
+		return "svef32mm";
+	case OMR_FEATURE_ARM64_F64MM:
+		return "svef64mm";
+	case OMR_FEATURE_ARM64_SVE_BF16:
+		return "svebf16";
+	case OMR_FEATURE_ARM64_I8MM:
+		return "i8mm";
+	case OMR_FEATURE_ARM64_BF16:
+		return "bf16";
+	case OMR_FEATURE_ARM64_DGH:
+		return "dgh";
+	case OMR_FEATURE_ARM64_RNG:
+		return "rng";
+	case OMR_FEATURE_ARM64_BTI:
+		return "bti";
+	case OMR_FEATURE_ARM64_MTE2:
+		return "mte";
+	default:
+		return "null";
+	}
+	return "null";
+}
+
+/**
+ * @internal
+ * Populates OMRProcessorDesc *desc on Linux ARM64
+ *
+ * @param[in] desc pointer to the struct that will contain the CPU type and features.
+ *
+ * @return 0 on success, -1 on failure
+ */
+static intptr_t
+omrsysinfo_get_linux_aarch64_description(struct OMRPortLibrary *portLibrary, OMRProcessorDesc *desc)
+{
+	/* initialize auxv prior to querying the auxv */
+	if (prefetch_auxv() != 0) {
+		desc->processor = OMR_PROCESSOR_ARM64_V8_A;
+		desc->physicalProcessor = OMR_PROCESSOR_ARM64_V8_A;
+		desc->features[0] = 0;
+		desc->features[1] = 0;
+		return -1;
+	}
+
+	desc->processor = OMR_PROCESSOR_ARM64_V8_A;
+	desc->physicalProcessor = desc->processor;
+	/* Linux ARM64 features:
+	 * Can't error check these calls as both 0 & -1 are valid
+	 * bit fields that could be returned by this query.
+	 */
+	desc->features[0] = query_auxv(AT_HWCAP);
+	desc->features[1] = query_auxv(AT_HWCAP2);
+
+	return 0;
+}
+#endif /* defined(AARCH64) && defined(LINUX) */
 
 intptr_t
 omrsysinfo_get_env(struct OMRPortLibrary *portLibrary, const char *envVar, char *infoString, uintptr_t bufSize)
@@ -1734,6 +2020,7 @@ omrsysinfo_get_OS_type(struct OMRPortLibrary *portLibrary)
 }
 
 #if defined(OSX)
+#define COMPAT_PLIST_LINK "/System/Library/CoreServices/.SystemVersionPlatform.plist"
 #define KERN_OSPRODUCTVERSION "kern.osproductversion"
 #define PLIST_FILE "/System/Library/CoreServices/SystemVersion.plist"
 #define PRODUCT_VERSION_ELEMENT "<key>ProductVersion</key>"
@@ -1755,7 +2042,7 @@ const char *
 omrsysinfo_get_OS_version(struct OMRPortLibrary *portLibrary)
 {
 	if (NULL == PPG_si_osVersion) {
-		int rc = -1;
+		int64_t rc = -1;
 #if defined(OSX)
 		char *versionString = NULL;
 		char *allocatedFileBuffer = NULL;
@@ -1780,21 +2067,28 @@ omrsysinfo_get_OS_version(struct OMRPortLibrary *portLibrary)
 		if (rc < 0) { /* older version of MacOS.  Fall back to parsing the plist. */
 			intptr_t plistFile = portLibrary->file_open(portLibrary, PLIST_FILE, EsOpenRead, 0444);
 			if (plistFile >= 0) {
-				char myBuffer[512];  /* the file size is typically ~480 bytes */
-				char *buffer = myBuffer;
-				size_t len = (size_t) portLibrary->file_flength(portLibrary, plistFile);
-				rc = 0;
-				if (len >= sizeof(myBuffer)) { /* leave space for a terminating null */
-					allocatedFileBuffer = portLibrary->mem_allocate_memory(portLibrary, len + 1, OMR_GET_CALLSITE(), OMRMEM_CATEGORY_PORT_LIBRARY);
-					buffer = allocatedFileBuffer;
+				char myBuffer[1024];  /* the file size is typically ~500 bytes */
+				char *buffer = NULL;
+				size_t fileLen = 0;
+				rc = portLibrary->file_flength(portLibrary, plistFile);
+				if (rc >= 0) {
+					fileLen = (size_t) rc;
+					if (fileLen >= sizeof(myBuffer)) { /* leave space for a terminating null */
+						allocatedFileBuffer = portLibrary->mem_allocate_memory(portLibrary, fileLen + 1,
+							OMR_GET_CALLSITE(), OMRMEM_CATEGORY_PORT_LIBRARY);
+						buffer = allocatedFileBuffer;
+					} else {
+						buffer = myBuffer;
+					}
 				}
+				rc = 0;
 				if (NULL != buffer) {
 					char *readPtr = buffer;
-					size_t bytesRemaining = len;
+					size_t bytesRemaining = fileLen;
 					while (bytesRemaining > 0) {
 						intptr_t result = portLibrary->file_read(portLibrary, plistFile, readPtr, bytesRemaining);
 						if (result > 0) {
-							bytesRemaining -= result;
+							bytesRemaining -= (size_t)result;
 							readPtr += result;
 						} else {
 							rc = -1; /* error or unexpected EOF */
@@ -1802,7 +2096,7 @@ omrsysinfo_get_OS_version(struct OMRPortLibrary *portLibrary)
 						}
 					}
 					if (0 == rc) {
-						buffer[len] = '\0';
+						buffer[fileLen] = '\0';
 						readPtr = strstr(buffer, PRODUCT_VERSION_ELEMENT);
 						if (NULL != readPtr) {
 							readPtr = strstr(readPtr + sizeof(PRODUCT_VERSION_ELEMENT) - 1, STRING_OPEN_TAG);
@@ -1823,6 +2117,7 @@ omrsysinfo_get_OS_version(struct OMRPortLibrary *portLibrary)
 				if (rc < 0) {
 					/* free the buffer if it was allocated */
 					portLibrary->mem_free_memory(portLibrary, allocatedFileBuffer);
+					allocatedFileBuffer = NULL;
 				}
 			}
 		}
@@ -1849,6 +2144,74 @@ omrsysinfo_get_OS_version(struct OMRPortLibrary *portLibrary)
 					rc = sysctlbyname(KERN_OSPRODUCTVERSION, buffer, &resultSize, NULL, 0);
 				}
 				buffer[resultSize] = '\0';
+
+				/* 10.16 is the version returned when in a backwards compatibility context in OSX versions 11+
+				 * so we check the plink symlink as that bypasses the compatibility context and returns the
+				 * real version info.
+				 */
+				if (0 == strcmp(buffer, "10.16")) {
+					portLibrary->mem_free_memory(portLibrary, buffer);
+					buffer = NULL;
+					len = 0;
+					portLibrary->mem_free_memory(portLibrary, allocatedFileBuffer);
+					allocatedFileBuffer = NULL;
+
+					intptr_t plistFile = portLibrary->file_open(portLibrary, COMPAT_PLIST_LINK, EsOpenRead, 0444);
+					if (plistFile >= 0) {
+						char myBuffer[1024];  /* the file size is ~500 bytes, 525 on a 11.3 */
+						char *fileBuffer = myBuffer;
+						size_t fileLen = 0;
+						rc = portLibrary->file_flength(portLibrary, plistFile);
+						if (rc > 0) {
+							fileLen = (size_t) rc;
+							if (fileLen >= sizeof(myBuffer)) { /* leave space for a terminating null */
+								allocatedFileBuffer = portLibrary->mem_allocate_memory(portLibrary, fileLen + 1,
+									OMR_GET_CALLSITE(), OMRMEM_CATEGORY_PORT_LIBRARY);
+								fileBuffer = allocatedFileBuffer;
+							} else {
+								fileBuffer = myBuffer;
+							}
+						}
+
+						rc = 0;
+						if (NULL != fileBuffer) {
+							char *readPtr = fileBuffer;
+							size_t bytesRemaining = fileLen;
+							while (bytesRemaining > 0) {
+								intptr_t result = portLibrary->file_read(portLibrary, plistFile, readPtr, bytesRemaining);
+								if (result > 0) {
+									bytesRemaining -= (size_t)result;
+									readPtr += result;
+								} else {
+									rc = -1; /* error or unexpected EOF */
+									break;
+								}
+							}
+							if (0 == rc) {
+								fileBuffer[fileLen] = '\0';
+								readPtr = strstr(fileBuffer, PRODUCT_VERSION_ELEMENT);
+								if (NULL != readPtr) {
+									readPtr = strstr(readPtr + sizeof(PRODUCT_VERSION_ELEMENT) - 1, STRING_OPEN_TAG);
+								}
+								if (NULL != readPtr) {
+									versionString = readPtr + sizeof(STRING_OPEN_TAG) - 1;
+									readPtr = strstr(versionString, STRING_CLOSE_TAG);
+								}
+								if (NULL != readPtr) {
+									resultSize = readPtr - versionString;
+									len = resultSize + 1;
+									buffer = portLibrary->mem_allocate_memory(portLibrary, len,
+										OMR_GET_CALLSITE(), OMRMEM_CATEGORY_PORT_LIBRARY);
+									if (NULL != buffer) {
+										memcpy(buffer, versionString, resultSize);
+										buffer[resultSize] = '\0';
+									}
+								}
+							}
+						}
+						portLibrary->file_close(portLibrary, plistFile);
+					}
+				}
 			}
 			/* allocatedFileBuffer is null if it was not allocated */
 			portLibrary->mem_free_memory(portLibrary, allocatedFileBuffer);
@@ -2497,9 +2860,12 @@ omrsysinfo_get_number_CPUs_by_type(struct OMRPortLibrary *portLibrary, uintptr_t
 		}
 #elif defined(LINUX) && !defined(OMRZTPF)
 		cpu_set_t cpuSet;
-		int32_t size = sizeof(cpuSet); /* Size in bytes */
+		int32_t error = 0;
+		size_t size = sizeof(cpuSet); /* Size in bytes */
 		pid_t mainProcess = getpid();
-		int32_t error = sched_getaffinity(mainProcess, size, &cpuSet);
+		memset(&cpuSet, 0, size);
+
+		error = sched_getaffinity(mainProcess, size, &cpuSet);
 
 		if (0 == error) {
 			toReturn = CPU_COUNT(&cpuSet);
@@ -2510,7 +2876,7 @@ omrsysinfo_get_number_CPUs_by_type(struct OMRPortLibrary *portLibrary, uintptr_t
 				int32_t numCPUs = sysconf(_SC_NPROCESSORS_CONF);
 				cpu_set_t *allocatedCpuSet = CPU_ALLOC(numCPUs);
 				if (NULL != allocatedCpuSet) {
-					size_t size = CPU_ALLOC_SIZE(numCPUs);
+					size = CPU_ALLOC_SIZE(numCPUs);
 					CPU_ZERO_S(size, allocatedCpuSet);
 					error = sched_getaffinity(mainProcess, size, allocatedCpuSet);
 					if (0 == error) {
@@ -2528,21 +2894,73 @@ omrsysinfo_get_number_CPUs_by_type(struct OMRPortLibrary *portLibrary, uintptr_t
 			int32_t rc = 0;
 			int64_t cpuQuota = 0;
 			uint64_t cpuPeriod = 0;
-			int32_t numItemsToRead = 1; /* cpu.cfs_quota_us and cpu.cfs_period_us files each contain only one integer value */
 
-			/* If either file read fails, ignore cgroup cpu quota limits and continue */
-			rc = readCgroupSubsystemFile(portLibrary, OMR_CGROUP_SUBSYSTEM_CPU, "cpu.cfs_quota_us", numItemsToRead, "%ld", &cpuQuota);
-			if (0 == rc) {
-				rc = readCgroupSubsystemFile(portLibrary, OMR_CGROUP_SUBSYSTEM_CPU, "cpu.cfs_period_us", numItemsToRead, "%lu", &cpuPeriod);
+			if (OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_CGROUP_V1_AVAILABLE)) {
+				/* cpu.cfs_quota_us and cpu.cfs_period_us files each contain only one integer value. */
+				int32_t numItemsToRead = 1;
+
+				/* If either file read fails, ignore cgroup cpu quota limits and continue. */
+				rc = readCgroupSubsystemFile(
+						portLibrary,
+						OMR_CGROUP_SUBSYSTEM_CPU,
+						CGROUP_CPU_CFS_QUOTA_US_FILE,
+						numItemsToRead,
+						"%ld",
+						&cpuQuota);
 				if (0 == rc) {
-					int32_t numCpusQuota = (int32_t) (((double) cpuQuota / cpuPeriod) + 0.5);
+					rc = readCgroupSubsystemFile(
+							portLibrary,
+							OMR_CGROUP_SUBSYSTEM_CPU,
+							CGROUP_CPU_CFS_PERIOD_US_FILE,
+							numItemsToRead,
+							"%lu",
+							&cpuPeriod);
+				}
+			} else if (OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_CGROUP_V2_AVAILABLE)) {
+				/* Read cpu.max file which contains the quota and period in the format
+				 * "$QUOTA $PERIOD". The value "max" for $QUOTA indicates no limit.
+				 */
+				int32_t numItemsToRead = 2;
+				char quotaString[MAX_64BIT_INT_LENGTH];
+				uint64_t quotaVal = 0;
 
-					if ((cpuQuota > 0) && (numCpusQuota < toReturn)) {
-						toReturn = numCpusQuota;
-						/* If the CPU quota rounds down to 0, then just return 1 as the closest usable value */
-						if (0 == toReturn) {
-							toReturn = 1;
+				rc = readCgroupSubsystemFile(
+						portLibrary,
+						OMR_CGROUP_SUBSYSTEM_CPU,
+						CGROUP_CPU_MAX_FILE,
+						numItemsToRead,
+						"%s %lu",
+						&quotaString,
+						&cpuPeriod);
+				if (0 != rc) {
+					Trc_PRT_sysinfo_get_number_CPUs_by_type_read_failed(CGROUP_CPU_MAX_FILE, rc);
+				} else {
+					rc = scanCgroupIntOrMax(portLibrary, quotaString, &quotaVal);
+					if (0 == rc) {
+						if (UINT64_MAX == quotaVal) {
+							cpuQuota = -1;
+						} else {
+							cpuQuota = (int64_t)quotaVal;
 						}
+					}
+				}
+			} else {
+				Trc_PRT_Assert_ShouldNeverHappen();
+			}
+
+			if (0 == rc) {
+				/* numCpusQuota is calculated from the cpu quota time allocated per cpu period. */
+				int32_t numCpusQuota = (int32_t)(((double)cpuQuota / cpuPeriod) + 0.5);
+
+				/* Overwrite toReturn if cgroup cpu quota is set (cpuQuota is not -1/unlimited)
+				 * or if numCpusQuota will limit the number of cpus available from the number
+				 * of physical cpus.
+				 */
+				if ((cpuQuota > 0) && (numCpusQuota < toReturn)) {
+					toReturn = numCpusQuota;
+					/* If the CPU quota rounds down to 0, then just return 1 as the closest usable value. */
+					if (0 == toReturn) {
+						toReturn = 1;
 					}
 				}
 			}
@@ -2770,15 +3188,6 @@ _cleanup:
 	return rc;
 }
 
-#define CGROUP_MEMORY_LIMIT_IN_BYTES_FILE "memory.limit_in_bytes"
-#define CGROUP_MEMORY_USAGE_IN_BYTES_FILE "memory.usage_in_bytes"
-#define CGROUP_MEMORY_SWAP_LIMIT_IN_BYTES_FILE "memory.memsw.limit_in_bytes"
-#define CGROUP_MEMORY_SWAP_USAGE_IN_BYTES_FILE "memory.memsw.usage_in_bytes"
-#define CGROUP_MEMORY_STAT_FILE "memory.stat"
-
-#define CGROUP_MEMORY_STAT_CACHE "cache"
-#define CGROUP_MEMORY_STAT_CACHE_SZ (sizeof(CGROUP_MEMORY_STAT_CACHE)-1)
-
 #if !defined(OMRZTPF)
 /**
  * Function collects memory usage statistics from the memory subsystem of the process's cgroup.
@@ -2794,6 +3203,12 @@ retrieveLinuxCgroupMemoryStats(struct OMRPortLibrary *portLibrary, struct OMRCgr
 	int32_t rc = 0;
 	FILE *memStatFs = NULL;
 	int32_t numItemsToRead = 1;
+	const char *memLimitFile = NULL;
+	const char *memUsageFile = NULL;
+	const char *swpLimitFile = NULL;
+	const char *swpUsageFile = NULL;
+	const char *cacheMetricName = NULL;
+	size_t cacheMetricSize = 0;
 
 	Assert_PRT_true(NULL != cgroupMemInfo);
 
@@ -2803,37 +3218,61 @@ retrieveLinuxCgroupMemoryStats(struct OMRPortLibrary *portLibrary, struct OMRCgr
 	cgroupMemInfo->memoryAndSwapUsage = OMRPORT_MEMINFO_NOT_AVAILABLE;
 	cgroupMemInfo->cached = OMRPORT_MEMINFO_NOT_AVAILABLE;
 
-	rc = readCgroupSubsystemFile(portLibrary, OMR_CGROUP_SUBSYSTEM_MEMORY, CGROUP_MEMORY_LIMIT_IN_BYTES_FILE, numItemsToRead, "%lu", &cgroupMemInfo->memoryLimit);
+	if (OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_CGROUP_V1_AVAILABLE)) {
+		memLimitFile = CGROUP_MEMORY_LIMIT_IN_BYTES_FILE;
+		memUsageFile = CGROUP_MEMORY_USAGE_IN_BYTES_FILE;
+		swpLimitFile = CGROUP_MEMORY_SWAP_LIMIT_IN_BYTES_FILE;
+		swpUsageFile = CGROUP_MEMORY_SWAP_USAGE_IN_BYTES_FILE;
+		cacheMetricName = CGROUP_MEMORY_STAT_CACHE_METRIC;
+		cacheMetricSize = CGROUP_MEMORY_STAT_CACHE_METRIC_SZ;
+	} else if (OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_CGROUP_V2_AVAILABLE)) {
+		memLimitFile = CGROUP_MEMORY_MAX_FILE;
+		memUsageFile = CGROUP_MEMORY_CURRENT_FILE;
+		swpLimitFile = CGROUP_MEMORY_SWAP_MAX_FILE;
+		swpUsageFile = CGROUP_MEMORY_SWAP_CURRENT_FILE;
+		cacheMetricName = CGROUP_MEMORY_STAT_FILE_METRIC;
+		cacheMetricSize = CGROUP_MEMORY_STAT_FILE_METRIC_SZ;
+	} else {
+		Trc_PRT_Assert_ShouldNeverHappen();
+	}
+
+	rc = readCgroupMemoryFileIntOrMax(portLibrary, memLimitFile, &cgroupMemInfo->memoryLimit);
 	if (0 != rc) {
 		goto _exit;
 	}
-	rc = readCgroupSubsystemFile(portLibrary, OMR_CGROUP_SUBSYSTEM_MEMORY, CGROUP_MEMORY_USAGE_IN_BYTES_FILE, numItemsToRead, "%lu", &cgroupMemInfo->memoryUsage);
+	rc = readCgroupSubsystemFile(portLibrary, OMR_CGROUP_SUBSYSTEM_MEMORY, memUsageFile, numItemsToRead, "%lu", &cgroupMemInfo->memoryUsage);
 	if (0 != rc) {
 		goto _exit;
 	}
-	rc = readCgroupSubsystemFile(portLibrary, OMR_CGROUP_SUBSYSTEM_MEMORY, CGROUP_MEMORY_SWAP_LIMIT_IN_BYTES_FILE, numItemsToRead, "%lu", &cgroupMemInfo->memoryAndSwapLimit);
+	rc = readCgroupMemoryFileIntOrMax(portLibrary, swpLimitFile, &cgroupMemInfo->memoryAndSwapLimit);
 	if (0 != rc) {
 		if (OMRPORT_ERROR_FILE_NOENT == rc) {
-			/* It is possible file memory.memsw.limit_in_bytes is not present if
-			 * swap space is not configured. In such cases, set memoryAndSwapLimit to same as memoryLimit.
+			/* It is possible that the swpLimitFile is not present if swap space is not configured.
+			 * In such cases, set memoryAndSwapLimit to memoryLimit.
 			 */
 			cgroupMemInfo->memoryAndSwapLimit = cgroupMemInfo->memoryLimit;
 			rc = 0;
 		} else {
 			goto _exit;
 		}
+	} else if (OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_CGROUP_V2_AVAILABLE)) {
+		/* Cgroup v2 swap limit and usage do not include the memory limit and usage. */
+		cgroupMemInfo->memoryAndSwapLimit += cgroupMemInfo->memoryLimit;
 	}
-	rc = readCgroupSubsystemFile(portLibrary, OMR_CGROUP_SUBSYSTEM_MEMORY, CGROUP_MEMORY_SWAP_USAGE_IN_BYTES_FILE, numItemsToRead, "%lu", &cgroupMemInfo->memoryAndSwapUsage);
+	rc = readCgroupSubsystemFile(portLibrary, OMR_CGROUP_SUBSYSTEM_MEMORY, swpUsageFile, numItemsToRead, "%lu", &cgroupMemInfo->memoryAndSwapUsage);
 	if (0 != rc) {
 		if (OMRPORT_ERROR_FILE_NOENT == rc) {
-			/* It is possible file memory.memsw.usage_in_bytes is not present if
-			 * swap space is not configured. In such cases, set memoryAndSwapUsage to memoryUsage.
+			/* It is possible that the swpUsageFile is not present if swap space is not configured.
+			 * In such cases, set memoryAndSwapUsage to memoryUsage.
 			 */
 			cgroupMemInfo->memoryAndSwapUsage = cgroupMemInfo->memoryUsage;
 			rc = 0;
 		} else {
 			goto _exit;
 		}
+	} else if (OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_CGROUP_V2_AVAILABLE)) {
+		/* Cgroup v2 swap limit and usage do not include the memory limit and usage. */
+		cgroupMemInfo->memoryAndSwapUsage += cgroupMemInfo->memoryUsage;
 	}
 
 	/* Read value of page cache memory from memory.stat file */
@@ -2854,12 +3293,17 @@ retrieveLinuxCgroupMemoryStats(struct OMRPortLibrary *portLibrary, struct OMRCgr
 		tmpPtr = (char *)statEntry;
 
 		/* Extract "cache" value */
-		if (0 == strncmp(tmpPtr, CGROUP_MEMORY_STAT_CACHE, CGROUP_MEMORY_STAT_CACHE_SZ)) {
-			tmpPtr += CGROUP_MEMORY_STAT_CACHE_SZ;
+		if (0 == strncmp(tmpPtr, cacheMetricName, cacheMetricSize)) {
+			tmpPtr += cacheMetricSize;
 			rc = sscanf(tmpPtr, "%" SCNu64, &cgroupMemInfo->cached);
 			if (1 != rc) {
-				Trc_PRT_retrieveLinuxCgroupMemoryStats_invalidValue(CGROUP_MEMORY_STAT_CACHE, CGROUP_MEMORY_STAT_FILE);
-				rc = portLibrary->error_set_last_error_with_message_format(portLibrary, OMRPORT_ERROR_SYSINFO_CGROUP_SUBSYSTEM_FILE_INVALID_VALUE, "invalid value for field %s in file %s", CGROUP_MEMORY_STAT_CACHE, CGROUP_MEMORY_STAT_FILE);
+				Trc_PRT_retrieveLinuxCgroupMemoryStats_invalidValue(cacheMetricName, CGROUP_MEMORY_STAT_FILE);
+				rc = portLibrary->error_set_last_error_with_message_format(
+						portLibrary,
+						OMRPORT_ERROR_SYSINFO_CGROUP_SUBSYSTEM_FILE_INVALID_VALUE,
+						"invalid value for field %s in file %s",
+						cacheMetricName,
+						CGROUP_MEMORY_STAT_FILE);
 			} else {
 				/* reset 'rc' to success code */
 				rc = 0;
@@ -3296,7 +3740,12 @@ omrsysinfo_shutdown(struct OMRPortLibrary *portLibrary)
 int32_t
 omrsysinfo_startup(struct OMRPortLibrary *portLibrary)
 {
-	PPG_isRunningInContainer = FALSE;
+	int32_t rc = 0;
+#if defined(LINUX) && !defined(OMRZTPF)
+	BOOLEAN runningInContainer = FALSE;
+#endif /* defined(LINUX) && !defined(OMRZTPF) */
+
+	PPG_sysinfoControlFlags = 0;
 	/* Obtain and cache executable name; if this fails, executable name remains NULL, but
 	 * shouldn't cause failure to startup port library.  Failure will be noticed only
 	 * when the omrsysinfo_get_executable_name() actually gets invoked.
@@ -3312,13 +3761,31 @@ omrsysinfo_startup(struct OMRPortLibrary *portLibrary)
 	 */
 	if (0 == attachedPortLibraries) {
 		if (omrthread_monitor_init_with_name(&cgroupEntryListMonitor, 0, "cgroup entry list monitor")) {
-			return -1;
+			rc = OMRPORT_ERROR_STARTUP_SYSINFO_MONITOR_INIT;
+			goto _end;
 		}
 	}
 	attachedPortLibraries += 1;
-	isRunningInContainer(portLibrary, &PPG_isRunningInContainer);
-#endif /* defined(LINUX) */
-	return 0;
+
+	if (isCgroupV1Available(portLibrary)) {
+		PPG_sysinfoControlFlags |= OMRPORT_SYSINFO_CGROUP_V1_AVAILABLE;
+	} else if (isCgroupV2Available()) {
+		PPG_sysinfoControlFlags |= OMRPORT_SYSINFO_CGROUP_V2_AVAILABLE;
+	}
+	/* isCgroupV1Available must be called before the following function as the latter checks
+	 * a bit set by the former.
+	 */
+	if (0 == isRunningInContainer(portLibrary, &runningInContainer)) {
+		if (runningInContainer) {
+			PPG_sysinfoControlFlags |= OMRPORT_SYSINFO_RUNNING_IN_CONTAINER;
+		}
+	} else {
+		rc = OMRPORT_ERROR_STARTUP_SYSINFO_RUNNING_IN_CONTAINER;
+	}
+
+_end:
+#endif /* defined(LINUX) && !defined(OMRZTPF) */
+	return rc;
 
 #if (defined(S390) || defined(J9ZOS390))
 	PPG_stfleCache.lastDoubleWord = -1;
@@ -3505,7 +3972,11 @@ omrsysinfo_get_limit(struct OMRPortLibrary *portLibrary, uint32_t resourceID, ui
 
 		switch (resourceRequested) {
 		case OMRPORT_RESOURCE_ADDRESS_SPACE:
+#if defined(J9ZOS39064)
+			resource = RLIMIT_MEMLIMIT;
+#else /* defined(J9ZOS39064) */
 			resource = RLIMIT_AS;
+#endif /* defined(J9ZOS39064) */
 			break;
 		case OMRPORT_RESOURCE_CORE_FILE:
 			resource = RLIMIT_CORE;
@@ -3571,7 +4042,11 @@ omrsysinfo_set_limit(struct OMRPortLibrary *portLibrary, uint32_t resourceID, ui
 
 		switch (resourceRequested) {
 		case OMRPORT_RESOURCE_ADDRESS_SPACE:
+#if defined(J9ZOS39064)
+			resource = RLIMIT_MEMLIMIT;
+#else /* defined(J9ZOS39064) */
 			resource = RLIMIT_AS;
+#endif /* defined(J9ZOS39064) */
 			break;
 		case OMRPORT_RESOURCE_CORE_FILE:
 			resource = RLIMIT_CORE;
@@ -5137,16 +5612,37 @@ isCgroupV1Available(struct OMRPortLibrary *portLibrary)
 	BOOLEAN result = TRUE;
 
 	/* If tmpfs is mounted on /sys/fs/cgroup, then it indicates cgroup v1 system is available */
-	rc = statfs(OMR_CGROUP_V1_MOUNT_POINT, &buf);
+	rc = statfs(OMR_CGROUP_MOUNT_POINT, &buf);
 	if (0 != rc) {
 		int32_t osErrCode = errno;
-		Trc_PRT_isCgroupV1Available_statfs_failed(OMR_CGROUP_V1_MOUNT_POINT, osErrCode);
+		Trc_PRT_isCgroupV1Available_statfs_failed(OMR_CGROUP_MOUNT_POINT, osErrCode);
 		portLibrary->error_set_last_error(portLibrary, osErrCode, OMRPORT_ERROR_SYSINFO_SYS_FS_CGROUP_STATFS_FAILED);
 		result = FALSE;
 	} else if (TMPFS_MAGIC != buf.f_type) {
-		Trc_PRT_isCgroupV1Available_tmpfs_not_mounted(OMR_CGROUP_V1_MOUNT_POINT);
-		portLibrary->error_set_last_error_with_message_format(portLibrary, OMRPORT_ERROR_SYSINFO_SYS_FS_CGROUP_TMPFS_NOT_MOUNTED, "tmpfs is not mounted on " OMR_CGROUP_V1_MOUNT_POINT);
+		Trc_PRT_isCgroupV1Available_tmpfs_not_mounted(OMR_CGROUP_MOUNT_POINT);
+		portLibrary->error_set_last_error_with_message_format(portLibrary, OMRPORT_ERROR_SYSINFO_SYS_FS_CGROUP_TMPFS_NOT_MOUNTED, "tmpfs is not mounted on " OMR_CGROUP_MOUNT_POINT);
 		result = FALSE;
+	}
+
+	return result;
+}
+
+/**
+ * @internal
+ * Checks if cgroup v2 system is available
+ *
+ * @param[in] portLibrary pointer to OMRPortLibrary
+ *
+ * @return TRUE if cgroup v2 system is available, FALSE otherwise
+ */
+static BOOLEAN
+isCgroupV2Available(void)
+{
+	BOOLEAN result = FALSE;
+
+	/* If the cgroup.controllers file exists at the root cgroup, then v2 is available. */
+	if (0 == access(OMR_CGROUP_MOUNT_POINT "/cgroup.controllers", F_OK)) {
+		result = TRUE;
 	}
 
 	return result;
@@ -5272,7 +5768,7 @@ _end:
  * returns 0 on success, negative code on error
  */
 static int32_t
-readCgroupFile(struct OMRPortLibrary *portLibrary, int pid, BOOLEAN inContainer, OMRCgroupEntry **cgroupEntryList, uint64_t *availableSubsystems)
+populateCgroupEntryListV1(struct OMRPortLibrary *portLibrary, int pid, BOOLEAN inContainer, OMRCgroupEntry **cgroupEntryList, uint64_t *availableSubsystems)
 {
 	char cgroupFilePath[PATH_MAX];
 	uintptr_t requiredSize = 0;
@@ -5283,7 +5779,7 @@ readCgroupFile(struct OMRPortLibrary *portLibrary, int pid, BOOLEAN inContainer,
 
 	Assert_PRT_true(NULL != cgroupEntryList);
 
-	requiredSize = portLibrary->str_printf(portLibrary, NULL, (uint32_t)-1, "/proc/%d/cgroup", pid);
+	requiredSize = portLibrary->str_printf(portLibrary, NULL, 0, "/proc/%d/cgroup", pid);
 	Assert_PRT_true(requiredSize <= PATH_MAX);
 	portLibrary->str_printf(portLibrary, cgroupFilePath, sizeof(cgroupFilePath), "/proc/%d/cgroup", pid);
 
@@ -5291,7 +5787,7 @@ readCgroupFile(struct OMRPortLibrary *portLibrary, int pid, BOOLEAN inContainer,
 	cgroupFile = fopen(cgroupFilePath, "r");
 	if (NULL == cgroupFile) {
 		int32_t osErrCode = errno;
-		Trc_PRT_readCgroupFile_fopen_failed(cgroupFilePath, osErrCode);
+		Trc_PRT_populateCgroupEntryList_fopen_failed(1, cgroupFilePath, osErrCode);
 		rc = portLibrary->error_set_last_error(portLibrary, osErrCode, OMRPORT_ERROR_SYSINFO_PROCESS_CGROUP_FILE_FOPEN_FAILED);
 		goto _end;
 	}
@@ -5310,11 +5806,11 @@ readCgroupFile(struct OMRPortLibrary *portLibrary, int pid, BOOLEAN inContainer,
 		}
 		if (0 != ferror(cgroupFile)) {
 			int32_t osErrCode = errno;
-			Trc_PRT_readCgroupFile_fgets_failed(cgroupFilePath, osErrCode);
+			Trc_PRT_populateCgroupEntryList_fgets_failed(1, cgroupFilePath, osErrCode);
 			rc = portLibrary->error_set_last_error_with_message_format(portLibrary, OMRPORT_ERROR_SYSINFO_PROCESS_CGROUP_FILE_READ_FAILED, "fgets failed to read %s file stream with errno=%d", cgroupFilePath, osErrCode);
 			goto _end;
 		}
-		rc = sscanf(buffer, PROC_PID_CGROUP_ENTRY_FORMAT, &hierId, subsystems, cgroup);
+		rc = sscanf(buffer, PROC_PID_CGROUPV1_ENTRY_FORMAT, &hierId, subsystems, cgroup);
 
 		if (EOF == rc) {
 			break;
@@ -5322,13 +5818,13 @@ readCgroupFile(struct OMRPortLibrary *portLibrary, int pid, BOOLEAN inContainer,
 			rc = sscanf(buffer, PROC_PID_CGROUP_SYSTEMD_ENTRY_FORMAT, &hierId, cgroup);
 
 			if (2 != rc) {
-				Trc_PRT_readCgroupFile_unexpected_format(cgroupFilePath);
+				Trc_PRT_populateCgroupEntryList_unexpected_format(1, cgroupFilePath);
 				rc = portLibrary->error_set_last_error_with_message_format(portLibrary, OMRPORT_ERROR_SYSINFO_PROCESS_CGROUP_FILE_READ_FAILED, "unexpected format of %s", cgroupFilePath);
 				goto _end;
 			}
 			subsystems[0] = '\0';
 		} else if (3 != rc) {
-			Trc_PRT_readCgroupFile_unexpected_format(cgroupFilePath);
+			Trc_PRT_populateCgroupEntryList_unexpected_format(1, cgroupFilePath);
 			rc = portLibrary->error_set_last_error_with_message_format(portLibrary, OMRPORT_ERROR_SYSINFO_PROCESS_CGROUP_FILE_READ_FAILED, "unexpected format of %s", cgroupFilePath);
 			goto _end;
 		}
@@ -5344,11 +5840,14 @@ readCgroupFile(struct OMRPortLibrary *portLibrary, int pid, BOOLEAN inContainer,
 
 			for (i = 0; i < sizeof(supportedSubsystems) / sizeof(supportedSubsystems[0]); i++) {
 				if (OMR_ARE_NO_BITS_SET(available, supportedSubsystems[i].flag)
-					&& !strcmp(cursor, supportedSubsystems[i].name)
+					&& (0 == strcmp(cursor, supportedSubsystems[i].name))
 				) {
 					const char *cgroupToUse = cgroup;
 
 					if (TRUE == inContainer) {
+						/* Cgroup v1 does not support namespaces; overwrite cgroup path as seen by host
+						 * with '/', the actual cgroup seen from the container.
+						 */
 						cgroupToUse = ROOT_CGROUP;
 					}
 					rc = addCgroupEntry(portLibrary, &cgEntryList, hierId, cursor, cgroupToUse, supportedSubsystems[i].flag);
@@ -5376,7 +5875,149 @@ _end:
 		*cgroupEntryList = cgEntryList;
 		if (NULL != availableSubsystems) {
 			*availableSubsystems = available;
-			Trc_PRT_readCgroupFile_available_subsystems(available);
+			Trc_PRT_populateCgroupEntryList_available_subsystems(1, available);
+		}
+	}
+
+	return rc;
+}
+
+/**
+ * Reads /proc/<pid>/cgroup to get the name of the cgroup to which the given process
+ * belongs, then the $MOUNT_POINT/cgroupName/cgroup.controllers file to get the
+ * enabled subsystems.
+ *
+ * @param[in] portLibrary pointer to OMRPortLibrary
+ * @param[in] pid process id
+ * @param[out] cgroupEntryList pointer to OMRCgroupEntry *. On successful return, *cgroupEntry
+ * points to a circular linked list. Each element of the list is populated based on the contents
+ * of /proc/<pid>/cgroup file.
+ * @param[out] availableSubsystems on successful return, contains bitwise-OR of flags of type OMR_CGROUP_SUBSYSTEMS_*
+ * indicating the subsystems available for use
+ *
+ * returns 0 on success, negative code on error
+ */
+static int32_t
+populateCgroupEntryListV2(struct OMRPortLibrary *portLibrary, int pid, OMRCgroupEntry **cgroupEntryList, uint64_t *availableSubsystems)
+{
+	char cgroupFilePath[PATH_MAX];
+	char controllerFilePath[PATH_MAX];
+	char buffer[PATH_MAX];
+	uintptr_t requiredSize = 0;
+	FILE *cgroupFile = NULL;
+	FILE *controllerFile = NULL;
+	OMRCgroupEntry *cgEntryList = NULL;
+	uint64_t available = 0;
+	int32_t rc = 0;
+
+	Assert_PRT_true(NULL != cgroupEntryList);
+
+	requiredSize = portLibrary->str_printf(portLibrary, NULL, 0, "/proc/%d/cgroup", pid);
+	Assert_PRT_true(requiredSize <= PATH_MAX);
+	portLibrary->str_printf(portLibrary, cgroupFilePath, sizeof(cgroupFilePath), "/proc/%d/cgroup", pid);
+
+	cgroupFile = fopen(cgroupFilePath, "r");
+	if (NULL == cgroupFile) {
+		int32_t osErrCode = errno;
+		Trc_PRT_populateCgroupEntryList_fopen_failed(2, cgroupFilePath, osErrCode);
+		rc = portLibrary->error_set_last_error(portLibrary, osErrCode, OMRPORT_ERROR_SYSINFO_PROCESS_CGROUP_FILE_FOPEN_FAILED);
+		goto _end;
+	}
+
+	if (NULL == fgets(buffer, PATH_MAX, cgroupFile)) {
+		if (0 != ferror(cgroupFile)) {
+			int32_t osErrCode = errno;
+			Trc_PRT_populateCgroupEntryList_fgets_failed(2, cgroupFilePath, osErrCode);
+			rc = portLibrary->error_set_last_error_with_message_format(
+					portLibrary,
+					OMRPORT_ERROR_SYSINFO_PROCESS_CGROUP_FILE_READ_FAILED,
+					"fgets failed to read %s file stream with errno=%d",
+					cgroupFilePath,
+					osErrCode);
+			goto _end;
+		}
+	} else {
+		/* For v2, the cgroup file contains one line of the format '0::<cgroup>'. */
+		char cgroup[PATH_MAX];
+		/* This array should be large enough to read names of all subsystems. 1024 should be enough based on current supported subsystems. */
+		char subsystems[PATH_MAX];
+		char *cursor = NULL;
+		char *separator = NULL;
+
+		rc = sscanf(buffer, PROC_PID_CGROUPV2_ENTRY_FORMAT, cgroup);
+
+		if (1 == rc) {
+			/* The controller file consists of a single space-delimited line of controllers/subsystems. */
+			requiredSize = portLibrary->str_printf(portLibrary, NULL, 0, "%s/%s/cgroup.controllers", OMR_CGROUP_MOUNT_POINT, cgroup);
+			Assert_PRT_true(requiredSize <= PATH_MAX);
+			portLibrary->str_printf(portLibrary, controllerFilePath, sizeof(controllerFilePath), "%s/%s/cgroup.controllers", OMR_CGROUP_MOUNT_POINT, cgroup);
+
+			controllerFile = fopen(controllerFilePath, "r");
+			if (NULL == controllerFile) {
+				int32_t osErrCode = errno;
+				Trc_PRT_populateCgroupEntryList_fopen_failed(2, controllerFilePath, osErrCode);
+				rc = portLibrary->error_set_last_error(portLibrary, osErrCode, OMRPORT_ERROR_SYSINFO_PROCESS_CGROUP_FILE_FOPEN_FAILED);
+				goto _end;
+			}
+
+			if (NULL == fgets(subsystems, PATH_MAX, controllerFile)) {
+				/* No controllers enabled. */
+				rc = 0;
+				goto _end;
+			}
+		} else {
+			Trc_PRT_populateCgroupEntryList_unexpected_format(2, cgroupFilePath);
+			rc = portLibrary->error_set_last_error_with_message_format(
+					portLibrary,
+					OMRPORT_ERROR_SYSINFO_PROCESS_CGROUP_FILE_READ_FAILED,
+					"unexpected format of %s",
+					cgroupFilePath);
+			goto _end;
+		}
+
+		cursor = subsystems;
+		do {
+			int32_t i = 0;
+
+			separator = strchr(cursor, ' ');
+			if (NULL != separator) {
+				*separator = '\0';
+			}
+
+			for (i = 0; i < sizeof(supportedSubsystems) / sizeof(supportedSubsystems[0]); i++) {
+				if (OMR_ARE_NO_BITS_SET(available, supportedSubsystems[i].flag)
+					&& (0 == strcmp(cursor, supportedSubsystems[i].name))
+				) {
+					/* In cgroup v2, all cgroups are bound to the single unified hierarchy, '0'. */
+					rc = addCgroupEntry(portLibrary, &cgEntryList, 0, cursor, cgroup, supportedSubsystems[i].flag);
+					if (0 != rc) {
+						goto _end;
+					}
+					available |= supportedSubsystems[i].flag;
+				}
+			}
+			if (NULL != separator) {
+				cursor = separator + 1;
+			}
+		} while (NULL != separator);
+	}
+	rc = 0;
+
+_end:
+	if (NULL != cgroupFile) {
+		fclose(cgroupFile);
+	}
+	if (NULL != controllerFile) {
+		fclose(controllerFile);
+	}
+	if (0 != rc) {
+		freeCgroupEntries(portLibrary, cgEntryList);
+		cgEntryList = NULL;
+	} else {
+		*cgroupEntryList = cgEntryList;
+		if (NULL != availableSubsystems) {
+			*availableSubsystems = available;
+			Trc_PRT_populateCgroupEntryList_available_subsystems(2, available);
 		}
 	}
 
@@ -5434,6 +6075,12 @@ getAbsolutePathOfCgroupSubsystemFile(struct OMRPortLibrary *portLibrary, uint64_
 		goto _end;
 	}
 
+	if (NULL == fileName) {
+		Trc_PRT_readCgroupSubsystemFile_invalid_fileName();
+		rc = portLibrary->error_set_last_error_with_message_format(portLibrary, OMRPORT_ERROR_SYSINFO_CGROUP_FILENAME_INVALID, "fileName is NULL");
+		goto _end;
+	}
+
 	cgroup = getCgroupNameForSubsystem(portLibrary, PPG_cgroupEntryList, subsystemNames[subsystem]);
 	if (NULL == cgroup) {
 		/* If the subsystem is available and supported, cgroup must not be NULL */
@@ -5443,15 +6090,31 @@ getAbsolutePathOfCgroupSubsystemFile(struct OMRPortLibrary *portLibrary, uint64_
 		goto _end;
 	}
 
-	/* absolute path of the file to be read is: /sys/fs/cgroup/subsystemNames[subsystem]/cgroup/filenName */
-	fullPathLen = portLibrary->str_printf(portLibrary, NULL, (uint32_t)-1, "%s/%s/%s/%s", OMR_CGROUP_V1_MOUNT_POINT, subsystemNames[subsystem], cgroup, fileName);
-	if (fullPathLen > *bufferLength) {
-		*bufferLength = fullPathLen;
-		rc = portLibrary->error_set_last_error_with_message_format(portLibrary, OMRPORT_ERROR_STRING_BUFFER_TOO_SMALL, "buffer size should be %d bytes", fullPathLen);
+	if (OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_CGROUP_V1_AVAILABLE)) {
+		/* Absolute path of the file to be read is: $MOUNT_POINT/$SUBSYSTEM_NAME/$CGROUP_NAME/$FILE_NAME. */
+		fullPathLen = portLibrary->str_printf(portLibrary, NULL, 0, "%s/%s/%s/%s", OMR_CGROUP_MOUNT_POINT, subsystemNames[subsystem], cgroup, fileName);
+		if (fullPathLen > *bufferLength) {
+			*bufferLength = fullPathLen;
+			rc = portLibrary->error_set_last_error_with_message_format(portLibrary, OMRPORT_ERROR_STRING_BUFFER_TOO_SMALL, "buffer size should be %d bytes", fullPathLen);
+			goto _end;
+		}
+
+		portLibrary->str_printf(portLibrary, fullPath, fullPathLen, "%s/%s/%s/%s", OMR_CGROUP_MOUNT_POINT, subsystemNames[subsystem], cgroup, fileName);
+	} else if (OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_CGROUP_V2_AVAILABLE)) {
+		/* Absolute path of the file to be read is: $MOUNT_POINT/$CGROUP_NAME/$FILE_NAME. */
+		fullPathLen = portLibrary->str_printf(portLibrary, NULL, 0, "%s/%s/%s", OMR_CGROUP_MOUNT_POINT, cgroup, fileName);
+		if (fullPathLen > *bufferLength) {
+			*bufferLength = fullPathLen;
+			rc = portLibrary->error_set_last_error_with_message_format(portLibrary, OMRPORT_ERROR_STRING_BUFFER_TOO_SMALL, "buffer size should be %d bytes", fullPathLen);
+			goto _end;
+		}
+
+		portLibrary->str_printf(portLibrary, fullPath, fullPathLen, "%s/%s/%s", OMR_CGROUP_MOUNT_POINT, cgroup, fileName);
+	} else {
+		Trc_PRT_readCgroupSubsystemFile_unsupported_cgroup_version();
+		rc = portLibrary->error_set_last_error_with_message(portLibrary, OMRPORT_ERROR_SYSINFO_CGROUP_VERSION_NOT_AVAILABLE, "cgroup or its version is unsupported");
 		goto _end;
 	}
-
-	portLibrary->str_printf(portLibrary, fullPath, fullPathLen, "%s/%s/%s/%s", OMR_CGROUP_V1_MOUNT_POINT, subsystemNames[subsystem], cgroup, fileName);
 
 _end:
 	return rc;
@@ -5510,32 +6173,40 @@ _end:
 }
 
 /**
- * Reads the Cgroup metric (if has multiple searched for metric key and reads it) and returns the value to the param `value`
+ * Reads the cgroup metric (if has multiple searched for metric key and reads it) and returns the
+ * value to the param value.
  *
- * @param[in] portLibrary pointer to OMRPortLibrary
- * @param[in] subsystemFlag flag of type OMR_CGROUP_SUBSYSTEMS_* representing the cgroup subsystem
- * @param[in] fileName name of the file under cgroup subsystem
- * @param[in] metricKeyInFile name of the cgroup metric which is in a group of metrics in a cgroup subsystem file
- * @param[in/out] value pointer to char * which stores the value for the specified cgroup subsystem metric
- * @param[in/out] fileContent double pointer to allocate memory and write file content in case of a multiline file with more than 1 metric available in it
+ * @param[in] portLibrary pointer to OMRPortLibrary.
+ * @param[in] subsystemFlag flag of type OMR_CGROUP_SUBSYSTEMS_* representing the cgroup subsystem.
+ * @param[in] fileName name of the file under cgroup subsystem.
+ * @param[in] metricKeyInFile name of the cgroup metric which is in a group of metrics in a cgroup
+ * subsystem file.
+ * @param[in/out] value pointer to char * which stores the value for the specified cgroup subsystem
+ * metric.
+ * @param[in/out] fileContent double pointer to allocate memory and write file content in case of a
+ * multiline file with more than 1 metric available in it.
  *
- * @return 0 on success, negative error code on any error
+ * @return 0 on success, negative error code on any error.
  */
 static int32_t
 readCgroupMetricFromFile(struct OMRPortLibrary *portLibrary, uint64_t subsystemFlag, const char *fileName, const char *metricKeyInFile, char **fileContent, char *value)
 {
 	int32_t rc = 0;
 	FILE *file = NULL;
+
 	rc = getHandleOfCgroupSubsystemFile(portLibrary, subsystemFlag, fileName, &file);
 	if (0 != rc) {
 		goto _end;
 	}
-	if (NULL == metricKeyInFile) { /* If `metricKeyInFile` is NULL then it states the file has only one Cgroup metric to be read */
+
+	if (NULL == metricKeyInFile) {
+		/* The file has only one cgroup metric to be read. */
 		if (NULL == fgets(value, MAX_LINE_LENGTH, file)) {
 			rc = OMRPORT_ERROR_SYSINFO_CGROUP_SUBSYSTEM_METRIC_NOT_AVAILABLE;
 		}
 		goto _end;
-	} else { /* Else we read the file to a buffer and pick the metrics from it later */
+	} else {
+		/* Read the file to a buffer and pick the metrics from it later. */
 		*fileContent = portLibrary->mem_allocate_memory(portLibrary, CGROUP_METRIC_FILE_CONTENT_MAX_LIMIT, OMR_GET_CALLSITE(), OMRMEM_CATEGORY_PORT_LIBRARY);
 		if (NULL != *fileContent) {
 			size_t returnvalue = fread(*fileContent, 1, CGROUP_METRIC_FILE_CONTENT_MAX_LIMIT, file);
@@ -5620,11 +6291,18 @@ isRunningInContainer(struct OMRPortLibrary *portLibrary, BOOLEAN *inContainer)
 	/* Assume we are not in container */
 	*inContainer = FALSE;
 
-	if (isCgroupV1Available(portLibrary)) {
+	/* Check for existence of files that signify running in a container (Docker and Podman respectively). Not completely
+	 * reliable as these files may not be available, but it should work for most cases.
+	 */
+	if ((0 == access("/.dockerenv", F_OK)) || (0 == access("/run/.containerenv", F_OK))) {
+		*inContainer = TRUE;
+	} else if (OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_CGROUP_V1_AVAILABLE)) {
 		/* Read PID 1's cgroup file /proc/1/cgroup and check cgroup name for each subsystem.
 		 * If cgroup name for each subsystem points to the root cgroup "/",
 		 * then the process is not running in a container.
 		 * For any other cgroup name, assume we are in a container.
+		 * Note that this will not work if namespaces are enabled in the container as all
+		 * cgroup names will be the root cgroup.
 		 */
 		cgroupFile = fopen(OMR_PROC_PID_ONE_CGROUP_FILE, "r");
 
@@ -5650,7 +6328,7 @@ isRunningInContainer(struct OMRPortLibrary *portLibrary, BOOLEAN *inContainer)
 				rc = portLibrary->error_set_last_error_with_message_format(portLibrary, OMRPORT_ERROR_SYSINFO_PROCESS_CGROUP_FILE_READ_FAILED, "fgets failed to read %s file stream with errno=%d", OMR_PROC_PID_ONE_CGROUP_FILE, osErrCode);
 				goto _end;
 			}
-			rc = sscanf(buffer, PROC_PID_CGROUP_ENTRY_FORMAT, &hierId, subsystems, cgroup);
+			rc = sscanf(buffer, PROC_PID_CGROUPV1_ENTRY_FORMAT, &hierId, subsystems, cgroup);
 
 			if (EOF == rc) {
 				break;
@@ -5683,19 +6361,129 @@ _end:
 	return rc;
 }
 
+/**
+ * Check the metric limit obtained from a cgroup subsystem file. If it is the string
+ * "max", this indicates that the metric is not limited and this function sets val
+ * to UINT64_MAX. Otherwise, val is set to the integer value of the metric.
+ *
+ * @param[in] portLibrary pointer to OMRPortLibrary.
+ * @param[in] metricString string obtained from a cgroup subsystem file.
+ * @param[out] val pointer to uint64_t which on successful return contains
+ *      the value UINT64_MAX if the metric is not limited, and the integer
+ *      value of the metric otherwise.
+ *
+ * @return 0 on success, otherwise negative error code.
+ */
+static int32_t
+scanCgroupIntOrMax(struct OMRPortLibrary *portLibrary, const char *metricString, uint64_t *val)
+{
+	int32_t rc = 0;
+
+	if (NULL == metricString || NULL == val) {
+		Trc_PRT_scanCgroupIntOrMax_null_param(metricString, val);
+		rc = portLibrary->error_set_last_error_with_message_format(
+				portLibrary,
+				OMRPORT_ERROR_SYSINFO_CGROUP_NULL_PARAM,
+				"a parameter is null: metricString=%s val=%p",
+				metricString,
+				val);
+		goto _end;
+	}
+
+	if (0 == strcmp(metricString, "max")) {
+		*val = UINT64_MAX;
+	} else {
+		rc = sscanf(metricString, "%" SCNu64, val);
+		if (1 != rc) {
+			Trc_PRT_scanCgroupIntOrMax_scan_failed(metricString, rc);
+			rc = portLibrary->error_set_last_error_with_message_format(
+					portLibrary,
+					OMRPORT_ERROR_SYSINFO_PROCESS_CGROUP_FILE_READ_FAILED,
+					"unexpected format of %s",
+					metricString);
+		} else {
+			rc = 0;
+		}
+	}
+
+_end:
+	return rc;
+}
+
+/**
+ * Read the cgroup memory limit from the memory subsystem file. For cgroup v1, it
+ * will always be a positive integer. For cgroup v2, the value in the file is
+ * either a positive integer or "max" (which indicates no limit).
+ *
+ * @param[in] portLibrary pointer to OMRPortLibrary.
+ * @param[in] fileName name of the file under cgroup subsystem.
+ * @param[out] limit pointer to uint64_t which on successful return contains
+ *      the cgroup memory limit.
+ *
+ * @return 0 on success, otherwise negative error code.
+ */
+static int32_t
+readCgroupMemoryFileIntOrMax(struct OMRPortLibrary *portLibrary, const char *fileName, uint64_t *limit)
+{
+	/* Memory limit files contain one value. */
+	int32_t numItemsToRead = 1;
+	int32_t rc = 0;
+
+	if (OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_CGROUP_V1_AVAILABLE)) {
+		rc = readCgroupSubsystemFile(portLibrary, OMR_CGROUP_SUBSYSTEM_MEMORY, fileName, numItemsToRead, "%" SCNu64, limit);
+		if (0 != rc) {
+			Trc_PRT_readCgroupMemoryFileIntOrMax_read_failed(fileName, rc);
+			goto _end;
+		}
+	} else if (OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_CGROUP_V2_AVAILABLE)) {
+		char memLimitString[MAX_64BIT_INT_LENGTH];
+		rc = readCgroupSubsystemFile(portLibrary, OMR_CGROUP_SUBSYSTEM_MEMORY, fileName, numItemsToRead, "%s", memLimitString);
+		if (0 != rc) {
+			Trc_PRT_readCgroupMemoryFileIntOrMax_read_failed(fileName, rc);
+			goto _end;
+		}
+		rc = scanCgroupIntOrMax(portLibrary, memLimitString, limit);
+	} else {
+		Trc_PRT_readCgroupMemoryFileIntOrMax_unsupported_cgroup_version();
+		rc = portLibrary->error_set_last_error_with_message(
+				portLibrary,
+				OMRPORT_ERROR_SYSINFO_CGROUP_VERSION_NOT_AVAILABLE,
+				"cgroup or its version is unsupported");
+	}
+
+_end:
+	return rc;
+}
+
+/**
+ * Get the cgroup memory limit from the memory subsystem file. This will either be
+ * memory.limit_in_bytes for cgroup v1 or memory.max for cgroup v2.
+ *
+ * @param[in] portLibrary pointer to OMRPortLibrary
+ * @param[out] limit pointer to uint64_t which on successful return contains
+ *      the cgroup memory limit
+ *
+ * @return 0 on success, otherwise negative error code
+ */
 static int32_t
 getCgroupMemoryLimit(struct OMRPortLibrary *portLibrary, uint64_t *limit)
 {
 	uint64_t cgroupMemLimit = 0;
 	uint64_t physicalMemLimit = 0;
-	int32_t numItemsToRead = 1; /* memory.limit_in_bytes file contains only one integer value */
+	const char *fileName = NULL;
 	int32_t rc = 0;
 
 	Trc_PRT_sysinfo_cgroup_get_memlimit_Entry();
 
-	rc = readCgroupSubsystemFile(portLibrary, OMR_CGROUP_SUBSYSTEM_MEMORY, "memory.limit_in_bytes", numItemsToRead, "%" SCNu64, &cgroupMemLimit);
+	if (OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_CGROUP_V1_AVAILABLE)) {
+		fileName = "memory.limit_in_bytes";
+	} else if (OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_CGROUP_V2_AVAILABLE)) {
+		fileName = "memory.max";
+	}
+
+	rc = readCgroupMemoryFileIntOrMax(portLibrary, fileName, &cgroupMemLimit);
 	if (0 != rc) {
-		Trc_PRT_sysinfo_cgroup_get_memlimit_memory_limit_read_failed("memory.limit_in_bytes", rc);
+		Trc_PRT_sysinfo_cgroup_get_memlimit_memory_limit_read_failed(fileName, rc);
 		goto _end;
 	}
 
@@ -5717,6 +6505,75 @@ _end:
 	return rc;
 }
 
+/**
+ * Get the cgroup subsystem metric map and its number of elements given the
+ * subsystem flag and the cgroup version in use.
+ *
+ * @param[in] portLibrary pointer to OMRPortLibrary
+ * @param[in] subsystem cgroup subsystem flag
+ * @param[out] subsystemMetricMap if not null, on successful return is assigned
+ *      the metric map associated with the subsystem flag
+ * @param[out] numElements if not null, on successful return is assigned the
+ *      number of elements of the metric map associated with the subsystem flag
+ *
+ * @return 0 on success, otherwise negative error code
+ */
+static int32_t
+getCgroupSubsystemMetricMap(struct OMRPortLibrary *portLibrary, uint64_t subsystem, const struct OMRCgroupSubsystemMetricMap **subsystemMetricMap, uint32_t *numElements)
+{
+	const struct OMRCgroupSubsystemMetricMap *map = NULL;
+	uint32_t count = 0;
+	int32_t rc = 0;
+
+	Assert_PRT_true((NULL != subsystemMetricMap) || (NULL != numElements));
+	if (OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_CGROUP_V1_AVAILABLE)) {
+		switch (subsystem) {
+		case OMR_CGROUP_SUBSYSTEM_MEMORY:
+			map = omrCgroupMemoryMetricMapV1;
+			count = OMR_CGROUP_MEMORY_METRIC_MAP_V1_SIZE;
+			break;
+		case OMR_CGROUP_SUBSYSTEM_CPU:
+			map = omrCgroupCpuMetricMapV1;
+			count = OMR_CGROUP_CPU_METRIC_MAP_V1_SIZE;
+			break;
+		case OMR_CGROUP_SUBSYSTEM_CPUSET:
+			map = omrCgroupCpusetMetricMapV1;
+			count = OMR_CGROUP_CPUSET_METRIC_MAP_V1_SIZE;
+			break;
+		default:
+			rc = OMRPORT_ERROR_SYSINFO_CGROUP_SUBSYSTEM_UNAVAILABLE;
+		}
+	} else if (OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_CGROUP_V2_AVAILABLE)) {
+		switch (subsystem) {
+		case OMR_CGROUP_SUBSYSTEM_MEMORY:
+			map = omrCgroupMemoryMetricMapV2;
+			count = OMR_CGROUP_MEMORY_METRIC_MAP_V2_SIZE;
+			break;
+		case OMR_CGROUP_SUBSYSTEM_CPU:
+			map = omrCgroupCpuMetricMapV2;
+			count = OMR_CGROUP_CPU_METRIC_MAP_V2_SIZE;
+			break;
+		case OMR_CGROUP_SUBSYSTEM_CPUSET:
+			map = omrCgroupCpusetMetricMapV2;
+			count = OMR_CGROUP_CPUSET_METRIC_MAP_V2_SIZE;
+			break;
+		default:
+			rc = OMRPORT_ERROR_SYSINFO_CGROUP_SUBSYSTEM_UNAVAILABLE;
+		}
+	} else {
+		Trc_PRT_Assert_ShouldNeverHappen();
+	}
+
+	if (NULL != subsystemMetricMap) {
+		*subsystemMetricMap = map;
+	}
+	if (NULL != numElements) {
+		*numElements = count;
+	}
+
+	return rc;
+}
+
 #endif /* defined(LINUX) && !defined(OMRZTPF) */
 
 BOOLEAN
@@ -5724,30 +6581,29 @@ omrsysinfo_cgroup_is_system_available(struct OMRPortLibrary *portLibrary)
 {
 	BOOLEAN result = FALSE;
 #if defined(LINUX) && !defined(OMRZTPF)
-	int32_t rc = OMRPORT_ERROR_SYSINFO_CGROUP_UNSUPPORTED_PLATFORM;
+	int32_t rc = 0;
 
 	Trc_PRT_sysinfo_cgroup_is_system_available_Entry();
 	if (NULL == PPG_cgroupEntryList) {
-		if (isCgroupV1Available(portLibrary)) {
-			BOOLEAN inContainer = FALSE;
+		if (OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_CGROUP_V1_AVAILABLE)) {
+			BOOLEAN inContainer = OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_RUNNING_IN_CONTAINER);
 
-			rc = isRunningInContainer(portLibrary, &inContainer);
-			if (0 != rc) {
-				goto _end;
-			}
 			omrthread_monitor_enter(cgroupEntryListMonitor);
 			if (NULL == PPG_cgroupEntryList) {
-				rc = readCgroupFile(portLibrary, getpid(), inContainer, &PPG_cgroupEntryList, &PPG_cgroupSubsystemsAvailable);
+				rc = populateCgroupEntryListV1(portLibrary, getpid(), inContainer, &PPG_cgroupEntryList, &PPG_cgroupSubsystemsAvailable);
 			}
 			omrthread_monitor_exit(cgroupEntryListMonitor);
-			if (0 != rc) {
-				goto _end;
+		} else if (OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_CGROUP_V2_AVAILABLE)) {
+			omrthread_monitor_enter(cgroupEntryListMonitor);
+			if (NULL == PPG_cgroupEntryList) {
+				rc = populateCgroupEntryListV2(portLibrary, getpid(), &PPG_cgroupEntryList, &PPG_cgroupSubsystemsAvailable);
 			}
+			omrthread_monitor_exit(cgroupEntryListMonitor);
+		} else {
+			rc = OMRPORT_ERROR_SYSINFO_CGROUP_UNSUPPORTED_PLATFORM;
 		}
-	} else {
-		rc = 0;
 	}
-_end:
+
 	if (0 == rc) {
 		Trc_PRT_sysinfo_cgroup_is_system_available_subsystems(PPG_cgroupSubsystemsAvailable);
 		result = TRUE;
@@ -5882,7 +6738,11 @@ omrsysinfo_get_cgroup_subsystem_list(struct OMRPortLibrary *portLibrary)
 BOOLEAN
 omrsysinfo_is_running_in_container(struct OMRPortLibrary *portLibrary)
 {
-	return PPG_isRunningInContainer;
+#if defined(LINUX) && !defined(OMRZTPF)
+	return OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_RUNNING_IN_CONTAINER);
+#else /* defined(LINUX) && !defined(OMRZTPF) */
+	return FALSE;
+#endif /* defined(LINUX) && !defined(OMRZTPF) */
 }
 
 int32_t
@@ -5894,22 +6754,8 @@ omrsysinfo_cgroup_subsystem_iterator_init(struct OMRPortLibrary *portLibrary, ui
 	state->count = 0;
 	state->subsystemid = subsystem;
 	state->fileMetricCounter = 0;
-	switch (subsystem) {
-	case OMR_CGROUP_SUBSYSTEM_MEMORY :
-		state->numElements = sizeof(omrCgroupMemoryMetricMap) / sizeof(omrCgroupMemoryMetricMap[0]);
-		break;
-	case OMR_CGROUP_SUBSYSTEM_CPU :
-		state->numElements = sizeof(omrCgroupCpuMetricMap) / sizeof(omrCgroupCpuMetricMap[0]);
-		break;
-	case OMR_CGROUP_SUBSYSTEM_CPUSET :
-		state->numElements = sizeof(omrCgroupCpusetMetricMap) / sizeof(omrCgroupCpusetMetricMap[0]);
-		break;
-	default :
-		goto _end;
-	}
-	rc = 0;
 
-_end:
+	rc = getCgroupSubsystemMetricMap(portLibrary, state->subsystemid, NULL, &state->numElements);
 #endif /* defined(LINUX) && !defined(OMRZTPF) */
 	return rc;
 }
@@ -5931,18 +6777,8 @@ omrsysinfo_cgroup_subsystem_iterator_metricKey(struct OMRPortLibrary *portLibrar
 #if defined(LINUX) && !defined(OMRZTPF)
 	if (NULL != metricKey) {
 		const struct OMRCgroupSubsystemMetricMap *subsystemMetricMap = NULL;
-		switch (state->subsystemid) {
-		case OMR_CGROUP_SUBSYSTEM_MEMORY:
-			subsystemMetricMap = omrCgroupMemoryMetricMap;
-			break;
-		case OMR_CGROUP_SUBSYSTEM_CPU:
-			subsystemMetricMap = omrCgroupCpuMetricMap;
-			break;
-		case OMR_CGROUP_SUBSYSTEM_CPUSET:
-			subsystemMetricMap = omrCgroupCpusetMetricMap;
-			break;
-		default:
-			rc = OMRPORT_ERROR_SYSINFO_CGROUP_SUBSYSTEM_UNAVAILABLE;
+		rc = getCgroupSubsystemMetricMap(portLibrary, state->subsystemid, &subsystemMetricMap, NULL);
+		if (0 != rc) {
 			goto _end;
 		}
 		if (state->fileMetricCounter < subsystemMetricMap[state->count].metricElementsCount){
@@ -5960,7 +6796,7 @@ _end:
 int32_t
 omrsysinfo_cgroup_subsystem_iterator_next(struct OMRPortLibrary *portLibrary, struct OMRCgroupMetricIteratorState *state, struct OMRCgroupMetricElement *metricElement)
 {
-	int32_t rc = OMRPORT_ERROR_SYSINFO_CGROUP_SUBSYSTEM_UNAVAILABLE;
+	int32_t rc = OMRPORT_ERROR_SYSINFO_CGROUP_UNSUPPORTED_PLATFORM;
 #if defined(LINUX) && !defined(OMRZTPF)
 	struct OMRCgroupMetricInfoElement *currentElement = NULL;
 	const struct OMRCgroupSubsystemMetricMap *subsystemMetricMap = NULL;
@@ -5968,24 +6804,15 @@ omrsysinfo_cgroup_subsystem_iterator_next(struct OMRPortLibrary *portLibrary, st
 	if (state->count >= state->numElements) {
 		goto _end;
 	}
-	switch (state->subsystemid) {
-	case OMR_CGROUP_SUBSYSTEM_MEMORY:
-		subsystemMetricMap = omrCgroupMemoryMetricMap;
-		break;
-	case OMR_CGROUP_SUBSYSTEM_CPU:
-		subsystemMetricMap = omrCgroupCpuMetricMap;
-		break;
-	case OMR_CGROUP_SUBSYSTEM_CPUSET:
-		subsystemMetricMap = omrCgroupCpusetMetricMap;
-		break;
-	default:
-		rc = OMRPORT_ERROR_SYSINFO_CGROUP_SUBSYSTEM_UNAVAILABLE;
+	rc = getCgroupSubsystemMetricMap(portLibrary, state->subsystemid, &subsystemMetricMap, NULL);
+	if (0 != rc) {
 		state->count += 1;
 		goto _end;
 	}
 	subsystemMetricMapElement = &subsystemMetricMap[state->count];
 	currentElement = subsystemMetricMapElement->metricInfoElementList;
 	if (NULL == state->fileContent) {
+		Assert_PRT_true(0 == state->fileMetricCounter);
 		rc = readCgroupMetricFromFile(portLibrary, state->subsystemid, subsystemMetricMapElement->metricFileName, currentElement->metricKeyInFile, &(state->fileContent), metricElement->value);
 
 		/* In error condition or single metric condition we increment the counter to continue to next metric */
@@ -5994,41 +6821,65 @@ omrsysinfo_cgroup_subsystem_iterator_next(struct OMRPortLibrary *portLibrary, st
 			state->count += 1;
 			goto _end;
 		}
-
-		state->fileMetricCounter = 0;
 	}
 
 	if (state->fileMetricCounter < subsystemMetricMapElement->metricElementsCount) {
-		BOOLEAN isMetricFound = FALSE;
 		char *current = state->fileContent;
-		char *end = state->fileContent + strlen(state->fileContent) - 1;
-		int32_t metricKeyLen = 0;
 		currentElement += state->fileMetricCounter;
-		metricKeyLen = strlen(currentElement->metricKeyInFile);
-		while (current < end) {
-			if (0 == strncmp(current, currentElement->metricKeyInFile, metricKeyLen)) {
-				char *newLine = current;
-				current += metricKeyLen;
-				/* advance past any whitespace */
-				while ((current != end) &&  (' ' == *current)) {
+
+		if ((OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_CGROUP_V2_AVAILABLE))
+			&& (CGROUP_METRIC_NO_KEY == (uintptr_t)currentElement->metricKeyInFile)
+		) {
+			/* File contains space-separated values with no keys. */
+			char *valueEnd = NULL;
+			int32_t i = 0;
+			for (i = 0; i < state->fileMetricCounter; i++) {
+				/* Skip values that were already read. */
+				while (' ' != *current) {
 					current += 1;
 				}
-				/* find the newline */
-				newLine = current;
-				while ('\n' != *newLine) {
-					newLine += 1;
-				}
-				strncpy(metricElement->value, current, newLine - current);
-				metricElement->value[newLine - current] = '\0';
-				isMetricFound = TRUE;
-				rc = 0;
-				break;
+				current += 1;
 			}
-			current += 1;
-		}
-		/* if we complete parse the fileContent and couldn't find the metric return error code */
-		if (!isMetricFound) {
-			rc = OMRPORT_ERROR_SYSINFO_CGROUP_SUBSYSTEM_METRIC_NOT_AVAILABLE;
+			valueEnd = current;
+			/* Find the last char of the value. */
+			while ((' ' != *valueEnd) && ('\n' != *valueEnd)) {
+				valueEnd += 1;
+			}
+			Assert_PRT_true((valueEnd - current + 1) <= sizeof(metricElement->value));
+			strncpy(metricElement->value, current, valueEnd - current);
+			metricElement->value[valueEnd - current] = '\0';
+			rc = 0;
+		} else {
+			BOOLEAN isMetricFound = FALSE;
+			char *end = state->fileContent + strlen(state->fileContent) - 1;
+			int32_t metricKeyLen = 0;
+			metricKeyLen = strlen(currentElement->metricKeyInFile);
+			while (current < end) {
+				if (0 == strncmp(current, currentElement->metricKeyInFile, metricKeyLen)) {
+					char *newLine = current;
+					current += metricKeyLen;
+					/* Advance past any whitespace. */
+					while ((current != end) &&  (' ' == *current)) {
+						current += 1;
+					}
+					/* Find the newline. */
+					newLine = current;
+					while ('\n' != *newLine) {
+						newLine += 1;
+					}
+					Assert_PRT_true((newLine - current + 1) <= sizeof(metricElement->value));
+					strncpy(metricElement->value, current, newLine - current);
+					metricElement->value[newLine - current] = '\0';
+					isMetricFound = TRUE;
+					rc = 0;
+					break;
+				}
+				current += 1;
+			}
+			/* Return an error code if the metric is not found after completely parsing fileContent. */
+			if (!isMetricFound) {
+				rc = OMRPORT_ERROR_SYSINFO_CGROUP_SUBSYSTEM_METRIC_NOT_AVAILABLE;
+			}
 		}
 
 		state->fileMetricCounter += 1;
@@ -6040,6 +6891,10 @@ omrsysinfo_cgroup_subsystem_iterator_next(struct OMRPortLibrary *portLibrary, st
 			state->fileContent = NULL;
 		}
 		state->count += 1;
+		/* Reset fileMetricCounter here so that a call to omrsysinfo_cgroup_subsystem_iterator_metricKey
+		 * immediately after won't fail.
+		 */
+		state->fileMetricCounter = 0;
 	}
 
 _end:
@@ -6050,13 +6905,49 @@ _end:
 		 */
 		size_t len = strlen(metricElement->value);
 		metricElement->units = currentElement->metricUnit;
-		if ((len > 0) && (metricElement->value[len-1] == '\n')) {
+		if ((len > 1) && (metricElement->value[len-1] == '\n')) {
 			metricElement->value[len-1] = '\0';
 		}
 		if (currentElement->isValueToBeChecked) {
-			int64_t result = 0;
-			sscanf(metricElement->value, "%" PRId64, &result);
-			if ((result > (MAX_DEFAULT_VALUE_CHECK)) || (result < 0)) {
+			BOOLEAN notSet = FALSE;
+			if ('\n' == metricElement->value[0]) {
+				/* Empty file, see cpuset.cpus and cpuset.mems in omrCgroupCpusetMetricMapV2. */
+				notSet = TRUE;
+			} else if (OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_CGROUP_V1_AVAILABLE)) {
+				int64_t result = 0;
+				rc = sscanf(metricElement->value, "%" PRId64, &result);
+				if (1 != rc) {
+					rc = portLibrary->error_set_last_error_with_message_format(
+							portLibrary,
+							OMRPORT_ERROR_SYSINFO_CGROUP_SUBSYSTEM_FILE_INVALID_VALUE,
+							"invalid value %s in file %s",
+							metricElement->value,
+							subsystemMetricMapElement->metricFileName);
+				} else {
+					if ((result > MAX_DEFAULT_VALUE_CHECK) || (result < 0)) {
+						notSet = TRUE;
+					}
+					rc = 0;
+				}
+			} else if (OMR_ARE_ANY_BITS_SET(PPG_sysinfoControlFlags, OMRPORT_SYSINFO_CGROUP_V2_AVAILABLE)) {
+				uint64_t uresult = 0;
+				rc = scanCgroupIntOrMax(portLibrary, metricElement->value, &uresult);
+				if (0 != rc) {
+					rc = portLibrary->error_set_last_error_with_message_format(
+							portLibrary,
+							OMRPORT_ERROR_SYSINFO_CGROUP_SUBSYSTEM_FILE_INVALID_VALUE,
+							"invalid value %s in file %s",
+							metricElement->value,
+							subsystemMetricMapElement->metricFileName);
+				} else if (uresult > MAX_DEFAULT_VALUE_CHECK) {
+					/* Assume that the metric is effectively unlimited and can be considered "Not Set". */
+					notSet = TRUE;
+				}
+			} else {
+				Trc_PRT_Assert_ShouldNeverHappen();
+			}
+			/* Check that the metric is set and that it is a reasonable value. */
+			if (notSet) {
 				metricElement->units = NULL;
 				strcpy(metricElement->value, "Not Set");
 			}

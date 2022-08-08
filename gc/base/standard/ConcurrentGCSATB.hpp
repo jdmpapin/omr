@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2018 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -25,13 +25,12 @@
 
 #include "omrcfg.h"
 #include "modronopt.h"
-
 #include "omr.h"
+
 #include "OMR_VM.hpp"
-#if defined(OMR_GC_MODRON_CONCURRENT_MARK)
 
+#if defined(OMR_GC_MODRON_CONCURRENT_MARK) && defined(OMR_GC_REALTIME)
 #include "ConcurrentGC.hpp"
-
 
 /**
  * @todo Provide class documentation
@@ -43,30 +42,69 @@ class MM_ConcurrentGCSATB : public MM_ConcurrentGC
 	 * Data members
 	 */
 private:
+	uintptr_t _bytesToTrace;
+	uintptr_t _traceTarget;
 
-public:
-	
 	/*
 	 * Function members
 	 */
+private:
+	void setThreadsScanned(MM_EnvironmentBase *env);
 
 protected:
+	bool initialize(MM_EnvironmentBase *env);
 	void tearDown(MM_EnvironmentBase *env);
-	void virtual reportConcurrentHalted(MM_EnvironmentBase *env);
-	uintptr_t virtual localMark(MM_EnvironmentBase *env, uintptr_t sizeToTrace);
 
+	virtual uintptr_t doConcurrentTrace(MM_EnvironmentBase *env, MM_AllocateDescription *allocDescription, uintptr_t sizeToTrace, MM_MemorySubSpace *subspace, bool tlhAllocation);
+	virtual uintptr_t localMark(MM_EnvironmentBase *env, uintptr_t sizeToTrace);
+
+	virtual void reportConcurrentCollectionStart(MM_EnvironmentBase *env);
+	virtual void reportConcurrentHalted(MM_EnvironmentBase *env);
+	virtual void setupForConcurrent(MM_EnvironmentBase *env);
+	virtual void finalConcurrentPrecollect(MM_EnvironmentBase *env) {};
+	virtual void tuneToHeap(MM_EnvironmentBase *env);
+	virtual void completeConcurrentTracing(MM_EnvironmentBase *env, uintptr_t executionModeAtGC);
+	virtual void adjustTraceTarget();
+	virtual uintptr_t getTraceTarget() { return _traceTarget; };
+#if defined(OMR_GC_MODRON_SCAVENGER)
+	/**
+	 * Process event from an external GC (Scavenger) when old-to-old reference is created.
+	 * @param objectPtr  Parent old object that has a reference to a child old object
+	 */
+	virtual void oldToOldReferenceCreated(MM_EnvironmentBase *env, omrobjectptr_t objectPtr) {};
+#endif /* OMR_GC_MODRON_SCAVENGER */
+
+	virtual bool acquireExclusiveVMAccessForCycleStart(MM_EnvironmentBase *env)
+	{
+		/* Caches must always be flushed, for both initial/final STW cycle.
+		 *
+		 * SATB marks all newly allocated objectes during active concurrent cycle.
+		 * Since it's done on TLH granularity we have to flush the current ones and start creating new ones, once the cycle starts.
+		 */
+		return env->acquireExclusiveVMAccessForGC(this, true, true);
+	}
+
+	void enableSATB(MM_EnvironmentBase *env);
+	void disableSATB(MM_EnvironmentBase *env);
 public:
 	virtual uintptr_t getVMStateID() { return OMRVMSTATE_GC_COLLECTOR_CONCURRENTGC; };
 	static MM_ConcurrentGCSATB *newInstance(MM_EnvironmentBase *env);
 	virtual void kill(MM_EnvironmentBase *env);
 
+	virtual void preAllocCacheFlush(MM_EnvironmentBase *env, void *base, void *top);
+
+	/* Refer to preAllocCacheFlush implementation for reasoning behind this. */
+	virtual uintptr_t reservedForGCAllocCacheSize() { return (_extensions->isSATBBarrierActive() ? OMR_MINIMUM_OBJECT_SIZE : 0); }
+
 	MM_ConcurrentGCSATB(MM_EnvironmentBase *env)
 		: MM_ConcurrentGC(env)
+		,_bytesToTrace(0)
+		,_traceTarget(0)
 		{
 			_typeId = __FUNCTION__;
 		}
 };
 
-#endif /* OMR_GC_MODRON_CONCURRENT_MARK */
+#endif /* OMR_GC_MODRON_CONCURRENT_MARK && OMR_GC_REALTIME */
 
 #endif /* CONCURRENTGCSATB_HPP_ */

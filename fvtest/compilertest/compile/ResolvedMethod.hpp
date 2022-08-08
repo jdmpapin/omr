@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -51,7 +51,7 @@ class ResolvedMethodBase : public TR_ResolvedMethod
    {
    virtual uint16_t              nameLength()                                   { return signatureLength(); }
    virtual uint16_t              classNameLength()                              { return signatureLength(); }
-   virtual uint16_t              signatureLength()                              { return strlen(signatureChars()); }
+   virtual uint16_t              signatureLength()                              { return static_cast<uint16_t>(strlen(signatureChars())); }
 
    // This group of functions only make sense for Java - we ought to provide answers from that definition
    virtual bool                  isConstructor()                                { return false; }
@@ -66,7 +66,6 @@ class ResolvedMethodBase : public TR_ResolvedMethod
    virtual bool                  isProtected()                                  { return false; }
    virtual bool                  isPublic()                                     { return true; }
    virtual bool                  isFinal()                                      { return false; }
-   virtual bool                  isStrictFP()                                   { return false; }
    virtual bool                  isSubjectToPhaseChange(TR::Compilation *comp)  { return false; }
 
    virtual bool                  hasBackwardBranches()                          { return false; }
@@ -117,7 +116,7 @@ class ResolvedMethod : public ResolvedMethodBase, public Method
    virtual char                * classNameChars()                           { return (char *)_fileName; }
    virtual char                * nameChars()                                { return _name; }
    virtual char                * signatureChars()                           { return _signatureChars; }
-   virtual uint16_t              signatureLength()                          { return strlen(signatureChars()); }
+   virtual uint16_t              signatureLength()                          { return static_cast<uint16_t>(strlen(signatureChars())); }
 
    virtual void                * resolvedMethodAddress()                    { return (void *)_ilInjector; }
 

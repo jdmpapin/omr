@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -110,7 +110,7 @@ getEntryName(uint8_t *entry_point, char **name)
 
 /* This function constructs a backtrace from a CPU context. Generally there are only one or two
  * values in the context that are actually used to construct the stack but these vary by platform
- * so arn't detailed here. If no heap is specified then this function will use malloc to allocate
+ * so aren't detailed here. If no heap is specified then this function will use malloc to allocate
  * the memory necessary for the stack frame structures which must be freed by the caller.
  *
  * @param portLbirary a pointer to an initialized port library
@@ -303,11 +303,12 @@ omrintrospect_backtrace_thread_raw(struct OMRPortLibrary *portLibrary, J9Platfor
  * @param portLbirary a pointer to an initialized port library
  * @param threadInfo a thread structure populated with a backtrace
  * @param heap a heap from which to allocate any necessary memory. If NULL malloc is used instead.
+ * @param options controls how much effort is expended trying to resolve symbols
  *
  * @return the number of frames for which a symbol was constructed.
  */
 uintptr_t
-omrintrospect_backtrace_symbols_raw(struct OMRPortLibrary *portLibrary, J9PlatformThread *threadInfo, J9Heap *heap)
+omrintrospect_backtrace_symbols_raw(struct OMRPortLibrary *portLibrary, J9PlatformThread *threadInfo, J9Heap *heap, uint32_t options)
 {
 	uintptr_t frameNumber = 0;
 	J9PlatformStackFrame *frame;

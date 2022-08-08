@@ -1,5 +1,5 @@
 ////////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 1998, 2020 IBM Corp. and others
+// Copyright (c) 1998, 2022 IBM Corp. and others
 //
 // This program and the accompanying materials are made available under
 // the terms of the Eclipse Public License 2.0 which accompanies this
@@ -533,7 +533,7 @@ TraceEvent=Trc_MM_J9AllocateIndexableObject_outOfLineObjectAllocation Overhead=1
 TraceEvent=Trc_MM_J9AllocateObject_outOfLineObjectAllocation Overhead=1 Level=1 Template="object allocated out-of-line sampled: class=%p (%.*s); object size=%zu"
 
 TraceEntry=Trc_MM_MemorySubSpaceTarok_calculateExpandSize_Entry Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_calculateExpandSize Entry Bytes required = %zu"
-TraceExit=Trc_MM_MemorySubSpaceTarok_calculateExpandSize_Exit1 Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_calculateExpandSize Exit1 Desired free bytes = %zu, current free bytes = %zu, returning expand size of %zu bytes"
+TraceExit=Trc_MM_MemorySubSpaceTarok_calculateExpandSize_Exit1 Obsolete Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_calculateExpandSize Exit1 Desired free bytes = %zu, current free bytes = %zu, returning expand size of %zu bytes"
 TraceEntry=Trc_MM_MemorySubSpaceTarok_checkForRatioExpand_Entry Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_checkForRatioExpand Entry Bytes required = %zu"
 TraceExit=Trc_MM_MemorySubSpaceTarok_checkForRatioExpand_Exit1 Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_checkForRatioExpand Exit1 Free space already at -Xmaxf limit"
 TraceExit=Trc_MM_MemorySubSpaceTarok_checkForRatioExpand_Exit2 Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_checkForRatioExpand Exit2 Percentage of time spent in garbage collection = %u, expansion not required"
@@ -551,7 +551,7 @@ TraceExit=Trc_MM_MemorySubSpaceTarok_timeForHeapContract_Exit4 Overhead=1 Level=
 TraceExit=Trc_MM_MemorySubSpaceTarok_timeForHeapContract_Exit5 Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_timeForHeapContract Exit5 Do not contract a expansion ocurred on one of previous three garbage collection cycles"
 TraceExit=Trc_MM_MemorySubSpaceTarok_timeForHeapContract_Exit6 Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_timeForHeapContract Exit6 Do not contract as free bytes at start of system garbage collect, %zu, less than minimum free bytes, %zu"
 TraceExit=Trc_MM_MemorySubSpaceTarok_timeForHeapContract_Exit7 Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_timeForHeapContract Exit7 Contraction required, size = %zu bytes"
-TraceEntry=Trc_MM_MemorySubSpaceTarok_calculateTargetContractSize_Entry Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_calculateTargetContractSize Entry Allocation size = %zu, ratio contract %s"
+TraceEntry=Trc_MM_MemorySubSpaceTarok_calculateTargetContractSize_Entry Obsolete Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_calculateTargetContractSize Entry Allocation size = %zu, ratio contract %s"
 TraceEvent=Trc_MM_MemorySubSpaceTarok_calculateTargetContractSize_Event1 Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_calculateTargetContractSize Event1 Contraction size = %zu bytes"
 TraceEvent=Trc_MM_MemorySubSpaceTarok_calculateTargetContractSize_Event2 Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_calculateTargetContractSize Event2 Contraction size = %zu bytes, maximum contraction size = %zu bytes"
 TraceExit=Trc_MM_MemorySubSpaceTarok_calculateTargetContractSize_Exit1 Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_calculateTargetContractSize Exit contraction size = %zu bytes"
@@ -592,7 +592,7 @@ TraceEvent=Trc_MM_FrequentObjectStats_AllocationCacheIndexableObjectAllocation O
 TraceEvent=Trc_MM_FrequentObjectStats_AllocationCacheObjectAllocation Overhead=1 Level=1 Template="Frequently allocated object in allocation cache: class=%p (%.*s); object size=%zu; allocations counted=%zu, estimated total allocations:%zu"
 
 TraceEntry=Trc_MM_SchedulingDelegate_partialGarbageCollectCompleted_Entry Overhead=1 Level=1 Group=kickoff Template="MM_SchedulingDelegate_partialGarbageCollectCompleted reclaimableRegions=%zu defragmentReclaimableRegions=%zu"
-TraceEvent=Trc_MM_SchedulingDelegate_partialGarbageCollectCompleted_stats Overhead=1 Level=1 Group=kickoff Template="Evacuated %zu Eden + %zu non-Eden regions into %zu + %zu regions. Eden was %zu regions."
+TraceEvent=Trc_MM_SchedulingDelegate_partialGarbageCollectCompleted_statsOld Obsolete Overhead=1 Level=1 Group=kickoff Template="Evacuated %zu Eden + %zu non-Eden regions into %zu + %zu regions. Eden was %zu regions."
 TraceExit=Trc_MM_SchedulingDelegate_partialGarbageCollectCompleted_Exit Overhead=1 Level=1 Group=kickoff Template="MM_SchedulingDelegate_partialGarbageCollectCompleted"
 
 TraceEntry=Trc_MM_CollectionSetDelegate_createNurseryCollectionSet_Entry Overhead=1 Level=1 Group=dynamiccollectionset Template="MM_CollectionSetDelegate_createNurseryCollectionSet dynamic=%s"
@@ -928,3 +928,77 @@ TraceEvent=Trc_MM_Scavenger_percolate_delegate Overhead=1 Level=1 Group=percolat
 
 TraceEntry=Trc_MM_MemorySubSpaceUniSpace_getHeapFreeMaximumHeuristicMultiplier Overhead=1 Level=1 Group=resize Template="Trc_MM_MemorySubSpaceUniSpace_getHeapFreeMaximumHeuristicMultiplier Maximum free multiplier = %zu"
 TraceEntry=Trc_MM_MemorySubSpaceUniSpace_getHeapFreeMinimumHeuristicMultiplier Overhead=1 Level=1 Group=resize Template="Trc_MM_MemorySubSpaceUniSpace_getHeapFreeMinimumHeuristicMultiplier Minimum free multiplier = %zu"
+
+TraceEntry=Trc_MM_Scavenger_calculateRecommendedWorkingThreads_entry Overhead=1 Level=1 Group=adaptivethread Template="[%u] MM_Scavenger_calculateRecommendedWorkingThreads entry"
+TraceExit=Trc_MM_Scavenger_calculateRecommendedWorkingThreads_exitOverflow Overhead=1 Level=1 Group=adaptivethread Template="Scavenge ignored for recommending threads (Irregular stalling with SyncAndReleaseMain)"
+TraceExit=Trc_MM_Scavenger_calculateRecommendedWorkingThreads_setRecommendedThreads Overhead=1 Level=1 Group=adaptivethread Template="ScavengeTime: %5llu  Avg.StallTime: %5llu (%.2f%%)  Threads [Current: %2u Ideal: %.2f Weighted: %.2f Boosted: %.2f Recommend: %2u]"
+TraceEvent=Trc_MM_Scavenger_calculateRecommendedWorkingThreads_averageStallBreakDown Overhead=1 Level=1 Group=adaptivethread Template="Average for: %u threads -> avgTimeToStartCollection: %5llu  avgTimeIdleAfterCollection: %5llu  avgScanStallTime: %5llu  avgSyncStallTime: %5llu  avgNotifyStallTime: %5llu"
+TraceEvent=Trc_MM_Scavenger_calculateRecommendedWorkingThreads_threadStallBreakDown Overhead=1 Level=1 Group=adaptivethread Template="Thread: %2u -> timeToStartCollection: %5llu  scanStall: %5llu  syncStall: %5llu  notifyStall: %5llu"
+TraceEvent=Trc_MM_ParallelDispatcher_recomputeActiveThreadCountForTask_useCollectorRecommendedThreads noEnv Overhead=1 Level=1 Group=adaptivethread Template="Attempting to use Task Recommended Threads: %u -> Adjusting to Bounds: %u"
+
+TraceEntry=Trc_MM_CopyForwardScheme_convertFreeMemoryCandidateToSurvivorRegion_Entry Overhead=1 Level=1 Group=copyforwardscheme Template="MM_CopyForwardScheme_convertCandidateToSurvivorRegion region=%p"
+TraceExit=Trc_MM_CopyForwardScheme_convertFreeMemoryCandidateToSurvivorRegion_Exit Overhead=1 Level=1 Group=copyforwardscheme Template="MM_CopyForwardScheme_convertCandidateToSurvivorRegion"
+
+TraceEntry=Trc_MM_AllocationContextBalanced_acquireMPAOLRegionFromNode_Entry Overhead=1 Level=1 Group=tarok Template="MM_AllocationContextBalanced::acquireMPAOLRegionFromNode thisContext=%p requestingContext=%p"
+TraceExit=Trc_MM_AllocationContextBalanced_acquireMPAOLRegionFromNode_Exit Overhead=1 Level=1 Group=tarok Template="MM_AllocationContextBalanced::acquireMPAOLRegionFromNode result=%p"
+TraceEntry=Trc_MM_MemorySubSpaceTarok_calculateTargetContractSize_Entry2 Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_calculateTargetContractSize Entry Allocation size = %zu"
+TraceExit=Trc_MM_MemorySubSpaceTarok_calculateExpandSize_Exit2 Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_calculateExpandSize Exit1 returning expand size of %zu bytes"
+TraceEvent=Trc_MM_MemorySubSpaceTarok_calculateHybridHeapOverhead Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_calculateHybridHeapOverhead GC Componant = %f Memory Componant = %f"
+TraceEvent=Trc_MM_MemorySubSpaceTarok_getHeapSizeWithinBounds_1 Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_getHeapSizeWithinBounds Better heap size = %zu hybrid overhead %f"
+TraceEvent=Trc_MM_MemorySubSpaceTarok_getHeapSizeWithinBounds_2 Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_getHeapSizeWithinBounds Changing heap by %f percent"
+TraceEvent=Trc_MM_MemorySubSpaceTarok_checkResize_1 Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_checkResize ready to resize ? %s"
+TraceEvent=Trc_MM_MemorySubSpaceTarok_checkResize_2 Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_checkResize heapSizeChange %zd bytes edenChangeRegionsBytes %zd"
+TraceEvent=Trc_MM_MemorySubSpaceTarok_mapMemoryPercentageToGcOverhead_1 Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_mapMemoryPercentageToGcOverhead Tenure: %zu bytes, Free Tenure %zu bytes"
+TraceEvent=Trc_MM_MemorySubSpaceTarok_mapMemoryPercentageToGcOverhead_2 Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_mapMemoryPercentageToGcOverhead heapSizeChange %zd bytes, free tenure ratio %f"
+TraceEvent=Trc_MM_MemorySubSpaceTarok_mapMemoryPercentageToGcOverhead_3 Overhead=1 Level=1 Group=resize Template="MM_MemorySubSpaceTarok_mapMemoryPercentageToGcOverhead free memory mapped to gc overhead: %f"
+
+
+TraceEvent=Trc_MM_SchedulingDelegate_calculateGlobalMarkOverhead Overhead=1 Level=1 Group=resize Template="MM_SchedulingDelegate_calculateGlobalMarkOverhead GMP Overhead = %f Increments total time = %zu Concurrent cost = %zu Interval time = %zu"
+TraceEvent=Trc_MM_SchedulingDelegate_calculatePartialGarbageCollectOverhead Overhead=1 Level=1 Group=resize Template="MM_SchedulingDelegate_calculatePartialGarbageCollectOverhead PGC Overhead = %f Average PGC interval = %zu Average PGC time = %zu"
+TraceEvent=Trc_MM_SchedulingDelegate_adjustIdealEdenRegionCount Overhead=1 Level=3 Group=resize Template="SchedulingDelegate_adjustIdealEdenRegionCount Allowed eden region range: %zu - %zu idealEdenRegionCount %zu  Eden region change %d"
+TraceEvent=Trc_MM_SchedulingDelegate_calculateEdenChangeHeapNotFullyExpanded Overhead=1 Level=3 Group=resize Template="SchedulingDelegate_calculateEdenChangeHeapNotFullyExpanded Hybrid eden overhead %f recent PGC pause time %zu Pause-to-Overhead mapping %f"
+TraceEvent=Trc_MM_SchedulingDelegate_calculateRecommendedEdenChangeForExpandedHeap Overhead=1 Level=3 Group=resize Template="SchedulingDelegate_calculateRecommendedEdenChangeForExpandedHeap Hybrid eden overhead %f avg pause time %zu Pause-to-Overhead mapping %f"
+TraceEvent=Trc_MM_SchedulingDelegate_calculateRecommendedEdenChangeForExpandedHeap_Exit Overhead=1 Level=1 Group=resize Template="SchedulingDelegate_calculateRecommendedEdenChangeForExpandedHeap_Exit Estimated free tenure = %zu GMP worktime = %zu PGC worktime = %zu PGG avg interval = %zu Eden survival rate %f Recommended eden size = %zu Recommended eden estimated overhead = %f"
+TraceEvent=Trc_MM_SchedulingDelegate_checkEdenSizeAfterPgc Overhead=1 Level=3 Group=resize Template="SchedulingDelegate_checkEdenSizeAfterPgc Not fully expanded recomendation %zd Fully expanded recommendation %zd percentage expanded %f"
+TraceEvent=Trc_MM_SchedulingDelegate_updatePgcTimePrediction Overhead=1 Level=3 Group=resize Template="SchedulingDelegate_updatePgcTimePrediction x1 %f y1 %f x2 %f y2 %f edenSizeRatio %f _pgcTimeIncreasePerEdenFactor %f"
+
+TraceEvent=Trc_MM_IncrementalGenerationalGC_calculateConcurrentMarkWorkTime Overhead=1 Level=2 Group=resize Template="IncrementalGenerationalGC_calculateConcurrentMarkWorkTime Concurrent GMP ratio %f previous increment concurrent worktime %llu Total concurrent worktime %llu"
+
+TraceEvent=Trc_MM_SweepEndBalancedGC Overhead=1 Level=1 Group=gclogger Template="Sweep end. Duration %llu us"
+
+TraceEvent=Trc_MM_SchedulingDelegate_partialGarbageCollectCompleted_stats Overhead=1 Level=1 Group=kickoff Template="Evacuated %zu Eden + %zu non-Eden regions into copy-forward %zu + %zu and compact %zu regions. Eden was %zu regions."
+
+TraceException=Trc_MM_VirtualMemory_decommitMemory_failure noEnv Overhead=1 Level=1 Group=arraylet Template="Failed to decommit memory: address: %p, size: %zu"
+
+TraceEvent=Trc_MM_SparseVirtualMemory_commitMemory_success noEnv Overhead=1 Level=1 Group=arraylet Template="Successfully committed memory: sparseHeapAddress: %p, size: %p, inHeapObjectPointer (spine): %p"
+TraceException=Trc_MM_SparseVirtualMemory_commitMemory_failure noEnv Overhead=1 Level=1 Group=arraylet Template="Failed to commit memory: sparseHeapAddress: %p, size: %p, inHeapObjectPointer (spine): %p"
+TraceEvent=Trc_MM_SparseVirtualMemory_decommitMemory_success noEnv Overhead=1 Level=1 Group=arraylet Template="Successfully decommitted memory: sparseHeapAddress: %p, size: %p"
+TraceException=Trc_MM_SparseVirtualMemory_decommitMemory_failure noEnv Overhead=1 Level=1 Group=arraylet Template="Failed to decommit memory: sparseHeapAddress: %p, size: %p"
+
+TraceEvent=Trc_MM_SparseVirtualMemory_releaseDoubleMappedRegion_success noEnv Overhead=1 Level=1 Group=arraylet Template="Successfully released double mapped region: dataPtr: %p, identifier->address: %p, dataSize: %p, identifier->size: %p"
+TraceException=Trc_MM_SparseVirtualMemory_releaseDoubleMappedRegion_failure noEnv Overhead=1 Level=1 Group=arraylet Template="Failed to release double mapped region: dataPtr: %p, identifier->address: %p, dataSize: %p, identifier->size: %p"
+
+TraceEvent=Trc_MM_SparseVirtualMemory_createSparseVirtualMemory_success noEnv Overhead=1 Level=1 Group=arraylet Template="Successfully created sparse virtual memory: getHeapTop: %p, getHeapBase: %p, in_heap_size: %p, maxHeapSize: %p, region size: %p, num of region: %zu,  sparseHeap size: %p, sparseDataPool: %p"
+TraceException=Trc_MM_SparseVirtualMemory_createSparseVirtualMemory_failure noEnv Overhead=1 Level=1 Group=arraylet Template="Failed to create sparse virtual memory: getHeapTop: %p, getHeapBase: %p, in_heap_size: %p, maxHeapSize: %p, region size: %p, num of region: %zu,  sparseHeap size: %p, sparseDataPool: %p"
+
+TraceEvent=Trc_MM_SparseAddressOrderedFixedSizeDataPool_allocation_success noEnv Overhead=1 Level=1 Group=arraylet Template="Successfully allocated space for new SparseAddressOrderedFixedSizeDataPool instance. New instance created with sparseHeapBase: %p, sparseDataPoolSize: %p"
+TraceException=Trc_MM_SparseAddressOrderedFixedSizeDataPool_allocation_failure noEnv Overhead=1 Level=1 Group=arraylet Template="Failed to allocate space for new SparseAddressOrderedFixedSizeDataPool instance. Failed new instance had sparseHeapBase: %p, sparseDataPoolSize: %p"
+
+TraceEvent=Trc_MM_SparseAddressOrderedFixedSizeDataPool_initialization_success noEnv Overhead=1 Level=1 Group=gclogger Template="Successfully intialized SparseAddressOrderedFixedSizeDataPool: sparseHeapBase: %p, freeListPool: %p, objectToSparseDataTable: %p, heapFreeList: %p"
+TraceException=Trc_MM_SparseAddressOrderedFixedSizeDataPool_initialization_failure noEnv Overhead=1 Level=1 Group=arraylet Template="Failed to initialize SparseAddressOrderedFixedSizeDataPool: sparseHeapBase: %p, freeListPool: %p, objectToSparseDataTable: %p, heapFreeList: %p"
+
+TraceEvent=Trc_MM_SparseAddressOrderedFixedSizeDataPool_insertEntry_success noEnv Overhead=1 Level=1 Group=arraylet Template="Successfully inserted an entry into objectToSparseDataTable: sparseHeapObjectDataPointer: %p, adjustedSize: %p, inHeapObjectPointer (spine): %p"
+TraceException=Trc_MM_SparseAddressOrderedFixedSizeDataPool_insertEntry_failure noEnv Overhead=1 Level=1 Group=arraylet Template="Failed to insert an entry into objectToSparseDataTable: sparseHeapObjectDataPointer: %p, adjustedSize: %p, inHeapObjectPointer (spine): %p"
+
+TraceEvent=Trc_MM_SparseAddressOrderedFixedSizeDataPool_removeEntry_success noEnv Overhead=1 Level=1 Group=arraylet Template="Successfully removed an entry from objectToSparseDataTable: sparseHeapObjectDataPointer: %p"
+TraceException=Trc_MM_SparseAddressOrderedFixedSizeDataPool_removeEntry_failure noEnv Overhead=1 Level=1 Group=arraylet Template="Failed to remove an entry from objectToSparseDataTable: sparseHeapObjectDataPointer: %p"
+
+TraceEvent=Trc_MM_SparseAddressOrderedFixedSizeDataPool_findEntry_success noEnv Overhead=1 Level=3 Group=arraylet Template="Successfully found entry from objectToSparseDataTable: sparseHeapObjectDataPointer: %p"
+TraceEvent=Trc_MM_SparseAddressOrderedFixedSizeDataPool_updateEntry_success noEnv Overhead=1 Level=1 Group=arraylet Template="Successfully found and updated entry from objectToSparseDataTable after the in-heap object has moved: sparseHeapObjectDataPointer: %p, old inHeapObjectPointer (old spine): %p, updated inHeapObjectPointer (updated spine): %p"
+TraceException=Trc_MM_SparseAddressOrderedFixedSizeDataPool_findEntry_failure noEnv Overhead=1 Level=1 Group=arraylet Template="Failed to find entry from objectToSparseDataTable or sparseHeapObjectDataPointer does not match the entry found in the table: sparseHeapObjectDataPointer: %p"
+
+TraceEvent=Trc_MM_SparseAddressOrderedFixedSizeDataPool_freeListEntryFoundForData_success noEnv Overhead=1 Level=1 Group=arraylet Template="Successfully found a sparse heap free list entry for requested data: freeListEntryAddrToStoreData: %p, size: %p, _freeListPoolFreeNodesCount: %zu, _approximateFreeMemorySize: %p, _freeListPoolAllocBytes: %p"
+TraceEvent=Trc_MM_SparseAddressOrderedFixedSizeDataPool_returnFreeListEntry_success noEnv Overhead=1 Level=1 Group=arraylet Template="Successfully returned a sparse heap free list entry for data: dataAddr: %p, size: %p, _freeListPoolFreeNodesCount: %zu, _approximateFreeMemorySize: %p, _freeListPoolAllocBytes: %p"
+
+TraceEntry=Trc_MM_getSparseAddressAndDecommitLeaves_Entry Overhead=1 Level=3 Group=arraylet Template="MM_IndexableObjectAllocationModel::getSparseAddressAndDecommitLeaves_Entry: inHeapObjectPointer (spine): %p, bytesToAllocate: %p, arrayletLeafCount: %zu, arrayletLeafSize: %p"
+TraceExit=Trc_MM_getSparseAddressAndDecommitLeaves_Exit Overhead=1 Level=3 Group=arraylet Template="MM_IndexableObjectAllocationModel::getSparseAddressAndDecommitLeaves_Exit: inHeapObjectPointer (spine): %p, bytesStillRemainingToAllocate (should be zero if allocated successfully to sparse heap): %zu"

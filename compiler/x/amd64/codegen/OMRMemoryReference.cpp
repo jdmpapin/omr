@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -45,7 +45,7 @@
 #include "infra/Flags.hpp"
 #include "runtime/Runtime.hpp"
 #include "x/codegen/X86Instruction.hpp"
-#include "x/codegen/X86Ops.hpp"
+#include "codegen/InstOpCode.hpp"
 
 class TR_OpaqueClassBlock;
 namespace TR { class Machine; }
@@ -185,7 +185,8 @@ void OMR::X86::AMD64::MemoryReference::finishInitialization(
             (cg->needRelocationsForStatics()            ||
              cg->needClassAndMethodPointerRelocations() ||
              cg->needRelocationsForBodyInfoData()       ||
-             cg->needRelocationsForPersistentInfoData()))
+             cg->needRelocationsForPersistentInfoData() ||
+             cg->needRelocationsForPersistentProfileInfoData()))
       {
       mightNeedAddressRegister = true;
       }
@@ -291,11 +292,13 @@ bool OMR::X86::AMD64::MemoryReference::needsAddressLoadInstruction(intptr_t next
       return true;
    else if (sr.getSymbol() && sr.getSymbol()->isCountForRecompile() && cg->needRelocationsForPersistentInfoData())
       return true;
+   else if (sr.getSymbol() && (sr.getSymbol()->isBlockFrequency() || sr.getSymbol()->isRecompQueuedFlag()) && cg->needRelocationsForPersistentProfileInfoData())
+      return true;
    else if (cg->comp()->getOption(TR_EnableHCR) && sr.getSymbol() && sr.getSymbol()->isClassObject())
       return true; // If a class gets replaced, it may no longer fit in an immediate
    else if (IS_32BIT_SIGNED(displacement))
       return false;
-   else if (cg->comp()->isOutOfProcessCompilation() && sr.getSymbol() && sr.getSymbol()->isStatic() && !sr.getSymbol()->isNotDataAddress())
+   else if (cg->comp()->isOutOfProcessCompilation() && sr.getSymbol() && sr.getSymbol()->isStatic() && !sr.getSymbol()->isStaticAddressWithinMethodBounds())
       return true;
    else if (IS_32BIT_RIP(displacement, nextInstructionAddress))
       return false;
@@ -497,15 +500,18 @@ OMR::X86::AMD64::MemoryReference::addMetaDataForCodeAddressWithLoad(
          }
       else if (sr.getSymbol()->isDebugCounter())
          {
-         TR::DebugCounterBase *counter = cg->comp()->getCounterFromStaticAddress(&sr);
-         if (counter == NULL)
+         if (cg->needRelocationsForStatics())
             {
-            cg->comp()->failCompilation<TR::CompilationException>("Could not generate relocation for debug counter in OMR::X86::AMD64::MemoryReference::addMetaDataForCodeAddressWithLoad\n");
+            TR::DebugCounterBase *counter = cg->comp()->getCounterFromStaticAddress(&sr);
+            if (counter == NULL)
+               {
+               cg->comp()->failCompilation<TR::CompilationException>("Could not generate relocation for debug counter in OMR::X86::AMD64::MemoryReference::addMetaDataForCodeAddressWithLoad\n");
+               }
+            TR::DebugCounter::generateRelocation(cg->comp(),
+                                                 displacementLocation,
+                                                 containingInstruction->getNode(),
+                                                 counter);
             }
-         TR::DebugCounter::generateRelocation(cg->comp(),
-                                              displacementLocation,
-                                              containingInstruction->getNode(),
-                                              counter);
          }
       }
    else
@@ -611,7 +617,7 @@ OMR::X86::AMD64::MemoryReference::generateBinaryEncoding(
 
          addressLoadInstruction = generateRegImm64SymInstruction(
             containingInstruction->getPrev(),
-            MOV8RegImm64,
+            TR::InstOpCode::MOV8RegImm64,
             _addressRegister,
             (!self()->getUnresolvedDataSnippet() &&
               sr.getSymbol()->isStatic() &&
@@ -634,7 +640,7 @@ OMR::X86::AMD64::MemoryReference::generateBinaryEncoding(
 
          addressLoadInstruction = generateRegImm64Instruction(
             containingInstruction->getPrev(),
-            MOV8RegImm64,
+            TR::InstOpCode::MOV8RegImm64,
             _addressRegister,
             displacement,
             cg
@@ -666,7 +672,7 @@ OMR::X86::AMD64::MemoryReference::generateBinaryEncoding(
 
       if (self()->getBaseRegister() && self()->getIndexRegister())
          {
-         TR::Instruction  *addressAddInstruction = generateRegRegInstruction(addressLoadInstruction, ADD8RegReg, self()->getAddressRegister(), self()->getBaseRegister(), cg);
+         TR::Instruction  *addressAddInstruction = generateRegRegInstruction(addressLoadInstruction, TR::InstOpCode::ADD8RegReg, self()->getAddressRegister(), self()->getBaseRegister(), cg);
          cursor = addressAddInstruction->generateBinaryEncoding();
          cg->setBinaryBufferCursor(cursor);
          }

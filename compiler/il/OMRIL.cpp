@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -35,12 +35,6 @@ TR::ILOpCodes OMR::IL::opCodesForConst[] =
    TR::fconst,   // Float
    TR::dconst,   // Double
    TR::aconst,   // Address
-   TR::vconst,   // VectorInt8
-   TR::vconst,   // VectorInt16
-   TR::vconst,   // VectorInt32
-   TR::vconst,   // VectorInt64
-   TR::vconst,   // VectorFloat
-   TR::vconst,   // VectorDouble
    TR::BadILOp,  // TR::Aggregate
    };
 
@@ -54,12 +48,6 @@ TR::ILOpCodes OMR::IL::opCodesForDirectLoad[] =
    TR::fload,    // Float
    TR::dload,    // Double
    TR::aload,    // Address
-   TR::vload,    // VectorInt8
-   TR::vload,    // VectorInt16
-   TR::vload,    // VectorInt32
-   TR::vload,    // VectorInt64
-   TR::vload,    // VectorFloat
-   TR::vload,    // VectorDouble
    TR::BadILOp,  // TR::Aggregate
    };
 
@@ -73,12 +61,6 @@ TR::ILOpCodes OMR::IL::opCodesForDirectReadBarrier[] =
    TR::frdbar,   // Float
    TR::drdbar,   // Double
    TR::ardbar,   // Address
-   TR::BadILOp,  // VectorInt8
-   TR::BadILOp,  // VectorInt16
-   TR::BadILOp,  // VectorInt32
-   TR::BadILOp,  // VectorInt64
-   TR::BadILOp,  // VectorFloat
-   TR::BadILOp,  // VectorDouble
    TR::BadILOp,  // TR::Aggregate
    };
 
@@ -92,12 +74,6 @@ TR::ILOpCodes OMR::IL::opCodesForDirectStore[] =
    TR::fstore,   // Float
    TR::dstore,   // Double
    TR::astore,   // Address
-   TR::vstore,   // VectorInt8
-   TR::vstore,   // VectorInt16
-   TR::vstore,   // VectorInt32
-   TR::vstore,   // VectorInt64
-   TR::vstore,   // VectorFloat
-   TR::vstore,   // VectorDouble
    TR::BadILOp,  // TR::Aggregate
    };
 
@@ -111,12 +87,6 @@ TR::ILOpCodes OMR::IL::opCodesForDirectWriteBarrier[] =
    TR::fwrtbar,   // Float
    TR::dwrtbar,   // Double
    TR::awrtbar,   // Address
-   TR::BadILOp,   // VectorInt8
-   TR::BadILOp,   // VectorInt16
-   TR::BadILOp,   // VectorInt32
-   TR::BadILOp,   // VectorInt64
-   TR::BadILOp,   // VectorFloat
-   TR::BadILOp,   // VectorDouble
    TR::BadILOp,  // TR::Aggregate
    };
 
@@ -130,12 +100,6 @@ TR::ILOpCodes OMR::IL::opCodesForIndirectLoad[] =
    TR::floadi,   // Float
    TR::dloadi,   // Double
    TR::aloadi,   // Address
-   TR::vloadi,   // TR::VectorInt8
-   TR::vloadi,   // TR::VectorInt16
-   TR::vloadi,   // TR::VectorInt32
-   TR::vloadi,   // TR::VectorInt64
-   TR::vloadi,   // TR::VectorFloat
-   TR::vloadi,   // TR::VectorDouble
    TR::BadILOp,  // TR::Aggregate
    };
 
@@ -149,12 +113,6 @@ TR::ILOpCodes OMR::IL::opCodesForIndirectReadBarrier[] =
    TR::frdbari,  // Float
    TR::drdbari,  // Double
    TR::ardbari,  // Address
-   TR::BadILOp,  // TR::VectorInt8
-   TR::BadILOp,  // TR::VectorInt16
-   TR::BadILOp,  // TR::VectorInt32
-   TR::BadILOp,  // TR::VectorInt64
-   TR::BadILOp,  // TR::VectorFloat
-   TR::BadILOp,  // TR::VectorDouble
    TR::BadILOp,  // TR::Aggregate
    };
 
@@ -168,12 +126,6 @@ TR::ILOpCodes OMR::IL::opCodesForIndirectStore[] =
    TR::fstorei,  // Float
    TR::dstorei,  // Double
    TR::astorei,  // Address
-   TR::vstorei,  // TR::VectorInt8
-   TR::vstorei,  // TR::VectorInt16
-   TR::vstorei,  // TR::VectorInt32
-   TR::vstorei,  // TR::VectorInt64
-   TR::vstorei,  // TR::VectorFloat
-   TR::vstorei,  // TR::VectorDouble
    TR::BadILOp,  // TR::Aggregate
    };
 
@@ -187,12 +139,6 @@ TR::ILOpCodes OMR::IL::opCodesForIndirectWriteBarrier[] =
    TR::fwrtbari,   // Float
    TR::dwrtbari,   // Double
    TR::awrtbari,   // Address
-   TR::BadILOp,   // VectorInt8
-   TR::BadILOp,   // VectorInt16
-   TR::BadILOp,   // VectorInt32
-   TR::BadILOp,   // VectorInt64
-   TR::BadILOp,   // VectorFloat
-   TR::BadILOp,   // VectorDouble
    TR::BadILOp,  // TR::Aggregate
    };
 
@@ -206,12 +152,6 @@ TR::ILOpCodes OMR::IL::opCodesForIndirectArrayLoad[] =
    TR::floadi,   // Float
    TR::dloadi,   // Double
    TR::aloadi,   // Address
-   TR::vloadi,   // TR::VectorInt8
-   TR::vloadi,   // TR::VectorInt16
-   TR::vloadi,   // TR::VectorInt32
-   TR::vloadi,   // TR::VectorInt64
-   TR::vloadi,   // TR::VectorFloat
-   TR::vloadi,   // TR::VectorDouble
    TR::BadILOp,  // TR::Aggregate
    };
 
@@ -225,12 +165,6 @@ TR::ILOpCodes OMR::IL::opCodesForIndirectArrayStore[] =
    TR::fstorei,  // Float
    TR::dstorei,  // Double
    TR::astorei,  // Address
-   TR::vstorei,  // TR::VectorInt8
-   TR::vstorei,  // TR::VectorInt16
-   TR::vstorei,  // TR::VectorInt32
-   TR::vstorei,  // TR::VectorInt64
-   TR::vstorei,  // TR::VectorFloat
-   TR::vstorei,  // TR::VectorDouble
    TR::BadILOp,  // TR::Aggregate
    };
 
@@ -244,12 +178,6 @@ TR::ILOpCodes OMR::IL::opCodesForRegisterLoad[] =
    TR::fRegLoad,  // Float
    TR::dRegLoad,  // Double
    TR::aRegLoad,  // Address
-   TR::vsRegLoad, // TR::VectorInt8
-   TR::vbRegLoad, // TR::VectorInt16
-   TR::viRegLoad, // TR::VectorInt32
-   TR::vlRegLoad, // TR::VectorInt64
-   TR::vfRegLoad, // TR::VectorFloat
-   TR::vdRegLoad, // TR::VectorDouble
    TR::BadILOp,   // TR::Aggregate
    };
 
@@ -263,12 +191,6 @@ TR::ILOpCodes OMR::IL::opCodesForRegisterStore[] =
    TR::fRegStore,  // Float
    TR::dRegStore,  // Double
    TR::aRegStore,  // Address
-   TR::vbRegStore, // TR::VectorInt8
-   TR::vsRegStore, // TR::VectorInt16
-   TR::viRegStore, // TR::VectorInt32
-   TR::vlRegStore, // TR::VectorInt64
-   TR::vfRegStore, // TR::VectorFloat
-   TR::vdRegStore, // TR::VectorDouble
    TR::BadILOp,    // TR::Aggregate
    };
 
@@ -282,12 +204,6 @@ TR::ILOpCodes OMR::IL::opCodesForCompareEquals[] =
    TR::fcmpeq,   // Float
    TR::dcmpeq,   // Double
    TR::acmpeq,   // Address
-   TR::vcmpeq,   // TR::VectorInt8
-   TR::vcmpeq,   // TR::VectorInt16
-   TR::vcmpeq,   // TR::VectorInt32
-   TR::vcmpeq,   // TR::VectorInt64
-   TR::vcmpeq,   // TR::VectorFloat
-   TR::vcmpeq,   // TR::VectorDouble
    TR::BadILOp,  // TR::Aggregate
    };
 
@@ -301,12 +217,6 @@ TR::ILOpCodes OMR::IL::opCodesForIfCompareEquals[] =
    TR::iffcmpeq,  // Float
    TR::ifdcmpeq,  // Double
    TR::ifacmpeq,  // Address
-   TR::BadILOp,   // TR::VectorInt8
-   TR::BadILOp,   // TR::VectorInt16
-   TR::BadILOp,   // TR::VectorInt32
-   TR::BadILOp,   // TR::VectorInt64
-   TR::BadILOp,   // TR::VectorFloat
-   TR::BadILOp,   // TR::VectorDouble
    TR::BadILOp,   // TR::Aggregate
    };
 
@@ -320,12 +230,6 @@ TR::ILOpCodes OMR::IL::opCodesForCompareNotEquals[] =
    TR::fcmpne,   // Float
    TR::dcmpne,   // Double
    TR::acmpne,   // Address
-   TR::vcmpne,   // TR::VectorInt8
-   TR::vcmpne,   // TR::VectorInt16
-   TR::vcmpne,   // TR::VectorInt32
-   TR::vcmpne,   // TR::VectorInt64
-   TR::vcmpne,   // TR::VectorFloat
-   TR::vcmpne,   // TR::VectorDouble
    TR::BadILOp,  // TR::Aggregate
    };
 
@@ -339,12 +243,6 @@ TR::ILOpCodes OMR::IL::opCodesForIfCompareNotEquals[] =
    TR::iffcmpne,  // Float
    TR::ifdcmpne,  // Double
    TR::ifacmpne,  // Address
-   TR::BadILOp,   // TR::VectorInt8
-   TR::BadILOp,   // TR::VectorInt16
-   TR::BadILOp,   // TR::VectorInt32
-   TR::BadILOp,   // TR::VectorInt64
-   TR::BadILOp,   // TR::VectorFloat
-   TR::BadILOp,   // TR::VectorDouble
    TR::BadILOp,   // TR::Aggregate
    };
 
@@ -358,12 +256,6 @@ TR::ILOpCodes OMR::IL::opCodesForCompareLessThan[] =
    TR::fcmplt,   // Float
    TR::dcmplt,   // Double
    TR::acmplt,   // Address
-   TR::vcmplt,   // TR::VectorInt8
-   TR::vcmplt,   // TR::VectorInt16
-   TR::vcmplt,   // TR::VectorInt32
-   TR::vcmplt,   // TR::VectorInt64
-   TR::vcmplt,   // TR::VectorFloat
-   TR::vcmplt,   // TR::VectorDouble
    TR::BadILOp,  // TR::Aggregate
    };
 
@@ -377,12 +269,6 @@ TR::ILOpCodes OMR::IL::opCodesForCompareLessOrEquals[] =
    TR::fcmple,   // Float
    TR::dcmple,   // Double
    TR::acmple,   // Address
-   TR::vcmple,   // TR::VectorInt8
-   TR::vcmple,   // TR::VectorInt16
-   TR::vcmple,   // TR::VectorInt32
-   TR::vcmple,   // TR::VectorInt64
-   TR::vcmple,   // TR::VectorFloat
-   TR::vcmple,   // TR::VectorDouble
    TR::BadILOp,  // TR::Aggregate
    };
 
@@ -396,12 +282,6 @@ TR::ILOpCodes OMR::IL::opCodesForIfCompareLessThan[] =
    TR::iffcmplt,  // Float
    TR::ifdcmplt,  // Double
    TR::ifacmplt,  // Address
-   TR::BadILOp,   // TR::VectorInt8
-   TR::BadILOp,   // TR::VectorInt16
-   TR::BadILOp,   // TR::VectorInt32
-   TR::BadILOp,   // TR::VectorInt64
-   TR::BadILOp,   // TR::VectorFloat
-   TR::BadILOp,   // TR::VectorDouble
    TR::BadILOp,   // TR::Aggregate
    };
 
@@ -415,12 +295,6 @@ TR::ILOpCodes OMR::IL::opCodesForIfCompareLessOrEquals[] =
    TR::iffcmple,  // Float
    TR::ifdcmple,  // Double
    TR::ifacmple,  // Address
-   TR::BadILOp,   // TR::VectorInt8
-   TR::BadILOp,   // TR::VectorInt16
-   TR::BadILOp,   // TR::VectorInt32
-   TR::BadILOp,   // TR::VectorInt64
-   TR::BadILOp,   // TR::VectorFloat
-   TR::BadILOp,   // TR::VectorDouble
    TR::BadILOp,   // TR::Aggregate
    };
 
@@ -434,12 +308,6 @@ TR::ILOpCodes OMR::IL::opCodesForCompareGreaterThan[] =
    TR::fcmpgt,   // Float
    TR::dcmpgt,   // Double
    TR::acmpgt,   // Address
-   TR::vcmpgt,   // TR::VectorInt8
-   TR::vcmpgt,   // TR::VectorInt16
-   TR::vcmpgt,   // TR::VectorInt32
-   TR::vcmpgt,   // TR::VectorInt64
-   TR::vcmpgt,   // TR::VectorFloat
-   TR::vcmpgt,   // TR::VectorDouble
    TR::BadILOp,  // TR::Aggregate
    };
 
@@ -453,12 +321,6 @@ TR::ILOpCodes OMR::IL::opCodesForCompareGreaterOrEquals[] =
    TR::fcmpge,   // Float
    TR::dcmpge,   // Double
    TR::acmpge,   // Address
-   TR::vcmpge,   // TR::VectorInt8
-   TR::vcmpge,   // TR::VectorInt16
-   TR::vcmpge,   // TR::VectorInt32
-   TR::vcmpge,   // TR::VectorInt64
-   TR::vcmpge,   // TR::VectorFloat
-   TR::vcmpge,   // TR::VectorDouble
    TR::BadILOp,  // TR::Aggregate
    };
 
@@ -472,12 +334,6 @@ TR::ILOpCodes OMR::IL::opCodesForIfCompareGreaterThan[] =
    TR::iffcmpgt,  // Float
    TR::ifdcmpgt,  // Double
    TR::ifacmpgt,  // Address
-   TR::BadILOp,   // TR::VectorInt8
-   TR::BadILOp,   // TR::VectorInt16
-   TR::BadILOp,   // TR::VectorInt32
-   TR::BadILOp,   // TR::VectorInt64
-   TR::BadILOp,   // TR::VectorFloat
-   TR::BadILOp,   // TR::VectorDouble
    TR::BadILOp,   // TR::Aggregate
    };
 
@@ -491,12 +347,6 @@ TR::ILOpCodes OMR::IL::opCodesForIfCompareGreaterOrEquals[] =
    TR::iffcmpge,  // Float
    TR::ifdcmpge,  // Double
    TR::ifacmpge,  // Address
-   TR::BadILOp,   // TR::VectorInt8
-   TR::BadILOp,   // TR::VectorInt16
-   TR::BadILOp,   // TR::VectorInt32
-   TR::BadILOp,   // TR::VectorInt64
-   TR::BadILOp,   // TR::VectorFloat
-   TR::BadILOp,   // TR::VectorDouble
    TR::BadILOp,   // TR::Aggregate
    };
 
@@ -510,82 +360,20 @@ TR::ILOpCodes OMR::IL::opCodesForSelect [] =
    TR::fselect,  // Float
    TR::dselect,  // Double
    TR::aselect,  // Address
-   TR::BadILOp,   // TR::VectorInt8
-   TR::BadILOp,   // TR::VectorInt16
-   TR::BadILOp,   // TR::VectorInt32
-   TR::BadILOp,   // TR::VectorInt64
-   TR::BadILOp,   // TR::VectorFloat
-   TR::BadILOp,   // TR::VectorDouble
    TR::BadILOp,   // TR::Aggregate
    };
 
-static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForConst) / sizeof(OMR::IL::opCodesForConst[0])),
-              "OMR::IL::opCodesForConst is not the correct size");
-
-static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForDirectLoad) / sizeof(OMR::IL::opCodesForDirectLoad[0])),
-              "OMR::IL::opCodesForDirectLoad is not the correct size");
-
-static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForDirectStore) / sizeof(OMR::IL::opCodesForDirectStore[0])),
-              "OMR::IL::opCodesForDirectStore is not the correct size");
-
-static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIndirectLoad) / sizeof(OMR::IL::opCodesForIndirectLoad[0])),
-              "OMR::IL::opCodesForIndirectLoad is not the correct size");
-
-static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIndirectStore) / sizeof(OMR::IL::opCodesForIndirectStore[0])),
-              "OMR::IL::opCodesForIndirectStore is not the correct size");
-
-static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIndirectArrayLoad) / sizeof(OMR::IL::opCodesForIndirectArrayLoad[0])),
-              "OMR::IL::opCodesForIndirectArrayLoad is not the correct size");
-
-static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIndirectArrayStore) / sizeof(OMR::IL::opCodesForIndirectArrayStore[0])),
-              "OMR::IL::opCodesForIndirectArrayStore is not the correct size");
-
-static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForRegisterLoad) / sizeof(OMR::IL::opCodesForRegisterLoad[0])),
-              "OMR::IL::opCodesForRegisterLoad is not the correct size");
-
-static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForRegisterStore) / sizeof(OMR::IL::opCodesForRegisterStore[0])),
-              "OMR::IL::opCodesForRegisterStore is not the correct size");
-
-static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForCompareEquals) / sizeof(OMR::IL::opCodesForCompareEquals[0])),
-              "OMR::IL::opCodesForCompareEquals is not the correct size");
-
-static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIfCompareEquals) / sizeof(OMR::IL::opCodesForIfCompareEquals[0])),
-              "OMR::IL::opCodesForIfCompareEquals is not the correct size");
-
-static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForCompareNotEquals) / sizeof(OMR::IL::opCodesForCompareNotEquals[0])),
-              "OMR::IL::opCodesForCompareNotEquals is not the correct size");
-
-static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIfCompareNotEquals) / sizeof(OMR::IL::opCodesForIfCompareNotEquals[0])),
-              "OMR::IL::opCodesForIfCompareNotEquals is not the correct size");
-
-static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForCompareLessThan) / sizeof(OMR::IL::opCodesForCompareLessThan[0])),
-              "OMR::IL::opCodesForCompareLessThan is not the correct size");
-
-static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForCompareLessOrEquals) / sizeof(OMR::IL::opCodesForCompareLessOrEquals[0])),
-              "OMR::IL::opCodesForCompareLessThan is not the correct size");
-
-static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIfCompareLessThan) / sizeof(OMR::IL::opCodesForIfCompareLessThan[0])),
-              "OMR::IL::opCodesForIfCompareLessThan is not the correct size");
-
-static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIfCompareLessOrEquals) / sizeof(OMR::IL::opCodesForIfCompareLessOrEquals[0])),
-              "OMR::IL::opCodesForIfCompareLessThan is not the correct size");
-
-static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForCompareGreaterThan) / sizeof(OMR::IL::opCodesForCompareGreaterThan[0])),
-              "OMR::IL::opCodesForCompareGreaterThan is not the correct size");
-
-static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForCompareGreaterOrEquals) / sizeof(OMR::IL::opCodesForCompareGreaterOrEquals[0])),
-              "OMR::IL::opCodesForCompareGreaterThan is not the correct size");
-
-static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIfCompareGreaterThan) / sizeof(OMR::IL::opCodesForIfCompareGreaterThan[0])),
-              "OMR::IL::opCodesForIfCompareGreaterThan is not the correct size");
-
-static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIfCompareGreaterOrEquals) / sizeof(OMR::IL::opCodesForIfCompareGreaterOrEquals[0])),
-              "OMR::IL::opCodesForIfCompareGreaterThan is not the correct size");
 
 
 TR::ILOpCodes
 OMR::IL::opCodeForCorrespondingIndirectLoad(TR::ILOpCodes loadOpCode)
    {
+   if (TR::ILOpCode::isVectorOpCode(loadOpCode))
+      {
+      if (TR::ILOpCode::getVectorOperation(loadOpCode) == TR::vloadi)
+         return TR::ILOpCode::createVectorOpCode(TR::vstorei, TR::ILOpCode::getVectorResultDataType(loadOpCode));
+      }
+
    switch (loadOpCode)
       {
       case TR::bloadi: return TR::bstorei;
@@ -595,7 +383,6 @@ OMR::IL::opCodeForCorrespondingIndirectLoad(TR::ILOpCodes loadOpCode)
       case TR::floadi: return TR::fstorei;
       case TR::dloadi: return TR::dstorei;
       case TR::aloadi: return TR::astorei;
-      case TR::vloadi: return TR::vstorei;
       case TR::brdbari:
       case TR::srdbari:
       case TR::irdbari:
@@ -618,6 +405,11 @@ OMR::IL::opCodeForCorrespondingIndirectLoad(TR::ILOpCodes loadOpCode)
 TR::ILOpCodes
 OMR::IL::opCodeForCorrespondingIndirectStore(TR::ILOpCodes storeOpCode)
    {
+   if (TR::ILOpCode::isVectorOpCode(storeOpCode))
+      {
+      if (TR::ILOpCode::getVectorOperation(storeOpCode) == TR::vstorei)
+         return TR::ILOpCode::createVectorOpCode(TR::vloadi, TR::ILOpCode::getVectorResultDataType(storeOpCode));
+      }
 
    switch (storeOpCode)
       {
@@ -629,7 +421,6 @@ OMR::IL::opCodeForCorrespondingIndirectStore(TR::ILOpCodes storeOpCode)
       case TR::dstorei:  return TR::dloadi;
       case TR::astorei:  return TR::aloadi;
       case TR::awrtbari: return TR::aloadi;
-      case TR::vstorei:  return TR::vloadi;
       case TR::bwrtbari:
       case TR::swrtbari:
       case TR::iwrtbari:
@@ -675,6 +466,12 @@ OMR::IL::opCodeForCorrespondingLoadOrStore(TR::ILOpCodes opCodes)
 TR::ILOpCodes
 OMR::IL::opCodeForCorrespondingDirectLoad(TR::ILOpCodes loadOpCode)
    {
+   if (TR::ILOpCode::isVectorOpCode(loadOpCode))
+      {
+      if (TR::ILOpCode::getVectorOperation(loadOpCode) == TR::vload)
+         return TR::ILOpCode::createVectorOpCode(TR::vstore, TR::ILOpCode::getVectorResultDataType(loadOpCode));
+      }
+
    switch (loadOpCode)
       {
       case TR::bload: return TR::bstore;
@@ -684,11 +481,6 @@ OMR::IL::opCodeForCorrespondingDirectLoad(TR::ILOpCodes loadOpCode)
       case TR::fload: return TR::fstore;
       case TR::dload: return TR::dstore;
       case TR::aload: return TR::astore;
-      case TR::vload: return TR::vstore;
-      case TR::cload: return TR::cstore;
-      case TR::buload: return TR::bstore;
-      case TR::iuload: return TR::istore;
-      case TR::luload: return TR::lstore;
       case TR::brdbar:
       case TR::srdbar:
       case TR::irdbar:
@@ -711,6 +503,12 @@ OMR::IL::opCodeForCorrespondingDirectLoad(TR::ILOpCodes loadOpCode)
 TR::ILOpCodes
 OMR::IL::opCodeForCorrespondingDirectStore(TR::ILOpCodes storeOpCode)
    {
+   if (TR::ILOpCode::isVectorOpCode(storeOpCode))
+      {
+      if (TR::ILOpCode::getVectorOperation(storeOpCode) == TR::vstore)
+         return TR::ILOpCode::createVectorOpCode(TR::vload, TR::ILOpCode::getVectorResultDataType(storeOpCode));
+      }
+
    switch (storeOpCode)
       {
       case TR::bstore:  return TR::bload;
@@ -721,11 +519,6 @@ OMR::IL::opCodeForCorrespondingDirectStore(TR::ILOpCodes storeOpCode)
       case TR::dstore:  return TR::dload;
       case TR::astore:  return TR::aload;
       case TR::awrtbar: return TR::aload;
-      case TR::vstore:  return TR::vload;
-      case TR::cstore:  return TR::sload;
-      case TR::bustore: return TR::bload;
-      case TR::iustore: return TR::iload;
-      case TR::lustore: return TR::lload;
       case TR::bwrtbar:
       case TR::swrtbar:
       case TR::iwrtbar:
@@ -747,6 +540,11 @@ OMR::IL::opCodeForCorrespondingDirectStore(TR::ILOpCodes storeOpCode)
 TR::ILOpCodes
 OMR::IL::opCodeForSelect(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForSelect) / sizeof(OMR::IL::opCodesForSelect[0])),
+              "OMR::IL::opCodesForSelect is not the correct size");
+
+   if (dt.isVector()) return TR::BadILOp;
+
    TR_ASSERT(dt < TR::NumOMRTypes, "Unexpected data type");
 
    return OMR::IL::opCodesForSelect[dt];
@@ -755,6 +553,11 @@ OMR::IL::opCodeForSelect(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForConst(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForConst) / sizeof(OMR::IL::opCodesForConst[0])),
+              "OMR::IL::opCodesForConst is not the correct size");
+
+   TR_ASSERT_FATAL(!dt.isVector(), "Vector constants are not supported\n");
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForConst[dt];
@@ -763,6 +566,11 @@ OMR::IL::opCodeForConst(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForDirectLoad(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForDirectLoad) / sizeof(OMR::IL::opCodesForDirectLoad[0])),
+              "OMR::IL::opCodesForDirectLoad is not the correct size");
+
+   if (dt.isVector()) return TR::ILOpCode::createVectorOpCode(TR::vload, dt);
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForDirectLoad[dt];
@@ -771,6 +579,11 @@ OMR::IL::opCodeForDirectLoad(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForDirectReadBarrier(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForDirectReadBarrier) / sizeof(OMR::IL::opCodesForDirectReadBarrier[0])),
+              "OMR::IL::opCodesForDirectReadBarrier is not the correct size");
+
+   if (dt.isVector()) return TR::BadILOp;
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForDirectReadBarrier[dt];
@@ -779,6 +592,11 @@ OMR::IL::opCodeForDirectReadBarrier(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForDirectStore(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForDirectStore) / sizeof(OMR::IL::opCodesForDirectStore[0])),
+              "OMR::IL::opCodesForDirectStore is not the correct size");
+
+   if (dt.isVector()) return TR::ILOpCode::createVectorOpCode(TR::vstore, dt);
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForDirectStore[dt];
@@ -787,6 +605,11 @@ OMR::IL::opCodeForDirectStore(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForDirectWriteBarrier(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForDirectWriteBarrier) / sizeof(OMR::IL::opCodesForDirectWriteBarrier[0])),
+              "OMR::IL::opCodesForDirectWriteBarrier is not the correct size");
+
+   if (dt.isVector()) return TR::BadILOp;
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForDirectWriteBarrier[dt];
@@ -796,6 +619,11 @@ OMR::IL::opCodeForDirectWriteBarrier(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForIndirectLoad(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIndirectLoad) / sizeof(OMR::IL::opCodesForIndirectLoad[0])),
+              "OMR::IL::opCodesForIndirectLoad is not the correct size");
+
+   if (dt.isVector()) return TR::ILOpCode::createVectorOpCode(TR::vloadi, dt);
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForIndirectLoad[dt];
@@ -804,6 +632,11 @@ OMR::IL::opCodeForIndirectLoad(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForIndirectReadBarrier(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIndirectReadBarrier) / sizeof(OMR::IL::opCodesForIndirectReadBarrier[0])),
+              "OMR::IL::opCodesForIndirectReadBarrier is not the correct size");
+
+   if (dt.isVector()) return TR::BadILOp;
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForIndirectReadBarrier[dt];
@@ -812,6 +645,11 @@ OMR::IL::opCodeForIndirectReadBarrier(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForIndirectStore(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIndirectStore) / sizeof(OMR::IL::opCodesForIndirectStore[0])),
+              "OMR::IL::opCodesForIndirectStore is not the correct size");
+
+   if (dt.isVector()) return TR::ILOpCode::createVectorOpCode(TR::vstorei, dt);
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForIndirectStore[dt];
@@ -820,6 +658,11 @@ OMR::IL::opCodeForIndirectStore(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForIndirectWriteBarrier(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIndirectWriteBarrier) / sizeof(OMR::IL::opCodesForIndirectWriteBarrier[0])),
+              "OMR::IL::opCodesForIndirectWriteBarrier is not the correct size");
+
+   if (dt.isVector()) return TR::BadILOp;
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForIndirectWriteBarrier[dt];
@@ -828,6 +671,11 @@ OMR::IL::opCodeForIndirectWriteBarrier(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForIndirectArrayLoad(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIndirectArrayLoad) / sizeof(OMR::IL::opCodesForIndirectArrayLoad[0])),
+              "OMR::IL::opCodesForIndirectArrayLoad is not the correct size");
+
+   if (dt.isVector()) return TR::ILOpCode::createVectorOpCode(TR::vloadi, dt);
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForIndirectArrayLoad[dt];
@@ -836,6 +684,11 @@ OMR::IL::opCodeForIndirectArrayLoad(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForIndirectArrayStore(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIndirectArrayStore) / sizeof(OMR::IL::opCodesForIndirectArrayStore[0])),
+              "OMR::IL::opCodesForIndirectArrayStore is not the correct size");
+
+   if (dt.isVector()) return TR::ILOpCode::createVectorOpCode(TR::vstorei, dt);
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForIndirectArrayStore[dt];
@@ -844,6 +697,11 @@ OMR::IL::opCodeForIndirectArrayStore(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForRegisterLoad(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForRegisterLoad) / sizeof(OMR::IL::opCodesForRegisterLoad[0])),
+              "OMR::IL::opCodesForRegisterLoad is not the correct size");
+
+   if (dt.isVector()) return TR::ILOpCode::createVectorOpCode(TR::vRegLoad, dt);
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForRegisterLoad[dt];
@@ -852,6 +710,11 @@ OMR::IL::opCodeForRegisterLoad(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForRegisterStore(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForRegisterStore) / sizeof(OMR::IL::opCodesForRegisterStore[0])),
+              "OMR::IL::opCodesForRegisterStore is not the correct size");
+
+   if (dt.isVector()) return TR::ILOpCode::createVectorOpCode(TR::vRegStore, dt);
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForRegisterStore[dt];
@@ -860,6 +723,11 @@ OMR::IL::opCodeForRegisterStore(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForCompareEquals(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForCompareEquals) / sizeof(OMR::IL::opCodesForCompareEquals[0])),
+              "OMR::IL::opCodesForCompareEquals is not the correct size");
+
+   if (dt.isVector()) return TR::ILOpCode::createVectorOpCode(TR::vcmpeq, dt);
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForCompareEquals[dt];
@@ -868,6 +736,11 @@ OMR::IL::opCodeForCompareEquals(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForIfCompareEquals(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIfCompareEquals) / sizeof(OMR::IL::opCodesForIfCompareEquals[0])),
+              "OMR::IL::opCodesForIfCompareEquals is not the correct size");
+
+   if (dt.isVector()) return TR::BadILOp;
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForIfCompareEquals[dt];
@@ -876,6 +749,11 @@ OMR::IL::opCodeForIfCompareEquals(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForCompareNotEquals(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForCompareNotEquals) / sizeof(OMR::IL::opCodesForCompareNotEquals[0])),
+              "OMR::IL::opCodesForCompareNotEquals is not the correct size");
+
+   if (dt.isVector()) return TR::ILOpCode::createVectorOpCode(TR::vcmpne, dt);
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForCompareNotEquals[dt];
@@ -884,6 +762,11 @@ OMR::IL::opCodeForCompareNotEquals(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForIfCompareNotEquals(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIfCompareNotEquals) / sizeof(OMR::IL::opCodesForIfCompareNotEquals[0])),
+              "OMR::IL::opCodesForIfCompareNotEquals is not the correct size");
+
+   if (dt.isVector()) return TR::BadILOp;
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForIfCompareNotEquals[dt];
@@ -892,6 +775,11 @@ OMR::IL::opCodeForIfCompareNotEquals(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForCompareLessThan(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForCompareLessThan) / sizeof(OMR::IL::opCodesForCompareLessThan[0])),
+              "OMR::IL::opCodesForCompareLessThan is not the correct size");
+
+   if (dt.isVector()) return TR::ILOpCode::createVectorOpCode(TR::vcmplt, dt);
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForCompareLessThan[dt];
@@ -900,6 +788,11 @@ OMR::IL::opCodeForCompareLessThan(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForCompareLessOrEquals(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForCompareLessOrEquals) / sizeof(OMR::IL::opCodesForCompareLessOrEquals[0])),
+              "OMR::IL::opCodesForCompareLessOrEquals is not the correct size");
+
+   if (dt.isVector()) return TR::ILOpCode::createVectorOpCode(TR::vcmple, dt);
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForCompareLessOrEquals[dt];
@@ -908,6 +801,11 @@ OMR::IL::opCodeForCompareLessOrEquals(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForIfCompareLessThan(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIfCompareLessThan) / sizeof(OMR::IL::opCodesForIfCompareLessThan[0])),
+              "OMR::IL::opCodesForIfCompareLessThan is not the correct size");
+
+   if (dt.isVector()) return TR::BadILOp;
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForIfCompareLessThan[dt];
@@ -916,6 +814,11 @@ OMR::IL::opCodeForIfCompareLessThan(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForIfCompareLessOrEquals(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIfCompareLessOrEquals) / sizeof(OMR::IL::opCodesForIfCompareLessOrEquals[0])),
+              "OMR::IL::opCodesForIfCompareLessOrEquals is not the correct size");
+
+   if (dt.isVector()) return TR::BadILOp;
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForIfCompareLessOrEquals[dt];
@@ -924,6 +827,11 @@ OMR::IL::opCodeForIfCompareLessOrEquals(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForCompareGreaterThan(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForCompareGreaterThan) / sizeof(OMR::IL::opCodesForCompareGreaterThan[0])),
+              "OMR::IL::opCodesForCompareGreaterThan is not the correct size");
+
+   if (dt.isVector()) return TR::ILOpCode::createVectorOpCode(TR::vcmpgt, dt);
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForCompareGreaterThan[dt];
@@ -932,6 +840,11 @@ OMR::IL::opCodeForCompareGreaterThan(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForCompareGreaterOrEquals(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForCompareGreaterOrEquals) / sizeof(OMR::IL::opCodesForCompareGreaterOrEquals[0])),
+              "OMR::IL::opCodesForCompareGreaterOrEquals is not the correct size");
+
+   if (dt.isVector()) return TR::ILOpCode::createVectorOpCode(TR::vcmpge, dt);
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForCompareGreaterOrEquals[dt];
@@ -940,6 +853,11 @@ OMR::IL::opCodeForCompareGreaterOrEquals(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForIfCompareGreaterThan(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIfCompareGreaterThan) / sizeof(OMR::IL::opCodesForIfCompareGreaterThan[0])),
+              "OMR::IL::opCodesForIfCompareGreaterThan is not the correct size");
+
+   if (dt.isVector()) return TR::BadILOp;
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForIfCompareGreaterThan[dt];
@@ -947,6 +865,11 @@ OMR::IL::opCodeForIfCompareGreaterThan(TR::DataType dt)
 TR::ILOpCodes
 OMR::IL::opCodeForIfCompareGreaterOrEquals(TR::DataType dt)
    {
+   static_assert(TR::NumOMRTypes == (sizeof(OMR::IL::opCodesForIfCompareGreaterOrEquals) / sizeof(OMR::IL::opCodesForIfCompareGreaterOrEquals[0])),
+              "OMR::IL::opCodesForIfCompareGreaterOrEquals is not the correct size");
+
+   if (dt.isVector()) return TR::BadILOp;
+
    TR_ASSERT(dt < TR::NumOMRTypes, "unexpected opcode");
 
    return OMR::IL::opCodesForIfCompareGreaterOrEquals[dt];

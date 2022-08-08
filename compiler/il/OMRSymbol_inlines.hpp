@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2020 IBM Corp. and others
+ * Copyright (c) 2017, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -22,7 +22,7 @@
 #ifndef OMR_SYMBOL_INLINES_INCL
 #define OMR_SYMBOL_INLINES_INCL
 
-#include "il/OMRSymbol.hpp"
+#include "il/Symbol.hpp"
 
 /**
  * Downcast to concrete instance
@@ -596,6 +596,19 @@ OMR::Symbol::setConstantPoolAddress()
    }
 
 bool
+OMR::Symbol::isStaticAddressWithinMethodBounds()
+   {
+   return self()->isStatic() && _flags.testAny(StaticAddressWithinMethodBounds);
+   }
+
+void
+OMR::Symbol::setStaticAddressWithinMethodBounds()
+   {
+   TR_ASSERT(self()->isStatic(), "Symbol must be static");
+   _flags.set(StaticAddressWithinMethodBounds);
+   }
+
+bool
 OMR::Symbol::isConstMethodHandle()
    {
    return self()->isStatic() && _flags2.testAny(ConstMethodHandle);
@@ -729,6 +742,18 @@ bool
 OMR::Symbol::isSyncVolatile()
    {
    return self()->isVolatile();
+   }
+
+void
+OMR::Symbol::setDummyResolvedMethod()
+   {
+   _flags2.set(DummyResolvedMethod);
+   }
+
+bool
+OMR::Symbol::isDummyResolvedMethod()
+   {
+   return _flags2.testAny(DummyResolvedMethod);
    }
 
 TR::RegisterMappedSymbol *

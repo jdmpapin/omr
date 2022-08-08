@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -19,14 +19,14 @@
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
-//  __   ___  __   __   ___  __       ___  ___  __
-// |  \ |__  |__) |__) |__  /  `  /\   |  |__  |  \
-// |__/ |___ |    |  \ |___ \__, /~~\  |  |___ |__/
-//
-// This file is now deprecated and its contents are slowly
-// being moved back to codegen and other directories. Please do not
-// add more interfaces here.
-//
+/*  __   ___  __   __   ___  __       ___  ___  __
+ * |  \ |__  |__) |__) |__  /  `  /\   |  |__  |  \
+ * |__/ |___ |    |  \ |___ \__, /~~\  |  |___ |__/
+ *
+ * This file is now deprecated and its contents are slowly
+ * being moved back to codegen and other directories. Please do not
+ * add more interfaces here.
+ */
 
 #ifndef DEBUG_INCL
 #define DEBUG_INCL
@@ -93,6 +93,7 @@ namespace TR { class OptionSet; }
 namespace TR { class Options; }
 namespace TR { class RealRegister; }
 namespace TR { class Register; }
+namespace TR { class RegisterDependencyGroup; }
 namespace TR { class RegisterDependency; }
 namespace TR { class RegisterDependencyConditions; }
 namespace TR { class RegisterMappedSymbol; }
@@ -112,7 +113,6 @@ struct J9AnnotationInfo;
 struct J9AnnotationInfoEntry;
 struct J9PortLibrary;
 
-class TR_X86OpCode;
 namespace TR { class X86LabelInstruction;                  }
 namespace TR { class X86PaddingInstruction;                }
 namespace TR { class X86AlignmentInstruction;              }
@@ -139,7 +139,6 @@ namespace TR { class X86FPRegInstruction;                  }
 namespace TR { class X86FPRegRegInstruction;               }
 namespace TR { class X86FPMemRegInstruction;               }
 namespace TR { class X86FPRegMemInstruction;               }
-class TR_X86RegisterDependencyGroup;
 namespace TR { class X86RestartSnippet; }
 namespace TR { class X86PicDataSnippet; }
 namespace TR { class X86DivideCheckSnippet; }
@@ -218,7 +217,6 @@ namespace TR { class PPCCallSnippet; }
 #endif
 
 
-class TR_ARMOpCode;
 namespace TR { class ARMLabelInstruction; }
 namespace TR { class ARMConditionalBranchInstruction; }
 namespace TR { class ARMVirtualGuardNOPInstruction; }
@@ -248,7 +246,6 @@ namespace TR { class ARMMonitorEnterSnippet; }
 namespace TR { class ARMMonitorExitSnippet; }
 namespace TR { class ARMStackCheckFailureSnippet; }
 namespace TR { class ARMRecompilationSnippet; }
-class TR_ARMRegisterDependencyGroup;
 
 namespace TR { class S390LabelInstruction; }
 namespace TR { class S390BranchInstruction; }
@@ -317,7 +314,6 @@ namespace TR { class S390JNICallDataSnippet; }
 
 namespace TR { class S390StackCheckFailureSnippet; }
 namespace TR { class S390HeapAllocSnippet; }
-class TR_S390RegisterDependencyGroup;
 namespace TR { class S390RRSInstruction; }
 namespace TR { class S390RIEInstruction; }
 namespace TR { class S390RISInstruction; }
@@ -346,18 +342,22 @@ namespace TR { class ARM64AdminInstruction; }
 namespace TR { class ARM64Trg1Instruction; }
 namespace TR { class ARM64Trg1CondInstruction; }
 namespace TR { class ARM64Trg1ImmInstruction; }
+namespace TR { class ARM64Trg1ImmShiftedInstruction; }
 namespace TR { class ARM64Trg1ImmSymInstruction; }
 namespace TR { class ARM64Trg1Src1Instruction; }
 namespace TR { class ARM64Trg1ZeroSrc1Instruction; }
+namespace TR { class ARM64Trg1ZeroImmInstruction; }
 namespace TR { class ARM64Trg1Src1ImmInstruction; }
 namespace TR { class ARM64Trg1Src2Instruction; }
 namespace TR { class ARM64CondTrg1Src2Instruction; }
 namespace TR { class ARM64Trg1Src2ShiftedInstruction; }
 namespace TR { class ARM64Trg1Src2ExtendedInstruction; }
+namespace TR { class ARM64Trg1Src2IndexedElementInstruction; }
 namespace TR { class ARM64Trg1Src2ZeroInstruction; }
 namespace TR { class ARM64Trg1Src3Instruction; }
 namespace TR { class ARM64Trg1MemInstruction; }
 namespace TR { class ARM64MemInstruction; }
+namespace TR { class ARM64MemImmInstruction; }
 namespace TR { class ARM64MemSrc1Instruction; }
 namespace TR { class ARM64MemSrc2Instruction; }
 namespace TR { class ARM64Trg1MemSrc1Instruction; }
@@ -390,6 +390,7 @@ namespace TR { class UtypeInstruction; }
 namespace TR { class JtypeInstruction; }
 namespace TR { class LoadInstruction;  }
 namespace TR { class StoreInstruction; }
+namespace TR { class RVHelperCallSnippet; }
 
 TR_Debug *createDebugObject(TR::Compilation *);
 
@@ -413,6 +414,14 @@ public:
    virtual void newVariableSizeSymbol(TR::AutomaticSymbol *sym);
    virtual void newInstruction(TR::Instruction *);
    virtual void addInstructionComment(TR::Instruction *, char*, ...);
+
+   /**
+    * @brief Check whether to trigger debugger breakpoint or launch debugger
+    *        when \c artifact name is created.
+    *
+    * @param[in] artifactName : name of artifact to break or debug on
+    */
+   void breakOrDebugOnCreate(char *artifactName);
 
    virtual TR::CompilationFilters * getInlineFilters() { return _inlineFilters; }
 
@@ -465,12 +474,10 @@ public:
    virtual TR_FilterBST *  addFilter(char * &, int32_t, int32_t, int32_t, TR::CompilationFilters *);
    virtual TR_FilterBST *  addFilter(char * &, int32_t, int32_t, int32_t, bool loadLimit);
    virtual TR_FilterBST *  addExcludedMethodFilter(bool loadLimit);
-   virtual bool            addSamplingPoint(char *, TR_FilterBST * &, bool loadLimit);
    virtual int32_t         scanFilterName(char *, TR_FilterBST *);
    virtual void            printFilters(TR::CompilationFilters *);
    virtual void            printFilters();
    virtual void            print(TR_FilterBST * filter);
-   virtual void            printSamplingPoints();
    virtual void         printHeader();
    virtual void         printMethodHotness();
    virtual void         printInstrDumpHeader(const char * title);
@@ -549,8 +556,8 @@ public:
    virtual void         dumpInstructionComments(TR::FILE *, TR::Instruction *, bool needsStartComment = true );
    virtual void         print(TR::FILE *, TR::Instruction *);
    virtual void         print(TR::FILE *, TR::Instruction *, const char *);
-   virtual void         print(TR::FILE *, List<TR::Snippet> &, bool isWarm = false);
-   virtual void         print(TR::FILE *, TR::list<TR::Snippet*> &, bool isWarm = false);
+   virtual void         print(TR::FILE *, List<TR::Snippet> &);
+   virtual void         print(TR::FILE *, TR::list<TR::Snippet*> &);
    virtual void         print(TR::FILE *, TR::Snippet *);
 
    virtual void         print(TR::FILE *, TR::RegisterMappedSymbol *, bool);
@@ -609,8 +616,8 @@ public:
    virtual const char * getPerCodeCacheHelperName(TR_CCPreLoadedCode helper);
 
 #if defined(TR_TARGET_X86)
-   virtual const char * getOpCodeName(TR_X86OpCode *);
-   virtual const char * getMnemonicName(TR_X86OpCode *);
+   virtual const char * getOpCodeName(TR::InstOpCode *);
+   virtual const char * getMnemonicName(TR::InstOpCode *);
    virtual void         printReferencedRegisterInfo(TR::FILE *, TR::Instruction *);
    virtual void         dumpInstructionWithVFPState(TR::Instruction *instr, const TR_VFPState *prevState);
 
@@ -630,13 +637,13 @@ public:
 #if defined(TR_TARGET_ARM)
    virtual void printARMDelayedOffsetInstructions(TR::FILE *pOutFile, TR::ARMMemInstruction *instr);
    virtual void printARMHelperBranch(TR::SymbolReference *symRef, uint8_t *cursor, TR::FILE *outFile, const char * opcodeName = "bl");
-   virtual const char * getOpCodeName(TR_ARMOpCode *);
+   virtual const char * getOpCodeName(TR::InstOpCode *);
    const char * getName(TR::RealRegister *, TR_RegisterSizes size = TR_WordReg);
    const char * getName(uint32_t realRegisterIndex, TR_RegisterSizes = (TR_RegisterSizes)-1);
    void print(TR::FILE *, TR::ARMHelperCallSnippet *);
 #endif
 #if defined(TR_TARGET_S390)
-   virtual void printRegisterDependencies(TR::FILE *pOutFile, TR_S390RegisterDependencyGroup *rgd, int numberOfRegisters);
+   virtual void printRegisterDependencies(TR::FILE *pOutFile, TR::RegisterDependencyGroup *rgd, int numberOfRegisters);
    const char * getName(TR::RealRegister *, TR_RegisterSizes size = TR_WordReg);
 #endif
 #if defined(TR_TARGET_ARM64)
@@ -674,7 +681,6 @@ public:
    virtual void print(TR::FILE *, TR_RegionStructure * regionStructure, uint32_t indentation);
    virtual void printSubGraph(TR::FILE *, TR_RegionStructure * regionStructure, uint32_t indentation);
    virtual void print(TR::FILE *, TR_InductionVariable * inductionVariable, uint32_t indentation);
-   virtual bool inDebugExtension() { return false; }
    virtual void* dxMallocAndRead(uintptr_t size, void *remotePtr, bool dontAddToMap = false){return remotePtr;}
    virtual void* dxMallocAndReadString(void *remotePtr, bool dontAddToMap = false){return remotePtr;}
    virtual void  dxFree(void * localPtr){return;}
@@ -696,9 +702,7 @@ public:
    void printNodeFlags(TR::FILE *, TR::Node *);
 #ifdef J9_PROJECT_SPECIFIC
    void printBCDNodeInfo(TR::FILE *pOutFile, TR::Node * node);
-   void printDFPNodeInfo(TR::FILE *pOutFile, TR::Node * node);
    void printBCDNodeInfo(TR::Node * node, TR_PrettyPrinterString& output);
-   void printDFPNodeInfo(TR::Node * node, TR_PrettyPrinterString& output);
 #endif
 
    int32_t * printStackAtlas(uintptr_t startPC, uint8_t * mapBits, int32_t numberOfSlotsMapped, bool fourByteOffsets, int32_t * sizeOfStackAtlas, int32_t frameSize);
@@ -783,7 +787,7 @@ public:
    void printPrefix(TR::FILE *, TR::Instruction *instr);
    int32_t printPrefixAndMnemonicWithoutBarrier(TR::FILE *, TR::Instruction *instr, int32_t barrier);
    void printPrefixAndMemoryBarrier(TR::FILE *, TR::Instruction *instr, int32_t barrier, int32_t barrierOffset);
-   void dumpDependencyGroup(TR::FILE *pOutFile, TR_X86RegisterDependencyGroup *group, int32_t numConditions, char *prefix, bool omitNullDependencies);
+   void dumpDependencyGroup(TR::FILE *pOutFile, TR::RegisterDependencyGroup *group, int32_t numConditions, char *prefix, bool omitNullDependencies);
    void dumpDependencies(TR::FILE *, TR::Instruction *);
    void printRegisterInfoHeader(TR::FILE *, TR::Instruction *);
    void printBoundaryAvoidanceInfo(TR::FILE *, TR::X86BoundaryAvoidanceInstruction *);
@@ -837,7 +841,7 @@ public:
    void printReferencedRegisterInfo(TR::FILE *, TR::X86RegRegMemInstruction *);
 
    void printFullRegisterDependencyInfo(TR::FILE *, TR::RegisterDependencyConditions * conditions);
-   void printDependencyConditions(TR_X86RegisterDependencyGroup *, uint8_t, char *, TR::FILE *);
+   void printDependencyConditions(TR::RegisterDependencyGroup *, uint8_t, char *, TR::FILE *);
 
    void print(TR::FILE *, TR::MemoryReference *, TR_RegisterSizes);
    void printReferencedRegisterInfo(TR::FILE *, TR::MemoryReference *);
@@ -965,7 +969,7 @@ public:
    char * fullOpCodeName(TR::Instruction *instr);
    void printPrefix(TR::FILE *, TR::Instruction *);
    void printBinaryPrefix(char *prefixBuffer, TR::Instruction *);
-   void dumpDependencyGroup(TR::FILE *pOutFile, TR_ARMRegisterDependencyGroup *group, int32_t numConditions, char *prefix, bool omitNullDependencies);
+   void dumpDependencyGroup(TR::FILE *pOutFile, TR::RegisterDependencyGroup *group, int32_t numConditions, char *prefix, bool omitNullDependencies);
    void dumpDependencies(TR::FILE *, TR::Instruction *);
    void print(TR::FILE *, TR::ARMLabelInstruction *);
 #ifdef J9_PROJECT_SPECIFIC
@@ -1122,18 +1126,22 @@ public:
    void print(TR::FILE *, TR::ARM64Trg1Instruction *);
    void print(TR::FILE *, TR::ARM64Trg1CondInstruction *);
    void print(TR::FILE *, TR::ARM64Trg1ImmInstruction *);
+   void print(TR::FILE *, TR::ARM64Trg1ImmShiftedInstruction *);
    void print(TR::FILE *, TR::ARM64Trg1ImmSymInstruction *);
    void print(TR::FILE *, TR::ARM64Trg1Src1Instruction *);
    void print(TR::FILE *, TR::ARM64Trg1ZeroSrc1Instruction *);
+   void print(TR::FILE *, TR::ARM64Trg1ZeroImmInstruction *);
    void print(TR::FILE *, TR::ARM64Trg1Src1ImmInstruction *);
    void print(TR::FILE *, TR::ARM64Trg1Src2Instruction *);
    void print(TR::FILE *, TR::ARM64CondTrg1Src2Instruction *);
    void print(TR::FILE *, TR::ARM64Trg1Src2ShiftedInstruction *);
    void print(TR::FILE *, TR::ARM64Trg1Src2ExtendedInstruction *);
+   void print(TR::FILE *, TR::ARM64Trg1Src2IndexedElementInstruction *);
    void print(TR::FILE *, TR::ARM64Trg1Src2ZeroInstruction *);
    void print(TR::FILE *, TR::ARM64Trg1Src3Instruction *);
    void print(TR::FILE *, TR::ARM64Trg1MemInstruction *);
    void print(TR::FILE *, TR::ARM64MemInstruction *);
+   void print(TR::FILE *, TR::ARM64MemImmInstruction *);
    void print(TR::FILE *, TR::ARM64MemSrc1Instruction *);
    void print(TR::FILE *, TR::ARM64MemSrc2Instruction *);
    void print(TR::FILE *, TR::ARM64Trg1MemSrc1Instruction *);
@@ -1169,6 +1177,7 @@ public:
    void print(TR::FILE *, TR::ARM64StackCheckFailureSnippet *);
    void print(TR::FILE *, TR::ARM64ForceRecompilationSnippet *);
    void print(TR::FILE *, TR::ARM64RecompilationSnippet *);
+   uint8_t *printARM64ArgumentsFlush(TR::FILE *, TR::Node *, uint8_t *, int32_t);
 #endif
    void print(TR::FILE *, TR::ARM64HelperCallSnippet *);
 
@@ -1188,6 +1197,7 @@ public:
    void print(TR::FILE *, TR::JtypeInstruction *);
    void print(TR::FILE *, TR::LoadInstruction * );
    void print(TR::FILE *, TR::StoreInstruction *);
+   void print(TR::FILE *, TR::RVHelperCallSnippet *);
 
    void print(TR::FILE *, TR::RealRegister *, TR_RegisterSizes size = TR_WordReg);
    void print(TR::FILE *, TR::RegisterDependency *);
@@ -1248,14 +1258,35 @@ class TR_PrettyPrinterString
    {
    public:
       TR_PrettyPrinterString(TR_Debug* debug);
-      void append(const char* format, ...);
+
+      /**
+       * @brief Append a null-terminated string with format specifiers to the buffer.
+       *        The buffer is guaranteed not to overflow and will be null-terminated.
+       *
+       * @param[in] format : null-terminated string to append with optional format specifiers
+       * @param[in] ... : optional arguments for format specifiers
+       */
+      void appendf(char const *format, ...);
+
+      /**
+       * @brief Append a null-terminated string to the buffer.  No format specifiers
+       *        are permitted.  The buffer is guaranteed not to overflow and will be
+       *        null-terminated.
+       *
+       * @param[in] str : null-terminated string to append
+       */
+      void appends(char const *str);
+
       const char* getStr() {return buffer;}
-      int getLength() {return len;}
+      int32_t getLength() {return len;}
       void reset() {buffer[0] = '\0'; len = 0;}
       bool isEmpty() { return len <= 0; }
+
+      static const int32_t maxBufferLength = 2000;
+
    private:
-      char buffer[2000];
-      int len;
+      char buffer[maxBufferLength];
+      int32_t len;
       TR::Compilation *_comp;
       TR_Debug *_debug;
    };

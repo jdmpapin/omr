@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -465,6 +465,13 @@ MM_Configuration::initializeGCParameters(MM_EnvironmentBase* env)
 	/* initialize scan cache lock splitting factor */
 	if (0 == extensions->cacheListSplit) {
 		extensions->cacheListSplit = (extensions->gcThreadCount - 1) / 8  +  1;
+	}
+	if (extensions->scavengerEnabled) {
+		if (MM_GCExtensionsBase::OMR_GC_SCAVENGER_SCANORDERING_NONE == extensions->scavengerScanOrdering) {
+			extensions->scavengerScanOrdering = MM_GCExtensionsBase::OMR_GC_SCAVENGER_SCANORDERING_HIERARCHICAL;
+		} else if (MM_GCExtensionsBase::OMR_GC_SCAVENGER_SCANORDERING_DYNAMIC_BREADTH_FIRST == extensions->scavengerScanOrdering) {
+			extensions->adaptiveGcCountBetweenHotFieldSort = true;
+		}
 	}
 #endif /* OMR_GC_MODRON_SCAVENGER */
 

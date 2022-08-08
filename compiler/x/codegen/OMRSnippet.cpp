@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -30,7 +30,7 @@
 #include "x/codegen/DataSnippet.hpp"
 #include "x/codegen/HelperCallSnippet.hpp"
 #include "x/codegen/RestartSnippet.hpp"
-#include "x/codegen/X86Ops.hpp"
+#include "codegen/InstOpCode.hpp"
 #include "codegen/UnresolvedDataSnippet.hpp"
 
 namespace TR { class X86BoundCheckWithSpineCheckSnippet; }
@@ -210,7 +210,7 @@ TR_Debug::printx(TR::FILE *pOutFile, TR::Snippet *snippet)
 int32_t
 TR_Debug::printRestartJump(TR::FILE *pOutFile, TR::X86RestartSnippet * snippet, uint8_t *bufferPos)
    {
-   int32_t size = snippet->estimateRestartJumpLength(JMP4, bufferPos - (uint8_t*)snippet->cg()->getBinaryBufferStart());
+   int32_t size = snippet->estimateRestartJumpLength(TR::InstOpCode::JMP4, static_cast<int32_t>(bufferPos - (uint8_t*)snippet->cg()->getBinaryBufferStart()));
    printPrefix(pOutFile, NULL, bufferPos, size);
    printLabelInstruction(pOutFile, "jmp", snippet->getRestartLabel());
    return size;
@@ -219,7 +219,7 @@ TR_Debug::printRestartJump(TR::FILE *pOutFile, TR::X86RestartSnippet * snippet, 
 int32_t
 TR_Debug::printRestartJump(TR::FILE *pOutFile, TR::X86RestartSnippet * snippet, uint8_t *bufferPos, int32_t branchOp, const char *branchOpName)
    {
-   int32_t size = snippet->estimateRestartJumpLength((TR_X86OpCodes) branchOp, bufferPos - (uint8_t*)snippet->cg()->getBinaryBufferStart());
+   int32_t size = snippet->estimateRestartJumpLength((TR::InstOpCode::Mnemonic) branchOp, static_cast<int32_t>(bufferPos - (uint8_t*)snippet->cg()->getBinaryBufferStart()));
    printPrefix(pOutFile, NULL, bufferPos, size);
    printLabelInstruction(pOutFile, branchOpName, snippet->getRestartLabel());
    return size;

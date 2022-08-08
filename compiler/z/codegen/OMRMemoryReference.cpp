@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -1304,7 +1304,7 @@ OMR::Z::MemoryReference::populateAddTree(TR::Node * subTree, TR::CodeGenerator *
    if (integerChild->getOpCode().isLoadConst() &&
        (!comp->useCompressedPointers() ||
        (integerChild->getOpCodeValue() != TR::lconst) ||
-       (integerChild->getLongInt() != TR::Compiler->vm.heapBaseAddress())))
+       (integerChild->getLongInt() != 0)))
       {
       self()->populateMemoryReference(addressChild, cg);
       if ((subTree->getOpCodeValue() != TR::iadd) && (subTree->getOpCodeValue() != TR::aiadd) && (subTree->getOpCodeValue() != TR::isub))
@@ -1494,8 +1494,17 @@ OMR::Z::MemoryReference::populateShiftLeftTree(TR::Node * subTree, TR::CodeGener
 
    if (!strengthReducedShift)
       {
-      _indexRegister = cg->evaluate(subTree);
-      _indexNode = subTree;
+      if (subTree->containsCompressionSequence())
+         {
+         // Evaluate the object reference into base register as this is part of a decompression sequence.
+         _baseRegister = cg->evaluate(subTree);
+         _baseNode = subTree;
+         }
+      else
+         {
+         _indexRegister = cg->evaluate(subTree);
+         _indexNode = subTree;
+         }
       }
    }
 
@@ -1974,7 +1983,7 @@ TR::Register *OMR::Z::MemoryReference::swapBaseRegister(TR::Register *br, TR::Co
 TR::Instruction *
 OMR::Z::MemoryReference::handleLargeOffset(TR::Node * node, TR::MemoryReference *interimMemoryReference, TR::Register *tempTargetRegister, TR::CodeGenerator * cg, TR::Instruction * preced)
    {
-   TR::InstOpCode::Mnemonic op = TR::InstOpCode::BAD;
+   TR::InstOpCode::Mnemonic op = TR::InstOpCode::bad;
 
    if (_offset > MINLONGDISP && _offset < MAXLONGDISP)
       {
@@ -2328,10 +2337,10 @@ OMR::Z::MemoryReference::propagateAlignmentInfo(OMR::Z::MemoryReference *newMemR
    }
 
 /**
- * 3 different kids of assignRegisters:
+ * 4 different kids of assignRegisters:
  *      1. TR::Instruction::assignRegisters
- *      2. TR_S390OutOfLineCodeSection::assignRegisters
- *      3. TR_S390RegisterDependencyGroup::assignRegisters
+ *      2. TR_OutOfLineCodeSection::assignRegisters
+ *      3. TR::RegisterDependencyGroup::assignRegisters
  *      4. OMR::Z::MemoryReference::assignRegisters
  *          TR::Instruction::assignRegisters calls this
  */
@@ -2951,7 +2960,7 @@ OMR::Z::MemoryReference::generateBinaryEncoding(uint8_t * cursor, TR::CodeGenera
       auto longDisplacementMnemonic = TR::InstOpCode::getEquivalentLongDisplacementMnemonic(instr->getOpCodeValue());
 
       if ((displacement < MAXLONGDISP && displacement > MINLONGDISP)
-         && (longDisplacementMnemonic != TR::InstOpCode::BAD
+         && (longDisplacementMnemonic != TR::InstOpCode::bad
             || instructionFormat == TR::Instruction::IsRXY
             || instructionFormat == TR::Instruction::IsRXYb
             || instructionFormat == TR::Instruction::IsRSY
@@ -2970,7 +2979,7 @@ OMR::Z::MemoryReference::generateBinaryEncoding(uint8_t * cursor, TR::CodeGenera
          // formats and S390*Instruction formats
          instructionFormat = TR::Instruction::IsRXY;
 
-         if (longDisplacementMnemonic != TR::InstOpCode::BAD)
+         if (longDisplacementMnemonic != TR::InstOpCode::bad)
             {
             TR::DebugCounter::incStaticDebugCounter(comp, TR::DebugCounter::debugCounterName(comp, "z/memref/long-displacement-upgrade/(%s)", comp->signature()));
             }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -387,6 +387,26 @@ TR::Instruction *generateTrg1ImmInstruction(
                    TR::Instruction *preced = NULL);
 
 /*
+ * @brief Generates shifted imm--to-trg instruction
+ * @param[in] cg : CodeGenerator
+ * @param[in] op : instruction opcode
+ * @param[in] node : node
+ * @param[in] treg : target register
+ * @param[in] imm : immediate value
+ * @param[in] shiftAmount : shift amount
+ * @param[in] preced : preceding instruction
+ * @return generated instruction
+ */
+TR::Instruction *generateTrg1ImmShiftedInstruction(
+                   TR::CodeGenerator *cg,
+                   TR::InstOpCode::Mnemonic op,
+                   TR::Node *node,
+                   TR::Register *treg,
+                   uint32_t imm,
+                   uint32_t shiftAmount,
+                   TR::Instruction *preced = NULL);
+
+/*
  * @brief Generates imm-to-trg label instruction
  * @param[in] cg : CodeGenerator
  * @param[in] op : instruction opcode
@@ -559,6 +579,28 @@ TR::Instruction *generateTrg1Src2ExtendedInstruction(
                    TR::Instruction *preced = NULL);
 
 /*
+ * @brief Generates src2-to-trg indexed element instruction
+ * @param[in] cg : CodeGenerator
+ * @param[in] op : instruction opcode
+ * @param[in] node : node
+ * @param[in] treg : target register
+ * @param[in] s1reg : source register 1
+ * @param[in] s2reg : source register 2
+ * @param[in] index : index of element in s2reg
+ * @param[in] preced : preceding instruction
+ * @return generated instruction
+ */
+TR::Instruction *generateTrg1Src2IndexedElementInstruction(
+                   TR::CodeGenerator *cg,
+                   TR::InstOpCode::Mnemonic op,
+                   TR::Node *node,
+                   TR::Register *treg,
+                   TR::Register *s1reg,
+                   TR::Register *s2reg,
+                   uint32_t index,
+                   TR::Instruction *preced = NULL);
+
+/*
  * @brief Generates src3-to-trg instruction
  * @param[in] cg : CodeGenerator
  * @param[in] op : instruction opcode
@@ -620,6 +662,24 @@ TR::Instruction *generateTrg1MemInstruction(
                    TR::Node *node,
                    TR::Register *treg,
                    TR::MemoryReference *mr,
+                   TR::Instruction *preced = NULL);
+
+/*
+ * @brief Generates mem-imm instruction
+ * @param[in] cg : CodeGenerator
+ * @param[in] op : instruction opcode
+ * @param[in] node : node
+ * @param[in] mr : memory reference
+ * @param[in] imm : immediate
+ * @param[in] preced : preceding instruction
+ * @return generated instruction
+ */
+TR::Instruction *generateMemImmInstruction(
+                   TR::CodeGenerator *cg,
+                   TR::InstOpCode::Mnemonic op,
+                   TR::Node *node,
+                   TR::MemoryReference *mr,
+                   uint32_t imm,
                    TR::Instruction *preced = NULL);
 
 /*
@@ -887,6 +947,24 @@ TR::Instruction *generateMovInstruction(
                   TR::Instruction *preced = NULL);
 
 /*
+ * @brief Generates MVN (register) instruction
+ * @param[in] cg : CodeGenerator
+ * @param[in] node : node
+ * @param[in] treg : target register
+ * @param[in] sreg : source register
+ * @param[in] is64bit : true when it is 64-bit operation
+ * @param[in] preced : preceding instruction
+ * @return generated instruction
+ */
+TR::Instruction *generateMvnInstruction(
+                  TR::CodeGenerator *cg,
+                  TR::Node *node,
+                  TR::Register *treg,
+                  TR::Register *sreg,
+                  bool is64bit = true,
+                  TR::Instruction *preced = NULL);
+
+/*
  * @brief Generates NEG (register) instruction
  * @param[in] cg : CodeGenerator
  * @param[in] node : node
@@ -905,6 +983,26 @@ TR::Instruction *generateNegInstruction(
                   TR::Instruction *preced = NULL);
 
 /*
+ * @brief Generates MOV (bitmask immediate) instruction
+ * @param[in] cg : CodeGenerator
+ * @param[in] node : node
+ * @param[in] treg : target register
+ * @param[in] N : N bit (bit 22) value
+ * @param[in] imm : immediate value
+ * @param[in] is64bit : true when it is 64-bit operation
+ * @param[in] preced : preceding instruction
+ * @return generated instruction
+ */
+TR::Instruction *generateMovBitMaskInstruction(
+                  TR::CodeGenerator *cg,
+                  TR::Node *node,
+                  TR::Register *treg,
+                  bool N,
+                  uint32_t imm,
+                  bool is64bit = true,
+                  TR::Instruction *preced = NULL);
+
+/*
  * @brief Generates MUL (register) instruction
  * @param[in] cg : CodeGenerator
  * @param[in] node : node
@@ -920,6 +1018,26 @@ TR::Instruction *generateMulInstruction(
                   TR::Register *treg,
                   TR::Register *s1reg,
                   TR::Register *s2reg,
+                  TR::Instruction *preced = NULL);
+
+/*
+ * @brief Generates MUL (register) instruction
+ * @param[in] cg : CodeGenerator
+ * @param[in] node : node
+ * @param[in] treg : target register
+ * @param[in] s1reg : source register 1
+ * @param[in] s2reg : source register 2
+ * @param[in] is64bit : true when it is 64-bit operation
+ * @param[in] preced : preceding instruction
+ * @return generated instruction
+ */
+TR::Instruction *generateMulInstruction(
+                  TR::CodeGenerator *cg,
+                  TR::Node *node,
+                  TR::Register *treg,
+                  TR::Register *s1reg,
+                  TR::Register *s2reg,
+                  bool is64bit,
                   TR::Instruction *preced = NULL);
 
 /*
@@ -968,6 +1086,170 @@ TR::ARM64ExceptionInstruction *generateExceptionInstruction(
                   TR::InstOpCode::Mnemonic op,
                   TR::Node *node,
                   uint32_t imm,
+                  TR::Instruction *preced = NULL);
+
+/**
+ * @brief Generates ubfx instruction
+ *
+ * @details Generates ubfx instruction which copies a bitfield of <width> bits
+ *          starting from bit position <lsb> in the source register to
+ *          the least significant bits of the target register.
+ *          The bits above the bitfield in the target register is set to 0.
+ *
+ * @param[in] cg      : CodeGenerator
+ * @param[in] node    : node
+ * @param[in] treg    : target register
+ * @param[in] sreg    : source register
+ * @param[in] lsb     : the lsb to be copied in the source register
+ * @param[in] width   : the bitfield width to copy
+ * @param[in] is64bit : true if 64bit
+ * @param[in] preced  : preceding instruction
+ * @return generated instruction
+ */
+TR::Instruction *generateUBFXInstruction(
+                  TR::CodeGenerator *cg,
+                  TR::Node *node,
+                  TR::Register *treg,
+                  TR::Register *sreg,
+                  uint32_t lsb,
+                  uint32_t width,
+                  bool is64bit,
+                  TR::Instruction *preced = NULL);
+
+/**
+ * @brief Generates ubfiz instruction
+ *
+ * @details Generates ubfiz instruction which copies a bitfield of <width> bits
+ *          from the least significant bits of the source register to
+ *          the bit position <lsb> of the target register.
+ *          The bits above and below the bitfield in the target register is set to 0.
+ *
+ * @param[in] cg      : CodeGenerator
+ * @param[in] node    : node
+ * @param[in] treg    : target register
+ * @param[in] sreg    : source register
+ * @param[in] lsb     : the bit position of the target register
+ * @param[in] width   : the bitfield width to copy
+ * @param[in] is64bit : true if 64bit
+ * @param[in] preced  : preceding instruction
+ * @return generated instruction
+ */
+TR::Instruction *generateUBFIZInstruction(
+                  TR::CodeGenerator *cg,
+                  TR::Node *node,
+                  TR::Register *treg,
+                  TR::Register *sreg,
+                  uint32_t lsb,
+                  uint32_t width,
+                  bool is64bit,
+                  TR::Instruction *preced = NULL);
+
+/**
+ * @brief Generates vector shift left immediate instruction
+ *
+ * @param[in] cg          : CodeGenerator
+ * @param[in] op          : opcode
+ * @param[in] node        : node
+ * @param[in] treg        : target register
+ * @param[in] sreg        : source register
+ * @param[in] shiftAmount : shift amount
+ * @param[in] preced      : preceding instruction
+ * @return generated instruction
+ */
+TR::Instruction *generateVectorShiftImmediateInstruction(
+                  TR::CodeGenerator *cg,
+                  TR::InstOpCode::Mnemonic op,
+                  TR::Node *node,
+                  TR::Register *treg,
+                  TR::Register *sreg,
+                  uint32_t shiftAmount,
+                  TR::Instruction *preced = NULL);
+
+/**
+ * @brief Generates duplicate vector element instruction
+ *
+ * @param[in] cg          : CodeGenerator
+ * @param[in] op          : opcode
+ * @param[in] node        : node
+ * @param[in] treg        : target register
+ * @param[in] sreg        : source register
+ * @param[in] srcIndex    : source element index
+ * @param[in] preced      : preceding instruction
+ * @return generated instruction
+ */
+TR::Instruction *generateVectorDupElementInstruction(
+                  TR::CodeGenerator *cg,
+                  TR::InstOpCode::Mnemonic op,
+                  TR::Node *node,
+                  TR::Register *treg,
+                  TR::Register *sreg,
+                  uint32_t srcIndex,
+                  TR::Instruction *preced = NULL);
+
+/**
+ * @brief Generates signed or unsigned move vector element to general purpose register instruction
+ *
+ * @param[in] cg          : CodeGenerator
+ * @param[in] op          : opcode
+ * @param[in] node        : node
+ * @param[in] treg        : target register
+ * @param[in] sreg        : source register
+ * @param[in] srcIndex    : source element index
+ * @param[in] preced      : preceding instruction
+ * @return generated instruction
+ */
+TR::Instruction *generateMovVectorElementToGPRInstruction(
+                  TR::CodeGenerator *cg,
+                  TR::InstOpCode::Mnemonic op,
+                  TR::Node *node,
+                  TR::Register *treg,
+                  TR::Register *sreg,
+                  uint32_t srcIndex,
+                  TR::Instruction *preced = NULL);
+
+/**
+ * @brief Generates move general purpose register to vector element instruction
+ *
+ * @param[in] cg          : CodeGenerator
+ * @param[in] op          : opcode
+ * @param[in] node        : node
+ * @param[in] treg        : target register
+ * @param[in] sreg        : source register
+ * @param[in] trgIndex    : target element index
+ * @param[in] preced      : preceding instruction
+ * @return generated instruction
+ */
+TR::Instruction *generateMovGPRToVectorElementInstruction(
+                  TR::CodeGenerator *cg,
+                  TR::InstOpCode::Mnemonic op,
+                  TR::Node *node,
+                  TR::Register *treg,
+                  TR::Register *sreg,
+                  uint32_t trgIndex,
+                  TR::Instruction *preced = NULL);
+
+
+/**
+ * @brief Generates move vector element instruction
+ *
+ * @param[in] cg          : CodeGenerator
+ * @param[in] op          : opcode
+ * @param[in] node        : node
+ * @param[in] treg        : target register
+ * @param[in] sreg        : source register
+ * @param[in] trgIndex    : target element index
+ * @param[in] srcIndex    : source element index
+ * @param[in] preced      : preceding instruction
+ * @return generated instruction
+ */
+TR::Instruction *generateMovVectorElementInstruction(
+                  TR::CodeGenerator *cg,
+                  TR::InstOpCode::Mnemonic op,
+                  TR::Node *node,
+                  TR::Register *treg,
+                  TR::Register *sreg,
+                  uint32_t trgIndex,
+                  uint32_t srcIndex,
                   TR::Instruction *preced = NULL);
 
 #ifdef J9_PROJECT_SPECIFIC

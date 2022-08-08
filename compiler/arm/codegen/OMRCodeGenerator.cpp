@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -299,62 +299,19 @@ TR::Instruction *OMR::ARM::CodeGenerator::generateSwitchToInterpreterPrePrologue
    uintptr_t             helperAddr = (uintptr_t)helperSymRef->getMethodAddress();
 
    // gr4 must contain the saved LR; see Recompilation.s
-   cursor = new (self()->trHeapMemory()) TR::ARMTrg1Src1Instruction(cursor, ARMOp_mov, node, gr4, lr, self());
+   cursor = new (self()->trHeapMemory()) TR::ARMTrg1Src1Instruction(cursor, TR::InstOpCode::mov, node, gr4, lr, self());
    cursor = self()->getLinkage()->flushArguments(cursor);
-   cursor = generateImmSymInstruction(self(), ARMOp_bl, node, (uintptr_t)revertToInterpreterSymRef->getMethodAddress(), new (self()->trHeapMemory()) TR::RegisterDependencyConditions((uint8_t)0,0, self()->trMemory()), revertToInterpreterSymRef, NULL, cursor);
-   cursor = generateImmInstruction(self(), ARMOp_dd, node, (int32_t)ramMethod, TR_RamMethod, cursor);
+   cursor = generateImmSymInstruction(self(), TR::InstOpCode::bl, node, (uintptr_t)revertToInterpreterSymRef->getMethodAddress(), new (self()->trHeapMemory()) TR::RegisterDependencyConditions((uint8_t)0,0, self()->trMemory()), revertToInterpreterSymRef, NULL, cursor);
+   cursor = generateImmInstruction(self(), TR::InstOpCode::dd, node, (int32_t)ramMethod, TR_RamMethod, cursor);
 
    if (comp->getOption(TR_EnableHCR))
       comp->getStaticHCRPICSites()->push_front(cursor);
 
-   cursor = generateImmInstruction(self(), ARMOp_dd, node, (int32_t)helperAddr, TR_AbsoluteHelperAddress, helperSymRef, cursor);
+   cursor = generateImmInstruction(self(), TR::InstOpCode::dd, node, (int32_t)helperAddr, TR_AbsoluteHelperAddress, helperSymRef, cursor);
    // Used in FSD to store an  instruction
-   cursor = generateImmInstruction(self(), ARMOp_dd, node, 0, cursor);
+   cursor = generateImmInstruction(self(), TR::InstOpCode::dd, node, 0, cursor);
 
    return cursor;
-   }
-
-static void removeGhostRegistersFromGCMaps(TR::CodeGenerator *cg, TR::Instruction *branchOOL)
-   {
-   // If a virtual is live at the end of the hot path and dead at the beginning it will not be killed immediatey after it's first use in the hot path
-   // if it's also used on the cold path, since RA still needs to be done on the cold path (which is where it's future use count will drop to 0), which
-   // means it will be incorrectly seen as live between it's first use and the top of the hot path.
-   // If there are any GC points between the top of the hot path and the first use the real reg holding the virtual will be included,
-   // so we need to fix this.
-   TR::Instruction *instr = branchOOL->getNext();
-   while (!instr->isLabel() || !((TR::ARMLabelInstruction*)instr)->getLabelSymbol()->isEndOfColdInstructionStream())
-      {
-      if (instr->needsGCMap())
-         {
-         TR_GCStackMap *map = instr->getGCMap();
-         TR_ASSERT( map, "Instruction should have a GC map");
-
-         // This instruction has a GC map, for every register in the register map check if that register is unassigned at the beginning of the hot path.
-         for (uint32_t regNum = TR::RealRegister::FirstGPR; regNum < TR::RealRegister::LastGPR; ++regNum)
-            {
-            uint32_t regMask = cg->registerBitMask(regNum);
-            if (map->getRegisterMap() & regMask)
-               {
-               TR::RealRegister *regInRegMap = cg->machine()->getRealRegister((TR::RealRegister::RegNum)regNum);
-               if (regInRegMap->getState() == TR::RealRegister::Free)
-                  {
-                  // This register is unassigned, check if it was defined before the GC point.
-                  TR::Instruction *prevInstr = instr->getPrev();
-                  while (prevInstr != branchOOL && !prevInstr->defsRealRegister(regInRegMap))
-                     prevInstr = prevInstr->getPrev();
-                  // If it wasn't defined before the GC point it died on the cold path and it's first use on the hot path was after the GC point
-                  // i.e. it shouldn't be in the register map.
-                  if (prevInstr == branchOOL)
-                     {
-                     map->resetRegistersBits(regMask);
-                     }
-                  }
-               }
-            }
-         }
-
-      instr = instr->getNext();
-      }
    }
 
 void OMR::ARM::CodeGenerator::beginInstructionSelection()
@@ -369,17 +326,17 @@ void OMR::ARM::CodeGenerator::beginInstructionSelection()
       if (methodSymbol->isJNI())
          {
          uintptr_t JNIMethodAddress = (uintptr_t) methodSymbol->getResolvedMethod()->startAddressForJNIMethod(comp);
-         cursor = new (self()->trHeapMemory()) TR::ARMImmInstruction(cursor, ARMOp_dd, startNode, (int32_t)JNIMethodAddress, self());
+         cursor = new (self()->trHeapMemory()) TR::ARMImmInstruction(cursor, TR::InstOpCode::dd, startNode, (int32_t)JNIMethodAddress, self());
          }
 
-      _returnTypeInfoInstruction = new (self()->trHeapMemory()) TR::ARMImmInstruction(cursor, ARMOp_dd, startNode, 0, self());
-      new (self()->trHeapMemory()) TR::ARMAdminInstruction(_returnTypeInfoInstruction, ARMOp_proc, startNode, NULL, self());
+      _returnTypeInfoInstruction = new (self()->trHeapMemory()) TR::ARMImmInstruction(cursor, TR::InstOpCode::dd, startNode, 0, self());
+      new (self()->trHeapMemory()) TR::ARMAdminInstruction(_returnTypeInfoInstruction, TR::InstOpCode::proc, startNode, NULL, self());
 
       }
    else
       {
       _returnTypeInfoInstruction = NULL;
-      new (self()->trHeapMemory()) TR::ARMAdminInstruction((TR::Instruction *)NULL, ARMOp_proc, startNode, NULL, self());
+      new (self()->trHeapMemory()) TR::ARMAdminInstruction((TR::Instruction *)NULL, TR::InstOpCode::proc, startNode, NULL, self());
       }
    }
 
@@ -388,74 +345,6 @@ void OMR::ARM::CodeGenerator::endInstructionSelection()
    if (_returnTypeInfoInstruction != NULL)
       {
       _returnTypeInfoInstruction->setSourceImmediate(static_cast<uint32_t>(self()->comp()->getReturnInfo()));
-      }
-   }
-
-void OMR::ARM::CodeGenerator::doRegisterAssignment(TR_RegisterKinds kindsToAssign)
-   {
-   TR::Compilation *comp = self()->comp();
-
-   if (comp->getOption(TR_TraceCG))
-      diagnostic("\nPerforming Register Assignment:\n");
-
-   TR::Instruction *instructionCursor = self()->getAppendInstruction();
-   if (!comp->getOption(TR_DisableOOL))
-      {
-      TR::list<TR::Register*> *spilledRegisterList = new (self()->trHeapMemory()) TR::list<TR::Register*>(getTypedAllocator<TR::Register*>(comp->allocator()));
-      self()->setSpilledRegisterList(spilledRegisterList);
-      }
-   while (instructionCursor)
-      {
-      // TODO Use cross-platform register assignment tracing facility
-      if (comp->getOption(TR_TraceCG))
-         {
-         diagnostic("\nassigning registers for [" POINTER_PRINTF_FORMAT "]:", instructionCursor);
-         self()->getDebug()->print(comp->getOutFile(), instructionCursor);
-         }
-
-      TR::Instruction *prevInstruction = instructionCursor->getPrev();
-      TR::Instruction *nextInstruction = instructionCursor->getNext();
-      instructionCursor->assignRegisters(TR_GPR);
-      // Maintain Internal Control Flow Depth
-      // Track internal control flow on labels
-      if (instructionCursor->isLabel())
-         {
-         TR::ARMLabelInstruction *li = (TR::ARMLabelInstruction *)instructionCursor;
-
-         if (li->getLabelSymbol() != NULL)
-            {
-            if (li->getLabelSymbol()->isStartInternalControlFlow())
-               {
-               self()->decInternalControlFlowNestingDepth();
-               }
-            if (li->getLabelSymbol()->isEndInternalControlFlow())
-               {
-               self()->incInternalControlFlowNestingDepth();
-               }
-            }
-         }
-      else if (instructionCursor->getKind() == TR::Instruction::IsConditionalBranch)
-         {
-         TR::ARMConditionalBranchInstruction *bi = (TR::ARMConditionalBranchInstruction *)instructionCursor;
-
-         if (bi->getLabelSymbol() && bi->getLabelSymbol()->isStartOfColdInstructionStream())
-            {
-            removeGhostRegistersFromGCMaps(self(), bi);
-            }
-         }
-      self()->freeUnlatchedRegisters();
-      self()->buildGCMapsForInstructionAndSnippet(instructionCursor);
-
-      if (comp->getOption(TR_TraceCG))
-         {
-         diagnostic("\npost-assignment instruction(s):");
-	 TR::Instruction *instr = prevInstruction ? prevInstruction->getNext() : instructionCursor;
-         for (; instr != nextInstruction; instr = instr->getNext())
-            self()->getDebug()->print(comp->getOutFile(), instr);
-         diagnostic("\n");
-         }
-
-      instructionCursor = prevInstruction;
       }
    }
 
@@ -470,7 +359,7 @@ void OMR::ARM::CodeGenerator::doBinaryEncoding()
    bool skipOneReturn = false;
    while (cursorInstruction)
       {
-      if (cursorInstruction->getOpCodeValue() == ARMOp_ret)
+      if (cursorInstruction->getOpCodeValue() == TR::InstOpCode::retn)
          {
          if (skipOneReturn == false)
             {
@@ -562,15 +451,15 @@ TR::Register *OMR::ARM::CodeGenerator::gprClobberEvaluate(TR::Node *node)
          TR::RegisterPair *longReg = self()->allocateRegisterPair(lowReg, highReg);
          TR::Register     *temp    = self()->evaluate(node);
 
-         generateTrg1Src1Instruction(self(), ARMOp_mov, node, lowReg, temp->getLowOrder());
-         generateTrg1Src1Instruction(self(), ARMOp_mov, node, highReg, temp->getHighOrder());
+         generateTrg1Src1Instruction(self(), TR::InstOpCode::mov, node, lowReg, temp->getLowOrder());
+         generateTrg1Src1Instruction(self(), TR::InstOpCode::mov, node, highReg, temp->getHighOrder());
 
          return longReg;
          }
       else
          {
          TR::Register *targetRegister = self()->allocateRegister();
-         generateTrg1Src1Instruction(self(), ARMOp_mov, node, targetRegister, self()->evaluate(node));
+         generateTrg1Src1Instruction(self(), TR::InstOpCode::mov, node, targetRegister, self()->evaluate(node));
          return targetRegister;
          }
       }

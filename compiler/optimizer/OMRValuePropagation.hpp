@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -36,24 +36,11 @@
 #include "optimizer/Optimization.hpp"
 #include "optimizer/OptimizationManager.hpp"
 
-#define USE_TREES   1
-#define HEDGE_TREES 1
-
-#if USE_TREES
-   #if HEDGE_TREES
-      #define TREE_CLASS TR_HedgeTree
-      #define TREE_NODE TR_HedgeNode
-      #define TREE_ITERATOR TR_HedgeTreeIterator
-      #define TREE_HANDLER TR_HedgeTreeHandler
-      #include "infra/HedgeTree.hpp"
-   #else
-      #define TREE_CLASS TR_AVLTree
-      #define TREE_NODE TR_AVLNode
-      #define TREE_ITERATOR TR_AVLTreeIterator
-      #define TREE_HANDLER TR_AVLTreeHandler
-      #include "infra/AVLTree.hpp"
-   #endif
-#endif
+#define TREE_CLASS TR_HedgeTree
+#define TREE_NODE TR_HedgeNode
+#define TREE_ITERATOR TR_HedgeTreeIterator
+#define TREE_HANDLER TR_HedgeTreeHandler
+#include "infra/HedgeTree.hpp"
 
 #define VP_HASH_TABLE_SIZE 251
 #define VP_SPECIALKLASS -1
@@ -88,10 +75,32 @@ template <class T> class TR_Array;
 template <class T> class TR_Stack;
 
 typedef TR::Node* (* ValuePropagationPtr)(OMR::ValuePropagation *, TR::Node *);
-extern const ValuePropagationPtr constraintHandlers[];
+
+class ValuePropagationPointerTable
+   {
+   private:
+   static const ValuePropagationPtr table[];
+
+   static void checkTableSize();
+
+   public:
+
+   ValuePropagationPointerTable() {}; // some compilers require a default constructor for this class
+
+   ValuePropagationPtr operator[] (TR::ILOpCode opcode) const
+      {
+      return table[opcode.getTableIndex()];
+      }
+   };
+
+extern const ValuePropagationPointerTable constraintHandlers;
 
 typedef TR::typed_allocator<std::pair<TR::CFGEdge * const, TR_BitVector*>, TR::Region &> DefinedOnAllPathsMapAllocator;
 typedef std::map<TR::CFGEdge *, TR_BitVector *, std::less<TR::CFGEdge *>, DefinedOnAllPathsMapAllocator> DefinedOnAllPathsMap;
+
+typedef TR::typed_allocator<std::pair<TR::Node * const, List<TR_Pair<TR::TreeTop, TR::CFGEdge>> *>, TR::Region &> CallNodeToGuardNodesMapAllocator;
+typedef std::map<TR::Node *, List<TR_Pair<TR::TreeTop, TR::CFGEdge>> *, std::less<TR::Node *>, CallNodeToGuardNodesMapAllocator> CallNodeToGuardNodesMap;
+
 
 namespace TR {
 
@@ -213,7 +222,6 @@ class ValuePropagation : public TR::Optimization
    // Value constraint. This represents constraints applied to a particular
    // value number, and is represented by a linked list of relationships.
    //
-#if USE_TREES
    class ValueConstraint : public TREE_NODE<ValueConstraint>
       {
       public:
@@ -237,60 +245,11 @@ class ValuePropagation : public TR::Optimization
    typedef TREE_CLASS<ValueConstraint> ValueConstraints;
    typedef TREE_ITERATOR<ValueConstraint> ValueConstraintIterator;
 
-#else
-   class ValueConstraint : public TR_Link<ValueConstraint>
-      {
-      public:
-      ValueConstraint(int32_t valueNumber)
-         : _valueNumber(valueNumber) {}
-
-      void initialize(int32_t valueNumber, Relationship *rel, StoreRelationship *storeRel)
-         {
-         _valueNumber = valueNumber;
-         relationships.setFirst(rel);
-         storeRelationships.setFirst(storeRel);
-         setNext(NULL);
-         }
-
-      int32_t getValueNumber() {return _valueNumber;}
-
-      TR_LinkHead<Relationship> relationships;
-      TR_LinkHead<StoreRelationship> storeRelationships;
-      void print(OMR::ValuePropagation *vp, int32_t indent);
-
-      private:
-      int32_t _valueNumber;
-
-      };
-
-   typedef TR_LinkHead<ValueConstraint> ValueConstraints;
-
-   class ValueConstraintIterator
-      {
-      public:
-      ValueConstraintIterator() : _list(NULL) {}
-      ValueConstraintIterator(ValueConstraints &list) {reset(list);}
-      void reset(ValueConstraints &list)
-         {
-         _list = &list;
-         _next = list.getFirst();
-         }
-      ValueConstraint *getFirst() {_next = _list->getFirst(); return getNext();}
-      ValueConstraint *getNext() {ValueConstraint *vc = _next; if (_next) _next = _next->getNext(); return vc;}
-      ValueConstraints *getBase() {return _list;}
-      private:
-      ValueConstraints *_list;
-      ValueConstraint  *_next;
-      };
-
-#endif
-
    ValueConstraint *createValueConstraint(int32_t valueNumber, Relationship *relationships, StoreRelationship *storeRelationships);
    void             freeValueConstraint(ValueConstraint *vc);
    void             freeValueConstraints(ValueConstraints &valueConstraints);
    ValueConstraint *copyValueConstraints(ValueConstraints &valueConstraints);
 
-#if USE_TREES
    class ValueConstraintHandler : public TREE_HANDLER <ValueConstraint>
       {
       public:
@@ -302,25 +261,6 @@ class ValuePropagation : public TR::Optimization
       private:
       OMR::ValuePropagation *_vp;
       };
-#else
-   class ValueConstraintHandler
-      {
-      public:
-      void setVP (OMR::ValuePropagation * vp);
-      ValueConstraint * allocate (int32_t key);
-      void free (ValueConstraint * vc);
-      ValueConstraint * copy (ValueConstraint * vc);
-      void empty (ValueConstraints & valueConstraints);
-      ValueConstraint * copyAll (ValueConstraints & valueConstraints);
-      ValueConstraint * getRoot (ValueConstraints & list);
-      void setRoot (ValueConstraints & list, ValueConstraint * vc);
-      ValueConstraint * find (int32_t key, ValueConstraints & list);
-      ValueConstraint * findOrCreate (int32_t key, ValueConstraints & list);
-      ValueConstraint * remove (int32_t key, ValueConstraints & list);
-      private:
-      OMR::ValuePropagation *_vp;
-      };
-#endif
 
    TR_Stack<ValueConstraint*> *_valueConstraintCache;
 
@@ -427,6 +367,81 @@ class ValuePropagation : public TR::Optimization
    void invalidateParmConstraintsIfNeeded(TR::Node *node, TR::VPConstraint *constraint);
    void checkTypeRelationship(TR::VPConstraint *lhs, TR::VPConstraint *rhs, int32_t &value, bool isInstanceOf, bool isCheckCast);
    TR_YesNoMaybe isCastClassObject(TR::VPClassType *type);
+
+   /**
+    * Determine whether the component type of an array is, or might be, a value
+    * type.
+    * \param arrayConstraint The \ref TR::VPConstraint type constraint for the array reference
+    * \return \c TR_yes if the array's component type is definitely a value type;\n
+    *         \c TR_no if it is definitely not a value type; or\n
+    *         \c TR_maybe otherwise.
+    */
+   virtual TR_YesNoMaybe isArrayCompTypeValueType(TR::VPConstraint *arrayConstraint);
+
+   /**
+    * Determine whether assignment of the supplied object reference to an element of the
+    * supplied array reference could cause an \c ArrayStoreException to be thrown.
+    * If the assignment would never trigger an \c ArrayStoreException, the method
+    * returns \c false; otherwise, the method returns \c true.
+    *
+    * The \c mustFail parameter is set to \c true if the assignment would always trigger
+    * an \c ArrayStoreException; otherwise, it is set to \c false.
+    *
+    * The \c storeClassForCheck parameter is set to the type of the object reference if
+    * it is known to be the same as the component type of the array, and the class is
+    * not known to be extended; otherwise, the parameter is set to \c NULL.
+    * If the value is not \c NULL, any \ref TR::ArrayStoreCHK generated for this potential
+    * assignment could be NOPed based on whether the class is ever seen to be extended.
+    *
+    * The \c componentClassForCheck parameter is set to the component type of the array if
+    * the class of the object must be the same class as the component type of the array
+    * or a subtype of the component type; otherwise, the parameter is set to \c NULL.
+    * At run-time, a simple check that the actual component type of the array really is
+    * equal to \c componentClassForCheck can be used to avoid the need for a more extensive
+    * subtype check on any \ref TR::ArrayStoreCHK.
+    *
+    * At most one of \c storeClassForCheck and \c componentClassForCheck will be non-NULL.
+    * The value of \c storeClassForCheck can be set on a \ref TR::ArrayStoreCHK node
+    * via \ref TR::Node::setArrayStoreClassInNode(TR_OpaqueClassBlock*)
+    * The value of \c componentClassForCheck can be set on a \ref TR::ArrayStoreCHK node
+    * via \ref TR::Node::setArrayComponentClassInNode(TR_OpaqueClassBlock*)
+    *
+    * \param[in] arrayRef A \ref TR::Node representing an array reference, an element of
+    *                 which is being considered as the target of an assignment
+    * \param[in] objectRef A \ref TR::Node representing an object reference that is being
+    *                 considered as the value to be assigned to the array element
+    * \param[out] mustFail An output parameter of type \c bool.  Set to \c true if the
+    *                 assignment under consideration would always result in an \c ArrayStoreException
+    * \param[out] storeClassForCheck An output parameter that is a pointer to \ref TR_OpaqueClassBlock
+    *                 representing what VP knows about the type of the object being stored
+    * \param[out] componentClassForCheck An output parameter that is a pointer to \ref TR_OpaqueClassBlock
+    *                 representing what VP knows about the type of the component type of the array
+    *
+    * \return \c false if Value Propagation determines that an \c ArrayStoreException would never
+    *                 be thrown by the assignment;\n
+    *         \c true otherwise
+    */
+   bool isArrayStoreCheckNeeded(TR::Node *arrayRef, TR::Node *objectRef, bool &mustFail,
+              TR_OpaqueClassBlock* &storeClassForCheck, TR_OpaqueClassBlock* &componentClassForCheck);
+
+   /**
+    * Determine the bounds and element size for an array constraint.
+    *
+    * The \c lowerBoundLimit and \c upperBoundLimit are in the range [0,2^31-1] and
+    * \c lowerBoundLimit <= \c upperBoundLimit.  If the array length is unknown,
+    * \c lowerBoundLimit will be zero and \c upperBoundLimit will be 2^31-1.
+    *
+    * \param[in] arrayConstraint A \ref TR::VPConstraint for an array reference
+    * \param[out] lowerBoundLimit The lower bound on the size of the array
+    * \param[out] upperBoundLimit The upper bound on the size of the array
+    * \param[out] elementSize The size of an element of the array; zero if not known
+    * \param[out] isKnownObj Set to \c true if this constraint represents a known object;\n
+    *             \c false otherwise.
+    */
+   virtual void getArrayLengthLimits(TR::VPConstraint *arrayConstraint, int32_t &lowerBoundLimit, int32_t &upperBoundLimit,
+                   int32_t &elementSize, bool &isKnownObj);
+
+
    TR::VPConstraint *getStoreConstraint(TR::Node *node, TR::Node *relative = NULL);
    void createStoreConstraints(TR::Node *node);
    void setUnreachableStore(StoreRelationship *store);
@@ -448,7 +463,6 @@ class ValuePropagation : public TR::Optimization
    void mustTakeException();
    void processTrees(TR::TreeTop *startTree, TR::TreeTop *endTree);
    void transformArrayCopyCall(TR::Node *node);
-   bool canTransformArrayCopyCallForSmall(TR::Node *node, int32_t &srcLength, int32_t &dstLength, int32_t &stride, TR::DataType &type );
    int32_t getPrimitiveArrayType(char primitiveArrayChar);
 
    bool canRunTransformToArrayCopy();
@@ -837,6 +851,8 @@ class ValuePropagation : public TR::Optimization
    //
    TR_Array<TR::CFGEdge *> *_edgesToBeRemoved;
 
+   CallNodeToGuardNodesMap *_callNodeToGuardNodes;
+
    // Cached constraints
    //
    TR::VPNullObject        *_nullObjectConstraint;
@@ -911,7 +927,7 @@ class ValuePropagation : public TR::Optimization
    List<ObjCloneInfo> _objectCloneTypes;
    List<ArrayCloneInfo> _arrayCloneTypes;
 
-   int32_t    *_parmInfo;
+   int32_t    *_parmMayBeVariant;
    bool       *_parmTypeValid;
 
    };

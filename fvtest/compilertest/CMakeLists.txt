@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -20,8 +20,6 @@
 ###############################################################################
 
 include(OmrCompilerSupport)
-
-set(OMR_WARNINGS_AS_ERRORS OFF)
 
 set(COMPILERTEST_FILES
 	compile/ResolvedMethod.cpp
@@ -53,6 +51,13 @@ elseif(OMR_ARCH_S390)
 		${omr_SOURCE_DIR}/compiler/z/env/OMRCPU.cpp
 		${omr_SOURCE_DIR}/compiler/z/env/OMRDebugEnv.cpp
 	)
+endif()
+
+if(OMR_ARCH_X86 OR OMR_ARCH_S390)
+	set(OMR_ENHANCED_WARNINGS OFF)
+else()
+	set(OMR_WARNINGS_AS_ERRORS OFF)
+	set(OMR_ENHANCED_WARNINGS OFF)
 endif()
 
 create_omr_compiler_library(
@@ -123,6 +128,6 @@ target_link_libraries(compilertest
 
 set_property(TARGET compilertest PROPERTY FOLDER fvtest)
 
-if (NOT OMR_HOST_OS STREQUAL "aix")
-	add_test(NAME CompilerTest COMMAND compilertest --gtest_output=xml:${CMAKE_CURRENT_BINARY_DIR}/compilertest-results.xml)
+if (NOT OMR_OS_AIX)
+	omr_add_test(NAME CompilerTest COMMAND $<TARGET_FILE:compilertest> --gtest_output=xml:${CMAKE_CURRENT_BINARY_DIR}/compilertest-results.xml)
 endif()

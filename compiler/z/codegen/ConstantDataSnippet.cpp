@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -93,7 +93,6 @@ TR::S390ConstantDataSnippet::addMetaDataForCodeAddress(uint8_t *cursor)
       case TR_ClassAddress:
       case TR_ClassObject:
          {
-         AOTcgDiag3(comp, "add relocation (%d) cursor=%x symbolReference=%x\n", reloType, cursor, getSymbolReference());
          TR::SymbolReference *reloSymRef= (reloType==TR_ClassAddress)?getNode()->getSymbolReference():getSymbolReference();
          if (cg()->comp()->getOption(TR_UseSymbolValidationManager))
             {
@@ -121,7 +120,6 @@ TR::S390ConstantDataSnippet::addMetaDataForCodeAddress(uint8_t *cursor)
          break;
       case TR_MethodObject:
          {
-         AOTcgDiag3(comp, "add relocation (%d) cursor=%x symbolReference=%x\n", reloType, cursor, getSymbolReference());
          TR::SymbolReference *reloSymRef= (reloType==TR_ClassAddress)?getNode()->getSymbolReference():getSymbolReference();
          cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor, (uint8_t *) reloSymRef,
                                                                                 getNode() ? (uint8_t *)(intptr_t)getNode()->getInlinedSiteIndex() : (uint8_t *)-1,
@@ -134,11 +132,19 @@ TR::S390ConstantDataSnippet::addMetaDataForCodeAddress(uint8_t *cursor)
       case TR_JNISpecialTargetAddress:
       case TR_JNIVirtualTargetAddress:
          {
-         AOTcgDiag3(comp, "add relocation (%d) cursor=%x symbolReference=%x\n", reloType, cursor, getSymbolReference());
-         cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor, (uint8_t *)getNode()->getSymbolReference(),
-                  getNode() ? (uint8_t *)(intptr_t)getNode()->getInlinedSiteIndex() : (uint8_t *)-1,
-                        (TR_ExternalRelocationTargetKind) reloType, cg()),
-                        __FILE__, __LINE__, getNode());
+         TR_RelocationRecordInformation *info = new (comp->trHeapMemory()) TR_RelocationRecordInformation();
+         info->data1 = 0;
+         info->data2 = reinterpret_cast<uintptr_t>(getNode()->getSymbolReference());
+         int16_t inlinedSiteIndex = getNode() ? getNode()->getInlinedSiteIndex() : -1;
+         info->data3 = static_cast<uintptr_t>(inlinedSiteIndex);
+
+         cg()->addExternalRelocation(
+            new (cg()->trHeapMemory()) TR::ExternalRelocation(
+               cursor,
+               reinterpret_cast<uint8_t *>(info),
+               static_cast<TR_ExternalRelocationTargetKind>(reloType),
+               cg()),
+            __FILE__, __LINE__, getNode());
          }
          break;
 
@@ -146,7 +152,6 @@ TR::S390ConstantDataSnippet::addMetaDataForCodeAddress(uint8_t *cursor)
          {
          if (cg()->needRelocationsForStatics())
             {
-            AOTcgDiag3(comp, "add relocation (%d) cursor=%x symbolReference=%x\n", reloType, cursor, getSymbolReference());
             cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor, (uint8_t *) getNode()->getSymbolReference(),
                                      getNode() ? (uint8_t *)(intptr_t)getNode()->getInlinedSiteIndex() : (uint8_t *)-1,
                                                                                    (TR_ExternalRelocationTargetKind) reloType, cg()),
@@ -156,14 +161,12 @@ TR::S390ConstantDataSnippet::addMetaDataForCodeAddress(uint8_t *cursor)
          break;
 
       case TR_ArrayCopyHelper:
-         AOTcgDiag3(comp, "add relocation (%d) cursor=%x symbolReference=%x\n", reloType, cursor, getSymbolReference());
          cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor, (uint8_t *) getSymbolReference(),
                                                                                 (TR_ExternalRelocationTargetKind) reloType, cg()),
                                 __FILE__, __LINE__, getNode());
          break;
 
       case TR_HelperAddress:
-         AOTcgDiag1(comp, "add TR_AbsoluteHelperAddress cursor=%x\n", cursor);
          if (cg()->comp()->target().is64Bit())
             {
             cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor, (uint8_t *) *((uint64_t*) cursor), TR_AbsoluteHelperAddress, cg()),
@@ -178,7 +181,6 @@ TR::S390ConstantDataSnippet::addMetaDataForCodeAddress(uint8_t *cursor)
 
       case TR_AbsoluteMethodAddress:
       case TR_BodyInfoAddress:
-         AOTcgDiag2(comp, "add relocation (%d) cursor=%x\n", reloType, cursor);
          if (cg()->comp()->target().is64Bit())
             {
             cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor, (uint8_t *) *((uint64_t*) cursor),
@@ -194,7 +196,6 @@ TR::S390ConstantDataSnippet::addMetaDataForCodeAddress(uint8_t *cursor)
          break;
 
       case TR_GlobalValue:
-         AOTcgDiag2(comp, "add TR_GlobalValue (countForRecompile) cursor=%x\n", reloType, cursor);
          cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor, (uint8_t *) TR_CountForRecompile,
                                                                                 TR_GlobalValue, cg()),
                                   __FILE__, __LINE__, getNode());
@@ -205,7 +206,6 @@ TR::S390ConstantDataSnippet::addMetaDataForCodeAddress(uint8_t *cursor)
          symbolKind = TR::SymbolType::typeMethod;
          // intentional fall through
       case TR_ClassPointer:
-         AOTcgDiag2(comp, "add relocation (%d) cursor=%x\n", reloType, cursor);
          if (cg()->comp()->getOption(TR_UseSymbolValidationManager))
             {
             TR_ASSERT_FATAL(getDataAs8Bytes(), "Static Sym can not be NULL");
@@ -243,11 +243,28 @@ TR::S390ConstantDataSnippet::addMetaDataForCodeAddress(uint8_t *cursor)
             {
             cg()->comp()->failCompilation<TR::CompilationException>("Could not generate relocation for debug counter in OMR::X86::MemoryReference::addMetaDataForCodeAddress\n");
             }
-         AOTcgDiag3(comp, "add relocation (%d) cursor=%x counter=%x\n", reloType, cursor, counter);
+
          TR::DebugCounter::generateRelocation(cg()->comp(),
                                               cursor,
                                               getNode(),
                                               counter);
+         }
+         break;
+
+      case TR_BlockFrequency:
+         {
+         TR_RelocationRecordInformation *recordInfo = ( TR_RelocationRecordInformation *)comp->trMemory()->allocateMemory(sizeof( TR_RelocationRecordInformation), heapAlloc);
+         recordInfo->data1 = (uintptr_t)getNode()->getSymbolReference();
+         recordInfo->data2 = 0; // seqKind
+         TR::Relocation *relocation = new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor, (uint8_t *)recordInfo, TR_BlockFrequency, cg());
+         cg()->addExternalRelocation(relocation, __FILE__, __LINE__, getNode());
+         }
+         break;
+
+      case TR_RecompQueuedFlag:
+         {
+         TR::Relocation *relocation = new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor, NULL, TR_RecompQueuedFlag, cg());
+         cg()->addExternalRelocation(relocation, __FILE__, __LINE__, getNode());
          }
          break;
 
@@ -257,15 +274,15 @@ TR::S390ConstantDataSnippet::addMetaDataForCodeAddress(uint8_t *cursor)
 
    if (comp->getOption(TR_EnableHCR))
       {
-      if (std::find(comp->getSnippetsToBePatchedOnClassRedefinition()->begin(), comp->getSnippetsToBePatchedOnClassRedefinition()->end(), this) != comp->getSnippetsToBePatchedOnClassRedefinition()->end())
+      if (std::find(cg()->getSnippetsToBePatchedOnClassRedefinition()->begin(), cg()->getSnippetsToBePatchedOnClassRedefinition()->end(), this) != cg()->getSnippetsToBePatchedOnClassRedefinition()->end())
          {
          cg()->jitAddPicToPatchOnClassRedefinition(((void *) (*(uintptr_t *) cursor)), (void *) (uintptr_t *) cursor);
          }
 
-      if (std::find(comp->getSnippetsToBePatchedOnClassUnload()->begin(), comp->getSnippetsToBePatchedOnClassUnload()->end(), this) != comp->getSnippetsToBePatchedOnClassUnload()->end())
+      if (std::find(cg()->getSnippetsToBePatchedOnClassUnload()->begin(), cg()->getSnippetsToBePatchedOnClassUnload()->end(), this) != cg()->getSnippetsToBePatchedOnClassUnload()->end())
          cg()->jitAddPicToPatchOnClassUnload(((void *) (*(uintptr_t *) cursor)), (void *) (uintptr_t *) cursor);
 
-      if (std::find(comp->getMethodSnippetsToBePatchedOnClassUnload()->begin(), comp->getMethodSnippetsToBePatchedOnClassUnload()->end(), this) != comp->getMethodSnippetsToBePatchedOnClassUnload()->end())
+      if (std::find(cg()->getMethodSnippetsToBePatchedOnClassUnload()->begin(), cg()->getMethodSnippetsToBePatchedOnClassUnload()->end(), this) != cg()->getMethodSnippetsToBePatchedOnClassUnload()->end())
          {
          void *classPointer = (void *) cg()->fe()->createResolvedMethod(cg()->trMemory(), (TR_OpaqueMethodBlock *) (*(uintptr_t *) cursor), comp->getCurrentMethod())->classOfMethod();
          cg()->jitAddPicToPatchOnClassUnload(classPointer, (void *) (uintptr_t *) cursor);
@@ -273,12 +290,12 @@ TR::S390ConstantDataSnippet::addMetaDataForCodeAddress(uint8_t *cursor)
       }
    else
       {
-      if (std::find(comp->getSnippetsToBePatchedOnClassUnload()->begin(), comp->getSnippetsToBePatchedOnClassUnload()->end(), this) != comp->getSnippetsToBePatchedOnClassUnload()->end())
+      if (std::find(cg()->getSnippetsToBePatchedOnClassUnload()->begin(), cg()->getSnippetsToBePatchedOnClassUnload()->end(), this) != cg()->getSnippetsToBePatchedOnClassUnload()->end())
          {
          cg()->jitAddPicToPatchOnClassUnload(((void *) (*(uintptr_t *) cursor)), (void *) (uintptr_t *) cursor);
          }
 
-      if (std::find(comp->getMethodSnippetsToBePatchedOnClassUnload()->begin(), comp->getMethodSnippetsToBePatchedOnClassUnload()->end(), this) != comp->getMethodSnippetsToBePatchedOnClassUnload()->end())
+      if (std::find(cg()->getMethodSnippetsToBePatchedOnClassUnload()->begin(), cg()->getMethodSnippetsToBePatchedOnClassUnload()->end(), this) != cg()->getMethodSnippetsToBePatchedOnClassUnload()->end())
          {
          void *classPointer = (void *) cg()->fe()->createResolvedMethod(cg()->trMemory(), (TR_OpaqueMethodBlock *) (*(uintptr_t *) cursor), comp->getCurrentMethod())->classOfMethod();
          cg()->jitAddPicToPatchOnClassUnload(classPointer, (void *) (uintptr_t *) cursor);
@@ -310,13 +327,10 @@ TR::S390ConstantDataSnippet::emitSnippetBody()
    uint8_t * cursor = cg()->getBinaryBufferCursor();
    TR::Compilation *comp = cg()->comp();
 
-   AOTcgDiag1(comp, "TR::S390ConstantDataSnippet::emitSnippetBody cursor=%x\n", cursor);
    getSnippetLabel()->setCodeLocation(cursor);
    memcpy(cursor, &_value, _length);
 
    uint32_t reloType = getReloType();
-
-   AOTcgDiag6(comp, "this=%p cursor=%p node=%p value=%p length=%x reloType=%x\n", this, cursor, getNode(), *((int*)cursor), _length, reloType);
 
    switch (reloType)
       {

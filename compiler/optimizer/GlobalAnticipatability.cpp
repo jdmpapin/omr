@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -171,7 +171,7 @@ static bool nodeCanSurvive(TR::Node *nextNode, TR::Node *lastNodeFirstChild, TR:
    {
    if (isFieldAccess(nextNode))
       {
-      int32_t similarOffset = -1;
+      intptr_t similarOffset = -1;
       bool seenSimilarAccess = false;
       TR::Node *firstChild = nextNode->getFirstChild();
       if (lastNodeFirstChild)
@@ -217,7 +217,7 @@ static bool nodeCanSurvive(TR::Node *nextNode, TR::Node *lastNodeFirstChild, TR:
          const char *otherSig = otherSymRef->getOwningMethod(comp)->classNameOfFieldOrStatic(otherSymRef->getCPIndex(), otherLen);
          if (otherSig)
             {
-            otherSig = classNameToSignature(otherSig, otherLen, comp);
+            otherSig = TR::Compiler->cls.classNameToSignature(otherSig, otherLen, comp);
             otherClassObject = comp->fe()->getClassFromSignature(otherSig, otherLen, otherSymRef->getOwningMethod(comp));
             }
 
@@ -341,7 +341,6 @@ void TR_GlobalAnticipatability::analyzeTreeTopsInBlockStructure(TR_BlockStructur
       {
       // Ignore the effect of cold blocks on anticipatability
       //
-      TR::CFGEdge *edge;
       TR::Block   *next;
       bool hasNonColdSuccessor = false;
       bool analyzedSucc = true;

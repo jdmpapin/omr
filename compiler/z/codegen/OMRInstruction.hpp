@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -49,7 +49,6 @@ namespace OMR { typedef OMR::Z::Instruction InstructionConnector; }
 
 class TR_Debug;
 namespace TR { class S390ImmInstruction; }
-class TR_S390RegisterDependencyGroup;
 namespace TR { class CodeGenerator; }
 namespace TR { class Instruction; }
 namespace TR { class MemoryReference; }
@@ -82,10 +81,6 @@ class OMR_EXTENSIBLE Instruction : public OMR::Instruction
    void initialize(TR::Instruction * precedingInstruction = NULL, bool instFlag = false, TR::RegisterDependencyConditions * cond = NULL, bool condFlag = false);
 
    public:
-
-   //  Basic Block Index Routines
-   int32_t getBlockIndex() { return _blockIndex; }
-   void setBlockIndex(int32_t i) { _blockIndex = i; }
 
    //  Register Dependency Routines
    TR::RegisterDependencyConditions* getDependencyConditions() {return _conditions;}
@@ -183,7 +178,6 @@ class OMR_EXTENSIBLE Instruction : public OMR::Instruction
    virtual bool isLabel()             { return _opcode.isLabel() > 0; }
    virtual bool isFloat()             { return _opcode.singleFPOp() > 0 || _opcode.doubleFPOp() > 0; }
    virtual bool isAdmin()             { return _opcode.isAdmin() > 0; }
-   virtual bool isDebugFence()        { return false; }
 
    virtual bool is4ByteLoad();
    virtual bool isRet();
@@ -252,7 +246,6 @@ class OMR_EXTENSIBLE Instruction : public OMR::Instruction
 
    private:
 
-   int32_t       _blockIndex;
    TR::RegisterDependencyConditions *_conditions;
 
    enum // _flags

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -37,6 +37,7 @@ namespace OMR { typedef OMR::Node NodeConnector; }
 #include <string.h>
 #include "codegen/RegisterConstants.hpp"
 #include "cs2/hashtab.h"
+#include "env/KnownObjectTable.hpp"
 #include "env/TRMemory.hpp"
 #include "il/DataTypes.hpp"
 #include "il/ILOpCodes.hpp"
@@ -49,7 +50,6 @@ namespace OMR { typedef OMR::Node NodeConnector; }
 
 class TR_BitVector;
 class TR_Debug;
-class TR_DebugExt;
 class TR_UseOnlyAliasSetInterface;
 class TR_UseDefAliasSetInterface;
 class TR_OpaqueClassBlock;
@@ -301,7 +301,7 @@ public:
    /**
     * \brief
     *    Create a call to eaEscapeHelperSymbol
-    * 
+    *
     * \parm originatingByteCodeNode The node whose bytecode info is used to create the call
     */
    static TR::Node *createEAEscapeHelperCall(TR::Node *originatingByteCodeNode, int32_t numChildren);
@@ -347,9 +347,6 @@ public:
    static TR::Node *createAddConstantToAddress(TR::Node * addr, intptr_t value, TR::Node * parent = NULL);
    static TR::Node *createLiteralPoolAddress(TR::Node *node, size_t offset);
 
-   static TR::Node *createVectorConst(TR::Node *originatingByteCodeNode, TR::DataType dt);
-   static TR::Node *createVectorConversion(TR::Node *src, TR::DataType trgType);
-
 /**
  * Private constructor helpers
  */
@@ -364,60 +361,8 @@ private:
       TR::ILOpCode opcode; opcode.setOpCodeValue(opvalue);
       TR_ASSERT(!opcode.isIf(), "use createif or createbranch on this node\n");
       TR_ASSERT(opvalue != TR::arraycopy, "use createArraycopy to create this node");
-      TR_ASSERT(opvalue != TR::v2v, "use createVectorConversion to create node: %s", opcode.getName());
-      TR_ASSERT(opvalue != TR::vconst, "use createVectorConst to create node: %s", opcode.getName());
       return true;
       }
-      
-   static bool isNotDeprecatedUnsigned(TR::ILOpCodes opvalue)
-      {
-      switch (opvalue) 
-         {
-         //Add and Subtract
-         case TR::aiuadd: 
-         case TR::aluadd: 
-         case TR::buadd: 
-         case TR::busub: 
-         case TR::cadd:
-         case TR::csub: 
-         case TR::iuadd: 
-         case TR::iuneg: 
-         case TR::iusub: 
-         case TR::luadd: 
-         case TR::luneg: 
-         case TR::lusub:
-
-         //Load
-         case TR::buload:
-         case TR::buloadi:
-         case TR::cload:
-         case TR::cloadi:
-         case TR::iuload:
-         case TR::iuloadi:
-         case TR::iuRegLoad:
-         case TR::luload:
-         case TR::luloadi:
-         case TR::luRegLoad:
-
-         //Store
-         case TR::bustore:
-         case TR::bustorei:
-         case TR::cstore:
-         case TR::cstorei:
-         case TR::iuRegStore:
-         case TR::iustore:
-         case TR::iustorei:
-         case TR::luRegStore:
-         case TR::lustore:
-         case TR::lustorei:
-         
-            return false;
-            
-         default: 
-            return true;
-         }
-      }
-
 
 /**
  * Public functions
@@ -503,7 +448,7 @@ public:
    /// isTernaryHigh is now deprecated. Use isSelectHigh instead.
    ///
    bool                   isTernaryHigh();
-   
+
    /// Whether this node is the high or low part of a "dual", in cyclic representation.
    /// ie it represents a composite operator, together with its pair.
    /// The node and its pair have each other as its third child, completing the cycle.
@@ -598,12 +543,6 @@ public:
     */
    bool                   isEAEscapeHelperCall();
 
-   // A common query used by the optimizer
-   inline bool            isSingleRef();
-
-   // A common query used by the code generators
-   inline bool            isSingleRefUnevaluated();
-
    TR_YesNoMaybe          hasBeenRun();
 
    /// Given a monenter node, return the persistent class identifer that's being synchronized
@@ -641,25 +580,25 @@ public:
 
    /** \brief
     *  Used to get the ram method from the Bytecode Info.
-    * 
+    *
     *  \param *comp
     *  _compilation of type TR::Compilation
-    * 
-    *  @return 
+    *
+    *  @return
     *  Returns the ram method (TR_OpaqueMethodBlock)  from function call getOwningMethod(TR::Compilation *comp, TR_ByteCodeInfo &bcInfo)
     */
    TR_OpaqueMethodBlock* getOwningMethod(TR::Compilation *comp);
 
    /** \brief
     *  Used to get the ram method from the Bytecode Info.
-    * 
+    *
     *  \param *comp
     *  _compilation of type TR::Compilation
-    * 
-    *  \param &bcInfo 
-    *  _byteCodeInfo of a node of type TR::Node  
-    * 
-    *  @return 
+    *
+    *  \param &bcInfo
+    *  _byteCodeInfo of a node of type TR::Node
+    *
+    *  @return
     *  Returns the ram method (TR_OpaqueMethodBlock)
     */
    static TR_OpaqueMethodBlock* getOwningMethod(TR::Compilation *comp, TR_ByteCodeInfo &bcInfo);
@@ -873,6 +812,24 @@ public:
    inline scount_t setLocalIndex(scount_t li);
    inline scount_t incLocalIndex();
    inline scount_t decLocalIndex();
+
+   /**
+    * @brief Sets a known object index on this node
+    * @param[in] koi : the known object index
+    */
+   void setKnownObjectIndex(TR::KnownObjectTable::Index koi) { _knownObjectIndex = koi; }
+
+   /**
+    * @brief Retrieve the known object index associated with this node, if any.
+    * @return Known object index, or TR::KnownObjectTable::UNKNOWN if none.
+    */
+   TR::KnownObjectTable::Index getKnownObjectIndex() { return _knownObjectIndex; }
+
+   /**
+    * @brief Inquires whether this node has a known object index associated with it.
+    * @return true if a known object index is cached; false otherwise.
+    */
+   bool hasKnownObjectIndex() { return _knownObjectIndex != TR::KnownObjectTable::UNKNOWN; }
 
    inline scount_t getFutureUseCount();
    inline scount_t setFutureUseCount(scount_t li);
@@ -1386,12 +1343,6 @@ public:
    void setSkipSignExtension(bool b);
    const char * printSkipSignExtension();
 
-   // Flag used by FP regLoad/regStore
-   bool needsPrecisionAdjustment();
-   void setNeedsPrecisionAdjustment(bool v);
-   bool chkNeedsPrecisionAdjustment();
-   const char * printNeedsPrecisionAdjustment();
-
    // Flag used by TR_if or TR::istore/TR::iRegStore or TR::iadd, TR::ladd, TR::isub, TR::lsub
    bool isUseBranchOnCount();
    void setIsUseBranchOnCount(bool v);
@@ -1698,8 +1649,8 @@ public:
    bool chkOpsNodeRequiresConditionCodes();
    const char *printRequiresConditionCodes();
 
-   // Clear out relevant flags set on the node.
-   void resetFlagsForCodeMotion();
+   // Clear out relevant flags and properties set on the node.
+   void resetFlagsAndPropertiesForCodeMotion();
 
    /**
     * Node flags functions end
@@ -1896,6 +1847,15 @@ protected:
    /// References to this node.
    rcount_t _referenceCount;
 
+   /// Known object index associated with this node, if any.
+   ///
+   /// This field allows for more accurate placement of known object information
+   /// as it applies to a particular node.
+   ///
+   /// If no such information is available this field is TR::KnownObjectTable::UNKNOWN
+   ///
+   TR::KnownObjectTable::Index _knownObjectIndex;
+
    UnionA                 _unionA;
 
    /// Elements unioned with children.
@@ -1910,7 +1870,6 @@ private:
    TR::Node * getExtendedChild(int32_t c);
    TR_YesNoMaybe computeIsCollectedReferenceImpl(TR::NodeChecklist &processedNodesCollected, TR::NodeChecklist &processedNodesNotCollected);
 
-   friend class ::TR_DebugExt;
    friend class TR::NodePool;
 
 
@@ -2023,7 +1982,7 @@ protected:
       arraycopyDirectionForward             = 0x00004000,
       arraycopyDirectionForwardRarePath     = 0x00006000,
       noArrayStoreCheckArrayCopy            = 0x00008000,
-      arraysetLengthMultipleOfPointerSize   = 0x00020000, ///< flag used by TR::arrayset to guarantee that checking for lengths smaller than pointer size is not needed (leading to more efficient code being generated, e.g. REP STOSQ on X86
+      arraysetLengthMultipleOfPointerSize   = 0x00020000, ///< flag used by TR::arrayset to guarantee that checking for lengths smaller than pointer size is not needed (leading to more efficient code being generated, e.g. REP TR::InstOpCode::STOSQ on X86
 
       // Flags used by TR::bitOpMem
       bitOpMemOPMASK                        = 0x00003000, ///< currently, XOR, AND, OR operations are suppoerted
@@ -2058,7 +2017,7 @@ protected:
        *     Represents that a load must be sign/zero extended to a particular width at the point of evaluation.
        *
        *  \details
-       *     This flag is used by load nodes to signal the code generator to emit a load and sign/zero extend 
+       *     This flag is used by load nodes to signal the code generator to emit a load and sign/zero extend
        *     instructions for the evaluation of this particular load. These flags are used in conjunction with the
        *     unneededConv flag to avoid sign/zero extension conversions which the respective load feeds into.
        */
@@ -2176,7 +2135,6 @@ protected:
       unneededConv                          = 0x00000400, ///< Flag used by TR::x2y
       ParentSupportsLazyClobber             = 0x00002000, ///< Tactical x86 codegen flag.  Only when refcount <= 1.  Indicates that parent will consult the register's node count before clobbering it (not just the node's refcount).
 
-      // Flag used by float to fixed conversion nodes e.g. f2i/f2pd/d2i/df2i/f2l/d2l/f2s/d2pd etc
       callForFloatToFixedConversion         = 0x00400000,
 
       // Flags used by TR::fence

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -162,7 +162,7 @@ enum ProfilingMode
    void addDebug(const char * string);
 #else
    #define diagnostic(msg, ...) ((void)0)
-   #define debug(option)      0
+   #define debug(option)      NULL
    #define addDebug(string)   ((void)0)
 #endif
 
@@ -287,7 +287,10 @@ namespace OMR
 
 class OMR_EXTENSIBLE Compilation
    {
-   friend class ::TR_DebugExt;
+protected:
+
+   inline TR::Compilation *self();
+
 public:
 
    TR_ALLOC(TR_Memory::Compilation)
@@ -309,7 +312,7 @@ public:
 
    ~Compilation() throw();
 
-   inline TR::Compilation *self();
+
 
    TR::Region &region() { return _heapMemoryRegion; }
 
@@ -342,6 +345,12 @@ public:
    // return true, for example, for ahead-of-time compilations.
    //
    bool compileRelocatableCode() { return false; }
+
+   // Is this compilation producing portable code?  This should generally
+   // return true, for example, for compilations to be used in a
+   // snapshot/restore setting.
+   //
+   bool compilePortableCode() { return false; }
 
    // Maximum number of internal pointers that can be managed.
    //
@@ -419,7 +428,6 @@ public:
    TR::Allocator allocator(const char *name = NULL) { return TR::Allocator(_allocator); }
 
    TR_ArenaAllocator  *arenaAllocator() { return &_arenaAllocator; }
-   void setAllocatorName(const char *name) { _allocatorName = name; }
 
    TR_OpaqueMethodBlock *getMethodFromNode(TR::Node * node);
    int32_t getLineNumber(TR::Node *);
@@ -427,7 +435,7 @@ public:
 
    bool useRegisterMaps();
 
-   bool suppressAllocationInlining()      {return _options->getOption(TR_DisableAllocationInlining) || _options->getOption(TR_OptimizeForSpace);}
+   bool suppressAllocationInlining()      {return _options->getOption(TR_DisableAllocationInlining);}
 
    // ==========================================================================
    // OMR utility
@@ -562,9 +570,7 @@ public:
 
    bool isPICSite(TR::Instruction *instruction);
 
-   TR::list<TR::Snippet*> *getSnippetsToBePatchedOnClassUnload() { return &_snippetsToBePatchedOnClassUnload; }
-   TR::list<TR::Snippet*> *getMethodSnippetsToBePatchedOnClassUnload() { return &_methodSnippetsToBePatchedOnClassUnload; }
-   TR::list<TR::Snippet*> *getSnippetsToBePatchedOnClassRedefinition() { return &_snippetsToBePatchedOnClassRedefinition; }
+   TR::list<TR::Snippet*> *getSnippetsToBePatchedOnClassRedefinition();
 
    TR_RegisterCandidates *getGlobalRegisterCandidates() { return _globalRegisterCandidates; }
    void setGlobalRegisterCandidates(TR_RegisterCandidates *t) { _globalRegisterCandidates = t; }
@@ -617,7 +623,6 @@ public:
    uint16_t getMaxInlineDepth() {return _maxInlineDepth;}
    bool incInlineDepth(TR::ResolvedMethodSymbol *, TR::Node *callNode, bool directCall, TR_VirtualGuardSelection *guard, TR_OpaqueClassBlock *receiverClass, TR_PrexArgInfo *argInfo = 0);
    bool incInlineDepth(TR::ResolvedMethodSymbol *, TR_ByteCodeInfo &, int32_t cpIndex, TR::SymbolReference *callSymRef, bool directCall, TR_PrexArgInfo *argInfo = 0);
-   bool incInlineDepth(TR_OpaqueMethodBlock *, TR::ResolvedMethodSymbol *, TR_ByteCodeInfo &, TR::SymbolReference *callSymRef, bool directCall, TR_PrexArgInfo *argInfo = 0);
    void decInlineDepth(bool removeInlinedCallSitesEntries = false);
    int16_t  adjustInlineDepth(TR_ByteCodeInfo & bcInfo);
    void     resetInlineDepth();
@@ -627,6 +632,11 @@ public:
    int32_t getInlinedCalls() { return _inlinedCalls; }
    void incInlinedCalls() { _inlinedCalls++; }
 
+
+protected:
+   bool incInlineDepth(TR_OpaqueMethodBlock *, TR::ResolvedMethodSymbol *, TR_ByteCodeInfo &, TR::SymbolReference *callSymRef, bool directCall, TR_PrexArgInfo *argInfo, TR_AOTMethodInfo *aotMethodInfo);
+
+public:
    TR_ExternalRelocationTargetKind getReloTypeForMethodToBeInlined(TR_VirtualGuardSelection *guard, TR::Node *callNode, TR_OpaqueClassBlock *receiverClass) { return TR_NoRelocation; }
 
    class TR_InlinedCallSiteInfo
@@ -637,17 +647,24 @@ public:
       int32_t *_osrCallSiteRematTable;
       bool _directCall;
       bool _cannotAttemptOSRDuring;
+      TR_AOTMethodInfo *_aotMethodInfo;
 
       public:
 
-      TR_InlinedCallSiteInfo(TR_OpaqueMethodBlock *methodInfo,
+      TR_InlinedCallSiteInfo(TR_OpaqueMethodBlock *method,
                              TR_ByteCodeInfo &bcInfo,
                              TR::ResolvedMethodSymbol *resolvedMethod,
                              TR::SymbolReference *callSymRef,
-                             bool directCall):
-         _resolvedMethod(resolvedMethod), _callSymRef(callSymRef), _directCall(directCall), _osrCallSiteRematTable(0), _cannotAttemptOSRDuring(false)
+                             bool directCall,
+                             TR_AOTMethodInfo *aotMethodInfo = NULL):
+         _resolvedMethod(resolvedMethod),
+         _callSymRef(callSymRef),
+         _directCall(directCall),
+         _osrCallSiteRematTable(0),
+         _cannotAttemptOSRDuring(false),
+         _aotMethodInfo(aotMethodInfo)
          {
-         _site._methodInfo = methodInfo;
+         _site._methodInfo = method;
          _site._byteCodeInfo = bcInfo;
          }
 
@@ -660,6 +677,7 @@ public:
       bool directCall() { return _directCall; }
       bool cannotAttemptOSRDuring() { return _cannotAttemptOSRDuring; }
       void setCannotAttemptOSRDuring(bool cannotOSR) { _cannotAttemptOSRDuring = cannotOSR; }
+      TR_AOTMethodInfo *aotMethodInfo() { return _aotMethodInfo; }
       };
 
    uint32_t getNumInlinedCallSites();
@@ -674,6 +692,7 @@ public:
    bool isInlinedDirectCall(uint32_t index);
    bool cannotAttemptOSRDuring(uint32_t index);
    void setCannotAttemptOSRDuring(uint32_t index, bool cannot);
+   TR_AOTMethodInfo *getInlinedAOTMethodInfo(uint32_t index);
 
    TR_InlinedCallSite *getCurrentInlinedCallSite();
    int32_t getCurrentInlinedSiteIndex();
@@ -963,9 +982,6 @@ public:
    void setHasMethodHandleInvoke() { _flags.set(HasMethodHandleInvoke); }
    bool getHasMethodHandleInvoke() { return _flags.testAny(HasMethodHandleInvoke); }
 
-   bool supressEarlyInlining() { return _noEarlyInline; }
-   void setSupressEarlyInlining(bool b) { _noEarlyInline = b; }
-
    void setHasColdBlocks()
       {
       _flags.set(HasColdBlocks);
@@ -993,8 +1009,6 @@ public:
       return _flags.testAny(GenerateReadOnlyCode);
       }
 
-   TR::ResolvedMethodSymbol *createJittedMethodSymbol(TR_ResolvedMethod *resolvedMethod);
-
    bool isGPUCompilation() { return _flags.testAny(IsGPUCompilation);}
 
 #ifdef J9_PROJECT_SPECIFIC
@@ -1003,10 +1017,6 @@ public:
 #endif
 
    bool isGPUCompileCPUCode() { return _flags.testAny(IsGPUCompileCPUCode);}
-   void setGPUBlockDimX(int32_t dim) { _gpuBlockDimX = dim; }
-   int32_t getGPUBlockDimX() { return _gpuBlockDimX; }
-   void setGPUParms(void * parms) { _gpuParms = parms; }
-   void *getGPUParms() { return _gpuParms; }
    ListHeadAndTail<char*>& getGPUPtxList() { return _gpuPtxList; }
    ListHeadAndTail<int32_t>& getGPUKernelLineNumberList() { return _gpuKernelLineNumberList; } //TODO: fix to get real line numbers
    void incGPUPtxCount() { _gpuPtxCount++; }
@@ -1181,7 +1191,6 @@ protected:
 private:
    TR_ResolvedMethod                 *_method; // must be declared before _flowGraph
    TR_ArenaAllocator                 _arenaAllocator;
-   const char *                      _allocatorName;
    TR::Region                        _aliasRegion;
 
 
@@ -1213,19 +1222,12 @@ private:
    TR::list<TR::Instruction*>               _staticPICSites;
    TR::list<TR::Instruction*>               _staticHCRPICSites;
    TR::list<TR::Instruction*>               _staticMethodPICSites;
-   TR::list<TR::Snippet*>                   _snippetsToBePatchedOnClassUnload;
-   TR::list<TR::Snippet*>                   _methodSnippetsToBePatchedOnClassUnload;
-   TR::list<TR::Snippet*>                   _snippetsToBePatchedOnClassRedefinition;
-
    TR::list<TR::ResolvedMethodSymbol*>      _genILSyms;
 
    TR::SymbolReferenceTable*            _symRefTab;
 
-   bool                               _noEarlyInline;
-
    TR_ReturnInfo                      _returnInfo;
 
-private:
    vcount_t                           _visitCount;
    ncount_t                           _nodeCount;               // _nodeCount is a global count of number of created nodes
    ncount_t                           _accurateNodeCount;       // this number is the current number of nodes in the trees. it can go stale
@@ -1313,8 +1315,6 @@ private:
 
    TR::IlVerifier                    *_ilVerifier;
 
-   int32_t _gpuBlockDimX;
-   void * _gpuParms;
    ListHeadAndTail<char*> _gpuPtxList;
    ListHeadAndTail<int32_t> _gpuKernelLineNumberList; //TODO: fix to get real line numbers
    int32_t _gpuPtxCount;

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -436,7 +436,7 @@ int32_t TR_PartialRedundancy::perform()
          }
       }
 
-   // Perform expression dominance and redundant expression adjustment
+   // Perform exception check motion and redundant expression adjustment
    // to obtain 'real' solution for checks. Solution till this point is
    // optimistic in that it ignores exception-ordering constraints in Java.
    // This step figures out if code motion for checks can in fact be done.
@@ -500,7 +500,7 @@ int32_t TR_PartialRedundancy::perform()
       if (nextRedundantComputation != 0)
          {
          supportedNodesAsArray[nextRedundantComputation] =  supportedNodesAsArray[nextRedundantComputation]->duplicateTreeWithCommoning(comp()->allocator());
-         supportedNodesAsArray[nextRedundantComputation]->resetFlagsForCodeMotion();
+         supportedNodesAsArray[nextRedundantComputation]->resetFlagsAndPropertiesForCodeMotion();
          }
       }
 
@@ -612,7 +612,7 @@ int32_t TR_PartialRedundancy::perform()
                    weight = weight * nextNode->getFrequency();
 
                 if (trace())
-                   traceMsg(comp(), "Benefit block_%d benefit %d\n", nextNode->getNumber(), weight);
+                   traceMsg(comp(), "Benefit block_%d benefit %d expr %d\n", nextNode->getNumber(), weight, nextOptimalComputation);
                 benefit = benefit + weight;
                 }
 
@@ -625,17 +625,9 @@ int32_t TR_PartialRedundancy::perform()
                    weight = weight * nextNode->getFrequency();
 
                 if (trace())
-                   traceMsg(comp(), "Cost block_%d cost %d\n", nextNode->getNumber(), weight);
+                   traceMsg(comp(), "Cost block_%d cost %d expr %d\n", nextNode->getNumber(), weight, nextOptimalComputation);
                 cost = cost + weight;
                 }
-             }
-
-          if (((_rednSetInfo[nextNode->getNumber()]->get(nextOptimalComputation)) ||
-          	   (_optSetInfo[nextNode->getNumber()]->get(nextOptimalComputation))) &&
-              (
-              false ))
-             {
-             invalidateOptimalComputation(nextOptimalComputation);
              }
           }
 
@@ -1553,7 +1545,7 @@ static bool isExpressionRedundant(TR::Node *node, TR_PartialRedundancy::Containe
        redundantComputations->get(node->getLocalIndex()) &&
        (node->getOpCode().isStore() || anticipatable->get(node->getLocalIndex())))
      {
-     if (node->getLocalIndex() < preIndex2)
+     if (node->getLocalIndex() < unsigned(preIndex2))
         return true;
      }
    return false;
@@ -1846,28 +1838,6 @@ void TR_PartialRedundancy::eliminateRedundantComputations(TR::Block *block, TR::
       if (_exceptionCheckMotion)
          _profilingWalk = false;
       }
-
-#if 0
-   // No need to walk trees again since we already walked through all of them
-   if (!walkedTreesAtLeastOnce)
-      {
-      TR::TreeTop *currentTree = startTree;
-      TR::TreeTop *exitTree = block->getExit();
-      vcount_t visitCount = comp()->incOrResetVisitCount();
-      while (currentTree != exitTree)
-         {
-         TR::ILOpCode &firstOpCodeInTree = currentTree->getNode()->getOpCode();
-
-         // Try to profile some exprs
-         //
-         if (!block->isCold())
-            eliminateRedundantSupportedNodes(NULL, currentTree->getNode(), false, currentTree, block->getNumber(), visitCount, NULL, anticipatabilityInfo, supportedNodesAsArray);
-
-         currentTree = currentTree->getNextTreeTop();
-         }
-      }
-#endif
-
    }
 
 
@@ -1985,20 +1955,7 @@ bool TR_PartialRedundancy::eliminateRedundantSupportedNodes(TR::Node *parent, TR
                 (currentNode->getOpCodeValue() == TR::treetop))
                currentNode = currentNode->getFirstChild();
 
-            static char *profileLongParms = feGetEnv("TR_ProfileLongParms");
-            if ((node->getType().isInt64()) &&
-                profileLongParms)
-               {
-               // Switch this compile to profiling comp() in case a
-               // potential opportunity is seen for specializing long autos is seen;
-               // in this case aggressively try to profile and recompile (reduced
-               // the profiling count)
-               //
-               if (comp()->getMethodHotness() == hot &&
-                   comp()->getRecompilationInfo())
-                  optimizer()->switchToProfiling();
-               }
-            else if (!node->getType().isInt64())
+            if (!node->getType().isInt64())
                {
                TR::ILOpCode &currentOpCode = currentNode->getOpCode();
                if (currentOpCode.isBranch() ||
@@ -2106,9 +2063,10 @@ bool TR_PartialRedundancy::eliminateRedundantSupportedNodes(TR::Node *parent, TR
                      TR::Node *newLoad = TR::Node::createWithSymRef(node, comp()->il.opCodeForDirectLoad(node->getDataType()), 0, newSymbolReference);
 
                      TR::ILOpCodes conversionOpCode = TR::ILOpCode::getProperConversion(newLoad->getDataType(), node->getDataType(), false /* !wantZeroExtension */);
-                     if (conversionOpCode == TR::v2v)
+                     if (TR::ILOpCode::isVectorOpCode(conversionOpCode) &&
+                         TR::ILOpCode::getVectorOperation(conversionOpCode) == TR::vcast)
                         {
-                        node = TR::Node::createVectorConversion(newLoad, node->getDataType());
+                        node = TR::Node::create(TR::ILOpCode::createVectorOpCode(TR::vcast, newLoad->getDataType(), node->getDataType()), 1, newLoad);
                         }
                      else
                         {
@@ -2305,7 +2263,7 @@ TR_ExceptionCheckMotion::TR_ExceptionCheckMotion(TR::Compilation *comp, TR::Opti
       //
       // Conservatively this is the maximum number of elements
       // that could possibly be in the actual optimal set for this
-      // block after expression dominance. All elements in optimistic opt
+      // block after exception check motion. All elements in optimistic opt
       // list info can obviously be there and elements in redundant list
       // may also be there eventually if they could NOT be moved to the
       // program point that is optimal (according to PRE) because of expression
@@ -2445,7 +2403,7 @@ int32_t TR_ExceptionCheckMotion::perform()
    _tryAnotherIteration = true;
    _trySecondBestSolution = false;
    //
-   // Try at most NUM_ITERATIONS iterations of expression dominance and redundant expression
+   // Try at most NUM_ITERATIONS iterations of exception check motion and redundant expression
    // adjustment; basically keep iterating till some list changes
    // If there is no change in less than NUM_ITERATIONS iterations we will
    // detect that we have a converged solution and return
@@ -2516,7 +2474,7 @@ int32_t TR_ExceptionCheckMotion::perform()
          exprsNotRedundant->empty();
          }
 
-      // Actually do the expression dominance analysis
+      // Actually do the exception check motion
       //
       bool redundantSetAdjustmentRequired = false;
       initializeGenAndKillSetInfo();
@@ -2564,7 +2522,7 @@ int32_t TR_ExceptionCheckMotion::perform()
 
          // Now add the other optimal expressions for this block
          // (dependent on ordering) as computed by this iteration of
-         // expression dominance
+         // exception check motion
          //
         if (_orderedOptList[i] != NULL)
             {
@@ -2588,7 +2546,7 @@ int32_t TR_ExceptionCheckMotion::perform()
 
         // If there is a difference between the optimistic optimal info
         // computed by PRE and the actual optimal info computed as a result of applying
-        // expression ordering constraints in expression dominance, then
+        // expression ordering constraints in exception check motion, then
         // we need to adjust the optimistic redundant set info for some blocks
         // as some expression(s) that were assumed to be optimal in this block
         // are no longer optimal
@@ -2605,7 +2563,7 @@ int32_t TR_ExceptionCheckMotion::perform()
       // that dominate other blocks where it is redundant
       //
       // We also compute global register assignment info in this final pass
-      // before leaving expression dominance; this uses the
+      // before leaving exception check motion; this uses the
       // availability information computed by redundant expression
       // adjustment
       //
@@ -4938,7 +4896,7 @@ bool TR_ExceptionCheckMotion::analyzeBlockStructure(TR_BlockStructure *blockStru
    // We are now ready to add whichever expressions are optimal in this block
    // into the ordered opt list for this block. Note that there may be some
    // elements in the ordered opt list for this block already (from prev
-   // iterations of expression dominance) in which case we would like to append the
+   // iterations of exception check motion) in which case we would like to append the
    // current solution to the already existing opt list. Also we would like
    // to prune the ordered list going out of this block (OUT in dataflow terms)
    // based on the check expressions already in the ordered opt list for this block; this
@@ -6056,7 +6014,7 @@ void TR_RedundantExpressionAdjustment::analyzeNode(TR::Node *, vcount_t, TR_Bloc
 
 // Analysis for adjusting the redundant info sets corresponding to the dynamic
 // changes being made to the optimal info sets (because of expression ordering
-// constraints). Done after each iteration of expression dominance to keep the
+// constraints). Done after each iteration of exception check motion to keep the
 // optimal/redundant sets correct at each stage of the iterative process
 //
 TR_RedundantExpressionAdjustment::TR_RedundantExpressionAdjustment(TR::Compilation *comp, TR::Optimizer *optimizer, TR_Structure *rootStructure, TR_ExceptionCheckMotion *exceptionCheckMotion)

@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2020, 2020 IBM Corp. and others
+# Copyright (c) 2020, 2022 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -31,6 +31,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(COMPCGTEST_FILES
 	main.cpp
+	CodeGenTest.cpp
 )
 
 if(OMR_ARCH_POWER)
@@ -41,6 +42,17 @@ if(OMR_ARCH_POWER)
 	)
 endif()
 
+if(OMR_ARCH_X86)
+	list(APPEND COMPCGTEST_FILES
+		x/BinaryEncoder.cpp
+	)
+endif()
+
+if(OMR_ARCH_AARCH64)
+	list(APPEND COMPCGTEST_FILES
+		aarch64/BinaryEncoder.cpp
+	)
+endif()
 
 list(APPEND COMPCGTEST_FILES
 	abstractinterpreter/AbsInterpreterTest.cpp
@@ -64,7 +76,7 @@ target_link_libraries(compunittest
 
 set_property(TARGET compunittest PROPERTY FOLDER fvtest)
 
-add_test(
+omr_add_test(
 	NAME compunittest
-	COMMAND compunittest --gtest_color=yes --gtest_output=xml:${CMAKE_CURRENT_BINARY_DIR}/compunittest-results.xml
+	COMMAND $<TARGET_FILE:compunittest> --gtest_color=yes --gtest_output=xml:${CMAKE_CURRENT_BINARY_DIR}/compunittest-results.xml
 )

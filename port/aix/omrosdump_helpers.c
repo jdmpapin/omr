@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2015 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -58,7 +58,9 @@ appendCoreName(OMRPortLibrary *portLibrary, char *corepath, intptr_t pid)
 	char pidFilter[24];
 	uintptr_t pidLen;
 
-	DIR *folder = opendir(corepath);
+	/* Open the core path or, if blank, the current working directory */
+	char *dirname = (*corepath != '\0') ? corepath : ".";
+	DIR *folder = opendir(dirname);
 
 	struct dirent *entry = NULL;
 
@@ -66,6 +68,9 @@ appendCoreName(OMRPortLibrary *portLibrary, char *corepath, intptr_t pid)
 	strcpy(base, "core");
 
 	if (!folder) {
+#if defined(DUMP_DBG)
+		portLibrary->tty_printf(portLibrary, "\tappendCoreName: failed to opendir: %s, errno: %d\n", dirname, errno);
+#endif /* defined(DUMP_DBG) */
 		return;
 	}
 
@@ -73,6 +78,10 @@ appendCoreName(OMRPortLibrary *portLibrary, char *corepath, intptr_t pid)
 
 	while ((entry = readdir(folder))) {
 		char *s = entry->d_name;
+
+#if defined(DUMP_DBG)
+		portLibrary->tty_printf(portLibrary, "\tappendCoreName: found file: \"%s\"\n", s);
+#endif /* defined(DUMP_DBG) */
 
 		/* Files beginning with "core." must contain ".<pid>",
 		 * unless we're on AIX, in which case if core compression is enabled, they can be of the form:
@@ -97,6 +106,10 @@ appendCoreName(OMRPortLibrary *portLibrary, char *corepath, intptr_t pid)
 			continue;
 		}
 
+#if defined(DUMP_DBG)
+		portLibrary->tty_printf(portLibrary, "\tappendCoreName: \"%s\" matches the pidFilter \"%s\" or is a plain \"core\" file: %s\n", s, pidFilter);
+#endif /* defined(DUMP_DBG) */
+
 		/* Temporarily append current name */
 		strcpy(base, entry->d_name);
 
@@ -108,12 +121,26 @@ appendCoreName(OMRPortLibrary *portLibrary, char *corepath, intptr_t pid)
 				corename[63] = '\0';
 				lastModTime = attrBuf.st_mtime;
 			}
+#if defined(DUMP_DBG)
+			else {
+				portLibrary->tty_printf(portLibrary, "\tappendCoreName: not a regular file: %s\n", corepath);
+			}
+#endif /* defined(DUMP_DBG) */
 		}
+#if defined(DUMP_DBG)
+		else {
+			portLibrary->tty_printf(portLibrary, "\tappendCoreName: failed to stat: %s, errno %d\n", corepath, errno);
+		}
+#endif /* defined(DUMP_DBG) */
 	}
 	closedir(folder);
 
 	/* Append most likely name */
 	strcpy(base, corename);
+
+#if defined(DUMP_DBG)
+	portLibrary->tty_printf(portLibrary, "\tappendCoreName: returning: %s\n", corepath);
+#endif /* defined(DUMP_DBG) */
 }
 
 /*
@@ -132,6 +159,9 @@ genSystemCoreUsingGencore(struct OMRPortLibrary *portLibrary, char *filename)
 	BOOLEAN filenameWasEmpty = FALSE;
 	struct coredumpinfo coreDumpInfo;
 	int rc = -1;
+#if defined(DUMP_DBG)
+	int savedErrno;
+#endif /* defined(DUMP_DBG) */
 
 	if (*filename == '\0') {
 		filenameWasEmpty = TRUE;
@@ -164,21 +194,22 @@ genSystemCoreUsingGencore(struct OMRPortLibrary *portLibrary, char *filename)
 	coreDumpInfo.length = (unsigned int) strlen(filename);
 
 #if defined(DUMP_DBG)
-	portLibrary->tty_printf(portLibrary, "\tomrdump_create: attempting to generate corefile, filename: %s\n", coreDumpInfo.name);
+	portLibrary->tty_printf(portLibrary, "\tomrdump_create: attempting to generate corefile, filename: %s, uid: %d, euid: %d\n", coreDumpInfo.name, getuid(), geteuid());
 	fflush(stdout);
-#endif
+#endif /* defined(DUMP_DBG) */
 
 	coreDumpInfo.pid = getpid();
 	coreDumpInfo.flags = GENCORE_VERSION_1;
 	rc = gencore(&coreDumpInfo);
 
 #if defined(DUMP_DBG)
+	savedErrno = errno;
 	portLibrary->tty_printf(portLibrary, "\tomrdump_create: gencore/coredump returned: %i\n", rc);
 	if (rc == -1) {
-		portLibrary->tty_printf(portLibrary, "\tomrdump_create: errno: %u %s\n", errno, portLibrary->error_last_error_message(portLibrary));
+		portLibrary->tty_printf(portLibrary, "\tomrdump_create: errno: %i %s\n", savedErrno, portLibrary->error_last_error_message(portLibrary));
 	}
 	fflush(stdout);
-#endif
+#endif /* defined(DUMP_DBG) */
 
 
 	if (rc == 0) {
@@ -208,7 +239,7 @@ genSystemCoreUsingGencore(struct OMRPortLibrary *portLibrary, char *filename)
  *
  * @param[out] coreFilePath caller allocated buffer to put preferred destination for core file.
  *
- * @note buffer is not modified if a preferred desitination was not found
+ * @note buffer is not modified if a preferred destination was not found
  * @note buffer length is platform dependent, assumed to be EsMaxPath/MAX_PATH
  */
 void
@@ -222,12 +253,12 @@ findOSPreferredCoreDir(struct OMRPortLibrary *portLibrary, char *coreFilePath)
 
 	getPEnvValue(portLibrary, CORE_PATH_ENV_STRING, buffer);
 
-	/* path via the chcore command takes precedence, if it was not set, check the path set via the syscorepath command*/
+	/* path via the chcore command takes precedence, if it was not set, check the path set via the syscorepath command */
 	if (buffer[0] == '\0') {
 		sysconfig(GET_COREPATH, buffer, MAXPATHLEN);
 #if defined(DUMP_DBG)
 		portLibrary->tty_printf(portLibrary, "\tsysconfig corepath: %s\n", buffer);
-#endif
+#endif /* defined(DUMP_DBG) */
 	}
 
 	bufferLen = strlen(buffer);
@@ -246,7 +277,7 @@ findOSPreferredCoreDir(struct OMRPortLibrary *portLibrary, char *coreFilePath)
 
 #if defined(DUMP_DBG)
 	portLibrary->tty_printf(portLibrary, "\tcorepath set to: %s\n", buffer);
-#endif
+#endif /* defined(DUMP_DBG) */
 
 	return;
 }
@@ -278,7 +309,7 @@ getPEnvValue(struct OMRPortLibrary *portLibrary, char *envVar, char *value)
 		if (!strncmp(penv[i], scanFor, strlen(scanFor))) {
 #if defined(DUMP_DBG)
 			portLibrary->tty_printf(portLibrary, "\tfound: %s\n", penv[i]);
-#endif
+#endif /* defined(DUMP_DBG) */
 			strncpy(value, penv[i] + strlen(scanFor), EsMaxPath);
 			return 0;
 		}

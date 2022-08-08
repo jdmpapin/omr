@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -35,7 +35,7 @@ namespace OMR { typedef OMR::ARM::Instruction InstructionConnector; }
 
 #include "compiler/codegen/OMRInstruction.hpp"
 
-#include "arm/codegen/ARMOps.hpp"
+#include "codegen/InstOpCode.hpp"
 #include "codegen/InstOpCode.hpp"
 #include "codegen/GCStackMap.hpp"
 #include "codegen/RegisterConstants.hpp"
@@ -64,20 +64,20 @@ class OMR_EXTENSIBLE Instruction : public OMR::Instruction
 
    Instruction(TR::Node *node, TR::CodeGenerator *cg);
 
-   Instruction(TR_ARMOpCodes op, TR::Node *node, TR::CodeGenerator *cg);
+   Instruction(TR::InstOpCode::Mnemonic op, TR::Node *node, TR::CodeGenerator *cg);
 
    Instruction(TR::Instruction   *precedingInstruction,
-               TR_ARMOpCodes     op,
+               TR::InstOpCode::Mnemonic     op,
                TR::Node          *node,
                TR::CodeGenerator *cg);
 
-   Instruction(TR_ARMOpCodes                       op,
+   Instruction(TR::InstOpCode::Mnemonic                       op,
                TR::Node                            *node,
                TR::RegisterDependencyConditions    *cond,
                TR::CodeGenerator                   *cg);
 
    Instruction(TR::Instruction                     *precedingInstruction,
-               TR_ARMOpCodes                       op,
+               TR::InstOpCode::Mnemonic                       op,
                TR::Node                            *node,
                TR::RegisterDependencyConditions    *cond,
                TR::CodeGenerator                   *cg);
@@ -86,13 +86,10 @@ class OMR_EXTENSIBLE Instruction : public OMR::Instruction
 
    virtual Kind getKind() { return IsNotExtended; }
 
-   TR_ARMOpCode& getOpCode()                       {return _opcode;}
-   TR_ARMOpCodes getOpCodeValue()                  {return _opcode.getOpCodeValue();}
-   TR_ARMOpCodes getRecordFormOpCode()             {return _opcode.getRecordFormOpCodeValue();}
-   TR_ARMOpCodes setOpCodeValue(TR_ARMOpCodes op)  {return _opcode.setOpCodeValue(op);}
-
-   int32_t  getBlockIndex()            { return _blockIndex; }
-   void     setBlockIndex(int32_t i)   { _blockIndex = i; }
+   TR::InstOpCode& getOpCode()                       {return _opcode;}
+   TR::InstOpCode::Mnemonic getOpCodeValue()                  {return _opcode.getOpCodeValue();}
+   TR::InstOpCode::Mnemonic getRecordFormOpCode()             {return _opcode.getRecordFormOpCodeValue();}
+   TR::InstOpCode::Mnemonic setOpCodeValue(TR::InstOpCode::Mnemonic op)  {return _opcode.setOpCodeValue(op);}
 
    void ARMNeedsGCMap(uint32_t mask);
 
@@ -112,7 +109,7 @@ class OMR_EXTENSIBLE Instruction : public OMR::Instruction
    virtual bool setWriteBack()   {return false;}
    virtual bool isWriteBack()    {return false;}
 
-   virtual bool isLabel()        {return _opcode.getOpCodeValue() == ARMOp_label;}
+   virtual bool isLabel()        {return _opcode.getOpCodeValue() == TR::InstOpCode::label;}
 
    virtual TR::RegisterDependencyConditions *getDependencyConditions()
       {
@@ -184,7 +181,6 @@ class OMR_EXTENSIBLE Instruction : public OMR::Instruction
    // @@ virtual bool     isSync()           {return _opcode.isSync();}
    // @@ virtual bool     isAdmin()          {return _opcode.isAdmin();}
    // @@ virtual bool     is4ByteLoad()      {return (getOpCodeValue() == TR::InstOpCode::lwz);}
-   virtual bool     isDebugFence()     {return false;};
    virtual int32_t  getMachineOpCode();
    // @@ virtual bool     isBeginBlock();
    // @@ virtual bool     isFloat()          {return _opcode.isFloat();}
@@ -214,8 +210,6 @@ class OMR_EXTENSIBLE Instruction : public OMR::Instruction
 
 
    private:
-      TR_ARMOpCode   _opcode;
-      int32_t       _blockIndex;
       TR_ARMConditionCode                  _conditionCode;
       TR::RegisterDependencyConditions *_conditions;
       bool        _asyncBranch;

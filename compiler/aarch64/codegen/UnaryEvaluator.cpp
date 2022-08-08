@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -23,6 +23,7 @@
 #include "codegen/ConstantDataSnippet.hpp"
 #include "codegen/GenerateInstructions.hpp"
 #include "codegen/TreeEvaluator.hpp"
+#include "compile/Compilation.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
 
@@ -70,6 +71,18 @@ TR::Register *OMR::ARM64::TreeEvaluator::aconstEvaluator(TR::Node *node, TR::Cod
 
       return trgReg;
       }
+   TR::Compilation *comp = cg->comp();
+   TR_ResolvedMethod *method = comp->getCurrentMethod();
+   bool isPicSite = (node->isClassPointerConstant() && cg->fe()->isUnloadAssumptionRequired(reinterpret_cast<TR_OpaqueClassBlock *>(node->getAddress()), method)) ||
+                     (node->isMethodPointerConstant() && cg->fe()->isUnloadAssumptionRequired(
+                        cg->fe()->createResolvedMethod(cg->trMemory(), reinterpret_cast<TR_OpaqueMethodBlock *>(node->getAddress()), method)->classOfMethod(), method));
+
+   if (isPicSite)
+      {
+      TR::Register *trgReg = node->setRegister(cg->allocateRegister());
+      loadAddressConstantInSnippet(cg, node, node->getAddress(), trgReg, TR_NoRelocation, true);
+      return trgReg;
+      }
 
    TR::Register *tempReg = node->setRegister(cg->allocateRegister());
    loadConstant64(cg, node, node->getAddress(), tempReg, NULL);
@@ -101,6 +114,130 @@ TR::Register *OMR::ARM64::TreeEvaluator::lnegEvaluator(TR::Node *node, TR::CodeG
    node->setRegister(tempReg);
    cg->decReferenceCount(firstChild);
    return tempReg;
+   }
+
+static TR::Register *inlineVectorUnaryOp(TR::Node *node, TR::CodeGenerator *cg, TR::InstOpCode::Mnemonic op)
+   {
+   TR::Node *firstChild = node->getFirstChild();
+   TR::Register *srcReg = cg->evaluate(firstChild);
+   TR::Register *resReg = (firstChild->getReferenceCount() == 1) ? srcReg : cg->allocateRegister(TR_VRF);
+
+   node->setRegister(resReg);
+   generateTrg1Src1Instruction(cg, op, node, resReg, srcReg);
+   cg->decReferenceCount(firstChild);
+   return resReg;
+   }
+
+TR::Register *OMR::ARM64::TreeEvaluator::vnegEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   TR::InstOpCode::Mnemonic negOp;
+
+   TR_ASSERT_FATAL_WITH_NODE(node, node->getDataType().getVectorLength() == TR::VectorLength128,
+                   "Only 128-bit vectors are supported %s", node->getDataType().toString());
+
+   switch(node->getDataType().getVectorElementType())
+      {
+      case TR::Int8:
+         negOp = TR::InstOpCode::vneg16b;
+         break;
+      case TR::Int16:
+         negOp = TR::InstOpCode::vneg8h;
+         break;
+      case TR::Int32:
+         negOp = TR::InstOpCode::vneg4s;
+         break;
+      case TR::Int64:
+         negOp = TR::InstOpCode::vneg2d;
+         break;
+      case TR::Float:
+         negOp = TR::InstOpCode::vfneg4s;
+         break;
+      case TR::Double:
+         negOp = TR::InstOpCode::vfneg2d;
+         break;
+      default:
+         TR_ASSERT(false, "unrecognized vector type %s", node->getDataType().toString());
+         return NULL;
+      }
+   return inlineVectorUnaryOp(node, cg, negOp);
+   }
+
+TR::Register *OMR::ARM64::TreeEvaluator::vnotEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   TR::InstOpCode::Mnemonic notOp;
+
+   TR_ASSERT_FATAL_WITH_NODE(node, node->getDataType().getVectorLength() == TR::VectorLength128,
+                   "Only 128-bit vectors are supported %s", node->getDataType().toString());
+
+   switch(node->getDataType().getVectorElementType())
+      {
+      case TR::Int8:
+      case TR::Int16:
+      case TR::Int32:
+      case TR::Int64:
+         notOp = TR::InstOpCode::vnot16b;
+         break;
+      default:
+         TR_ASSERT(false, "unrecognized vector type %s", node->getDataType().toString());
+         return NULL;
+      }
+   return inlineVectorUnaryOp(node, cg, notOp);
+   }
+
+TR::Register*
+OMR::ARM64::TreeEvaluator::vabsEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   TR_ASSERT_FATAL_WITH_NODE(node, node->getDataType().getVectorLength() == TR::VectorLength128,
+                     "Only 128-bit vectors are supported %s", node->getDataType().toString());
+   TR::InstOpCode::Mnemonic absOp;
+
+   switch(node->getDataType().getVectorElementType())
+      {
+      case TR::Int8:
+         absOp = TR::InstOpCode::vabs16b;
+         break;
+      case TR::Int16:
+         absOp = TR::InstOpCode::vabs8h;
+         break;
+      case TR::Int32:
+         absOp = TR::InstOpCode::vabs4s;
+         break;
+      case TR::Int64:
+         absOp = TR::InstOpCode::vabs2d;
+         break;
+      case TR::Float:
+         absOp = TR::InstOpCode::vfabs4s;
+         break;
+      case TR::Double:
+         absOp = TR::InstOpCode::vfabs2d;
+         break;
+      default:
+         TR_ASSERT_FATAL(false, "unrecognized vector type %s", node->getDataType().toString());
+         return NULL;
+      }
+   return inlineVectorUnaryOp(node, cg, absOp);
+   }
+
+TR::Register*
+OMR::ARM64::TreeEvaluator::vsqrtEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   TR_ASSERT_FATAL_WITH_NODE(node, node->getDataType().getVectorLength() == TR::VectorLength128,
+                           "Only 128-bit vectors are supported %s", node->getDataType().toString());
+   TR::InstOpCode::Mnemonic sqrtOp;
+
+   switch(node->getDataType().getVectorElementType())
+      {
+      case TR::Float:
+         sqrtOp = TR::InstOpCode::vfsqrt4s;
+         break;
+      case TR::Double:
+         sqrtOp = TR::InstOpCode::vfsqrt2d;
+         break;
+      default:
+         TR_ASSERT_FATAL(false, "unrecognized vector type %s", node->getDataType().toString());
+         return NULL;
+      }
+   return inlineVectorUnaryOp(node, cg, sqrtOp);
    }
 
 static TR::Register *commonIntegerAbsEvaluator(TR::Node *node, TR::CodeGenerator *cg)
@@ -206,6 +343,38 @@ TR::Register *OMR::ARM64::TreeEvaluator::ihbitEvaluator(TR::Node *node, TR::Code
 TR::Register *OMR::ARM64::TreeEvaluator::lhbitEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    return hbitHelper(node, true, cg);
+   }
+
+/*
+ * lowest one bit
+ */
+static TR::Register *lbitHelper(TR::Node *node, bool is64bit, TR::CodeGenerator *cg)
+   {
+   TR::Node *child = node->getFirstChild();
+   TR::Register *srcReg = cg->evaluate(child);
+   TR::Register *trgReg = (child->getReferenceCount() == 1) ? srcReg : cg->allocateRegister();
+   TR::Register *tmpReg = cg->allocateRegister();
+   TR::InstOpCode::Mnemonic op = is64bit ? TR::InstOpCode::andx : TR::InstOpCode::andw;
+
+   // x & -x
+   generateNegInstruction(cg, node, tmpReg, srcReg, is64bit);
+   generateTrg1Src2Instruction(cg, op, node, trgReg, srcReg, tmpReg);
+
+   cg->stopUsingRegister(tmpReg);
+
+   node->setRegister(trgReg);
+   cg->decReferenceCount(child);
+   return trgReg;
+   }
+
+TR::Register *OMR::ARM64::TreeEvaluator::ilbitEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return lbitHelper(node, false, cg);
+   }
+
+TR::Register *OMR::ARM64::TreeEvaluator::llbitEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return lbitHelper(node, true, cg);
    }
 
 /*

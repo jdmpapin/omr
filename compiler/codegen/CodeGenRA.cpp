@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -164,7 +164,6 @@ OMR::CodeGenerator::estimateRegisterPressure(TR::Node *node, int32_t &registerPr
        node->getOpCodeValue() == TR::newarray ||
        node->getOpCodeValue() == TR::anewarray ||
        node->getOpCodeValue() == TR::multianewarray ||
-       node->getOpCodeValue() == TR::MergeNew ||
        node->getOpCodeValue() == TR::monent ||
        node->getOpCodeValue() == TR::monexit ||
        node->getOpCodeValue() == TR::checkcast ||
@@ -198,31 +197,15 @@ OMR::CodeGenerator::estimateRegisterPressure(TR::Node *node, int32_t &registerPr
             TR::DataType dtype = node->getDataType();
             if (dtype == TR::Float
                 || dtype == TR::Double
-#ifdef J9_PROJECT_SPECIFIC
-                || dtype == TR::DecimalFloat
-                || dtype == TR::DecimalDouble
-                || dtype == TR::DecimalLongDouble
-#endif
                  )
                gprCandidate = false;
             if (node->getDataType() == TR::Float
                 || node->getDataType() == TR::Double
-#ifdef J9_PROJECT_SPECIFIC
-                || node->getDataType() == TR::DecimalFloat
-                || node->getDataType() == TR::DecimalDouble
-#endif
                 )
                {
                if (!gprCandidate)
                   registerPressure++;
                }
-#ifdef J9_PROJECT_SPECIFIC
-            else if (node->getDataType() == TR::DecimalLongDouble)
-               {
-               if (!gprCandidate)
-                  registerPressure +=2;
-               }
-#endif
             else
                {
                if (gprCandidate)
@@ -387,9 +370,8 @@ OMR::CodeGenerator::prepareRegistersForAssignment()
    TR_Array<TR::Register *>&    regArray=self()->getRegisterArray();
    TR::Register               *registerCursor;
    TR_RegisterMask           km, foundKindsMask = 0;
-   int i;
 
-   for (i=0; i < regArray.size(); i++)
+   for (auto i = 0U; i < regArray.size(); i++)
       {
       registerCursor = regArray[i];
       if (registerCursor->getKind() != TR_SSR)
@@ -428,7 +410,7 @@ OMR::CodeGenerator::allocateInternalPointerSpill(TR::AutomaticSymbol *pinningArr
       TR::AutomaticSymbol *spillSymbol =
          TR::AutomaticSymbol::createInternalPointer(self()->trHeapMemory(),
                                                    TR::Address,
-                                                   TR::Compiler->om.sizeofReferenceAddress(),
+                                                   static_cast<uint32_t>(TR::Compiler->om.sizeofReferenceAddress()),
                                                    self()->fe());
       spillSymbol->setSpillTempAuto();
       spillSymbol->setPinningArrayPointer(pinningArrayPointer);
@@ -453,7 +435,7 @@ OMR::CodeGenerator::allocateSpill(bool containsCollectedReference, int32_t *offs
 TR_BackingStore *
 OMR::CodeGenerator::allocateSpill(int32_t dataSize, bool containsCollectedReference, int32_t *offset, bool reuse)
    {
-   TR_ASSERT_FATAL(dataSize <= 16, "assertion failure");
+   TR_ASSERT_FATAL(dataSize <= 64, "Spill size must be <= 64 bytes");
    TR_ASSERT_FATAL(!containsCollectedReference || (dataSize == TR::Compiler->om.sizeofReferenceAddress()), "assertion failure");
 
    if (self()->comp()->getOption(TR_TraceRA))
@@ -476,24 +458,37 @@ OMR::CodeGenerator::allocateSpill(int32_t dataSize, bool containsCollectedRefere
    //
    bool try8ByteSpills = (dataSize < 16) && ((TR::Compiler->om.sizeofReferenceAddress() == 8) || !containsCollectedReference);
    bool try16ByteSpills = (dataSize == 16);
+   bool try32ByteSpills = (dataSize == 32);
+   bool try64ByteSpills = (dataSize == 64);
 
    if(reuse)
-     {
-     if (dataSize <= 4 && !self()->getSpill4FreeList().empty())
-     {
-       spill = self()->getSpill4FreeList().front();
-       self()->getSpill4FreeList().pop_front();
-     }
-     if (!spill && try8ByteSpills && !self()->getSpill8FreeList().empty())
-     {
-       spill = self()->getSpill8FreeList().front();
-       self()->getSpill8FreeList().pop_front();
-     }
-     if (!spill && try16ByteSpills && !self()->getSpill16FreeList().empty())
-     {
-       spill = self()->getSpill16FreeList().front();
-       self()->getSpill16FreeList().pop_front();
-     }
+      {
+      if (dataSize <= 4 && !self()->getSpill4FreeList().empty())
+         {
+         spill = self()->getSpill4FreeList().front();
+         self()->getSpill4FreeList().pop_front();
+         }
+      else if (try8ByteSpills && !self()->getSpill8FreeList().empty())
+         {
+         spill = self()->getSpill8FreeList().front();
+         self()->getSpill8FreeList().pop_front();
+         }
+      else if (try16ByteSpills && !self()->getSpill16FreeList().empty())
+         {
+         spill = self()->getSpill16FreeList().front();
+         self()->getSpill16FreeList().pop_front();
+         }
+      else if (try32ByteSpills && !self()->getSpill32FreeList().empty())
+         {
+         spill = self()->getSpill32FreeList().front();
+         self()->getSpill32FreeList().pop_front();
+         }
+      else if (try64ByteSpills && !self()->getSpill64FreeList().empty())
+         {
+         spill = self()->getSpill64FreeList().front();
+         self()->getSpill64FreeList().pop_front();
+         }
+
      if (
          (spill && self()->comp()->getOption(TR_TraceRA) && !performTransformation(self()->comp(), "O^O SPILL TEMPS: Reuse spill temp %s\n", self()->getDebug()->getName(spill->getSymbolReference()))))
        {
@@ -522,8 +517,8 @@ OMR::CodeGenerator::allocateSpill(int32_t dataSize, bool containsCollectedRefere
       //
       int spillSize = std::max(dataSize, static_cast<int32_t>(TR::Compiler->om.sizeofReferenceAddress()));
 
-      TR_ASSERT(4 <= spillSize && spillSize <= 16, "Spill temps should be between 4 and 16 bytes");
-      spillSymbol = TR::AutomaticSymbol::create(self()->trHeapMemory(),TR::NoType,spillSize);
+      TR_ASSERT_FATAL(4 <= spillSize && spillSize <= 64, "Spill temps should be between 4 and 64 bytes");
+      spillSymbol = TR::AutomaticSymbol::create(self()->trHeapMemory(), TR::NoType, spillSize);
       spillSymbol->setSpillTempAuto();
       self()->comp()->getMethodSymbol()->addAutomatic(spillSymbol);
       spill = new (self()->trHeapMemory()) TR_BackingStore(self()->comp()->getSymRefTab(), spillSymbol, 0);
@@ -574,9 +569,9 @@ OMR::CodeGenerator::allocateSpill(int32_t dataSize, bool containsCollectedRefere
 void
 OMR::CodeGenerator::freeSpill(TR_BackingStore *spill, int32_t dataSize, int32_t offset)
    {
-   TR_ASSERT(1 <= dataSize && dataSize <= 16, "assertion failure");
-   TR_ASSERT(offset == 0 || offset == 4, "assertion failure");
-   TR_ASSERT(dataSize + offset <= 16, "assertion failure");
+   TR_ASSERT_FATAL(1 <= dataSize && dataSize <= 64, "Spill size must be >= 1 and <= 64 bytes");
+   TR_ASSERT_FATAL(offset == 0 || offset == 4, "Spill offset must be 0 or 4 bytes");
+   TR_ASSERT_FATAL(dataSize + offset <= 64, "Spill size + offset must not exceed 64 bytes");
 
    if (self()->comp()->getOption(TR_TraceRA))
       {
@@ -677,6 +672,18 @@ OMR::CodeGenerator::freeSpill(TR_BackingStore *spill, int32_t dataSize, int32_t 
             if (self()->comp()->getOption(TR_TraceRA))
                traceMsg(self()->comp(), "\n -> added to spill16FreeList");
             }
+         else if (spill->getSymbolReference()->getSymbol()->getSize() == 32)
+            {
+            _spill32FreeList.push_front(spill);
+            if (self()->comp()->getOption(TR_TraceRA))
+               traceMsg(self()->comp(), "\n -> added to spill32FreeList");
+            }
+         else if (spill->getSymbolReference()->getSymbol()->getSize() == 64)
+            {
+            _spill64FreeList.push_front(spill);
+            if (self()->comp()->getOption(TR_TraceRA))
+               traceMsg(self()->comp(), "\n -> added to spill64FreeList");
+            }
          }
       }
    }
@@ -689,6 +696,8 @@ OMR::CodeGenerator::jettisonAllSpills()
    _spill4FreeList.clear();
    _spill8FreeList.clear();
    _spill16FreeList.clear();
+   _spill32FreeList.clear();
+   _spill64FreeList.clear();
    _internalPointerSpillFreeList.clear();
    }
 
@@ -1128,7 +1137,7 @@ OMR::CodeGenerator::TR_RegisterPressureState::updateRegisterPressure(TR::Symbol 
    if (dt == TR::NoType)
       dt = symbol->getDataType();
 
-   _gprPressure += cg->gprCount(TR::DataType(dt),symbol->getSize());
+   _gprPressure += cg->gprCount(TR::DataType(dt), static_cast<int32_t>(symbol->getSize()));
    _fprPressure += cg->fprCount(TR::DataType(dt));
    _vrfPressure += cg->vrfCount(TR::DataType(dt));
 
@@ -1201,11 +1210,6 @@ OMR::CodeGenerator::pickRegister(TR_RegisterCandidate     *rc,
 
       const bool usesFPR = (dtype == TR::Float
                            || dtype == TR::Double
-#ifdef J9_PROJECT_SPECIFIC
-                           || dtype == TR::DecimalFloat
-                           || dtype == TR::DecimalDouble
-                           || dtype == TR::DecimalLongDouble
-#endif
                            );
 
       const bool usesVRF = dtype.isVector();
@@ -1739,11 +1743,6 @@ OMR::CodeGenerator::pickRegister(TR_RegisterCandidate     *rc,
       uint8_t regsWithheld =
          (dtype == TR::Float
           || dtype == TR::Double
-#ifdef J9_PROJECT_SPECIFIC
-          || dtype == TR::DecimalFloat
-          || dtype == TR::DecimalDouble
-          || dtype == TR::DecimalLongDouble
-#endif
           ) ?
          fprsWithheldFromPickRegister : (self()->comp()->getMethodHotness() == warm)? gprsWithheldFromPickRegisterWhenWarm :
          gprsWithheldFromPickRegister;
@@ -1807,11 +1806,6 @@ OMR::CodeGenerator::pickRegister(TR_RegisterCandidate     *rc,
       dtype = rcSymbol->getDataType();
       if (dtype == TR::Float
           || dtype == TR::Double
-#ifdef J9_PROJECT_SPECIFIC
-          || dtype == TR::DecimalFloat
-          || dtype == TR::DecimalDouble
-          || dtype == TR::DecimalLongDouble
-#endif
           )
          preservedRegisters = self()->getGlobalFPRsPreservedAcrossCalls();
       else
@@ -2822,11 +2816,11 @@ OMR::CodeGenerator::simulateNodeEvaluation(TR::Node *node, TR_RegisterPressureSt
       }
 
    if (summary->_gprPressure < summary->PRESSURE_LIMIT)
-      TR_ASSERT(state->_gprPressure <= summary->_gprPressure, "Children of %s must record max register gprPressure in summary; %d > %d", self()->getDebug()->getName(node), state->_gprPressure, summary->_gprPressure);
+      TR_ASSERT(unsigned(state->_gprPressure) <= summary->_gprPressure, "Children of %s must record max register gprPressure in summary; %d > %d", self()->getDebug()->getName(node), state->_gprPressure, summary->_gprPressure);
    if (summary->_fprPressure < summary->PRESSURE_LIMIT )
-      TR_ASSERT(state->_fprPressure <= summary->_fprPressure, "Children of %s must record max register fprPressure in summary; %d > %d", self()->getDebug()->getName(node), state->_fprPressure, summary->_fprPressure);
+      TR_ASSERT(unsigned(state->_fprPressure) <= summary->_fprPressure, "Children of %s must record max register fprPressure in summary; %d > %d", self()->getDebug()->getName(node), state->_fprPressure, summary->_fprPressure);
    if (summary->_vrfPressure <= summary->PRESSURE_LIMIT)
-      TR_ASSERT(state->_vrfPressure <= summary->_vrfPressure, "Children of %s must record max register vrfPressure in summary; %d > %d", self()->getDebug()->getName(node), state->_vrfPressure, summary->_vrfPressure);
+      TR_ASSERT(unsigned(state->_vrfPressure) <= summary->_vrfPressure, "Children of %s must record max register vrfPressure in summary; %d > %d", self()->getDebug()->getName(node), state->_vrfPressure, summary->_vrfPressure);
 
 
    // Dec children's ref counts.
@@ -3373,15 +3367,15 @@ OMR::CodeGenerator::TR_RegisterPressureSummary::accumulate(
    // increase pressure.
 
    uint32_t gprs = state->_gprPressure + gprTemps;
-   if (gprs > state->_gprLimit && state->pressureIsAtRisk())
+   if (gprs > unsigned(state->_gprLimit) && state->pressureIsAtRisk())
       spill(TR_gprSpill, cg);
 
    uint32_t fprs = state->_fprPressure + fprTemps;
-   if (fprs > state->_fprLimit && state->pressureIsAtRisk())
+   if (fprs > unsigned(state->_fprLimit) && state->pressureIsAtRisk())
       spill(TR_fprSpill, cg);
 
    uint32_t vrfs = state->_vrfPressure + vrfTemps;
-   if (vrfs > state->_vrfLimit && state->pressureIsAtRisk())
+   if (vrfs > unsigned(state->_vrfLimit) && state->pressureIsAtRisk())
       spill(TR_vrfSpill, cg);
 
    accumulate(gprs, fprs, vrfs);

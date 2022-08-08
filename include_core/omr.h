@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2013, 2020 IBM Corp. and others
+ * Copyright (c) 2013, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -101,12 +101,6 @@ typedef struct OMR_VMConfiguration {
 	uintptr_t _maximum_thread_count; /* 0 for unlimited */
 } OMR_VMConfiguration;
 
-typedef struct movedObjectHashCode {
-	uint32_t originalHashCode;
-	BOOLEAN hasBeenMoved;
-	BOOLEAN hasBeenHashed;
-} movedObjectHashCode;
-
 typedef struct OMR_ExclusiveVMAccessStats {
 	U_64 startTime;
 	U_64 endTime;
@@ -158,26 +152,6 @@ typedef struct OMR_VM {
 #endif /* defined(OMR_GC_REALTIME) */
 } OMR_VM;
 
-#if defined(OMR_GC_COMPRESSED_POINTERS)
-#if defined(OMR_GC_FULL_POINTERS)
-/* Mixed mode - necessarily 64-bit */
-#if defined(OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES)
-#define OMRVM_COMPRESS_OBJECT_REFERENCES(omrVM) OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES
-#else /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
-#define OMRVM_COMPRESS_OBJECT_REFERENCES(omrVM) (0 != (omrVM)->_compressObjectReferences)
-#endif /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
-#define OMRVM_REFERENCE_SHIFT(omrVM) (OMRVM_COMPRESS_OBJECT_REFERENCES(omrVM) ? 2 : 3)
-#else /* OMR_GC_FULL_POINTERS */
-/* Compressed only - necessarily 64-bit */
-#define OMRVM_COMPRESS_OBJECT_REFERENCES(omrVM) TRUE
-#define OMRVM_REFERENCE_SHIFT(omrVM) 2
-#endif /* OMR_GC_FULL_POINTERS */
-#else /* OMR_GC_COMPRESSED_POINTERS */
-/* Full only - could be 32 or 64-bit */
-#define OMRVM_COMPRESS_OBJECT_REFERENCES(omrVM) FALSE
-#define OMRVM_REFERENCE_SHIFT(omrVM) OMR_LOG_POINTER_SIZE
-#endif /* OMR_GC_COMPRESSED_POINTERS */
-
 typedef struct OMR_VMThread {
 	struct OMR_VM *_vm;
 	uint32_t _sampleStackBackoff;
@@ -214,8 +188,6 @@ typedef struct OMR_VMThread {
 
 	void *memorySpace;
 
-	struct movedObjectHashCode movedObjectHashCodeCache;
-
 	int32_t _attachCount;
 
 	void *_savedObject1; /**< holds new object allocation until object can be attached to reference graph (see MM_AllocationDescription::save/restoreObjects()) */
@@ -226,21 +198,29 @@ typedef struct OMR_VMThread {
 #if defined(OMR_GC_FULL_POINTERS)
 /* Mixed mode - necessarily 64-bit */
 #if defined(OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES)
-#define OMRVMTHREAD_COMPRESS_OBJECT_REFERENCES(omrVMThread) OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES
+/* Mixed mode - static */
+#define OMR_COMPRESS_OBJECT_REFERENCES(dynamicValue) (0 != OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES)
 #else /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
-#define OMRVMTHREAD_COMPRESS_OBJECT_REFERENCES(omrVMThread) (0 != (omrVMThread)->_compressObjectReferences)
+/* Mixed mode - dynamic */
+#define OMR_COMPRESS_OBJECT_REFERENCES(dynamicValue) (dynamicValue)
 #endif /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
+#define OMRVM_REFERENCE_SHIFT(omrVM) (OMRVM_COMPRESS_OBJECT_REFERENCES(omrVM) ? 2 : 3)
 #define OMRVMTHREAD_REFERENCE_SHIFT(omrVMThread) (OMRVMTHREAD_COMPRESS_OBJECT_REFERENCES(omrVMThread) ? 2 : 3)
 #else /* OMR_GC_FULL_POINTERS */
 /* Compressed only - necessarily 64-bit */
-#define OMRVMTHREAD_COMPRESS_OBJECT_REFERENCES(omrVMThread) TRUE
+#define OMRVM_REFERENCE_SHIFT(omrVM) 2
 #define OMRVMTHREAD_REFERENCE_SHIFT(omrVMThread) 2
+#define OMR_COMPRESS_OBJECT_REFERENCES(dynamicValue) TRUE
 #endif /* OMR_GC_FULL_POINTERS */
 #else /* OMR_GC_COMPRESSED_POINTERS */
 /* Full only - could be 32 or 64-bit */
-#define OMRVMTHREAD_COMPRESS_OBJECT_REFERENCES(omrVMThread) FALSE
+#define OMR_COMPRESS_OBJECT_REFERENCES(dynamicValue) FALSE
+#define OMRVM_REFERENCE_SHIFT(omrVM) OMR_LOG_POINTER_SIZE
 #define OMRVMTHREAD_REFERENCE_SHIFT(omrVMThread) OMR_LOG_POINTER_SIZE
 #endif /* OMR_GC_COMPRESSED_POINTERS */
+
+#define OMRVM_COMPRESS_OBJECT_REFERENCES(omrVM) OMR_COMPRESS_OBJECT_REFERENCES(0 != (omrVM)->_compressObjectReferences)
+#define OMRVMTHREAD_COMPRESS_OBJECT_REFERENCES(omrVMThread) OMR_COMPRESS_OBJECT_REFERENCES(0 != (omrVMThread)->_compressObjectReferences)
 
 /**
  * Perform basic structural initialization of the OMR runtime

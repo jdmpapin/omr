@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -79,24 +79,19 @@
 #include "optimizer/TransformUtil.hpp"
 #include "ras/Debug.hpp"
 
-extern const SimplifierPtr simplifierOpts[];
 
-static_assert(TR::NumIlOps ==
-              (sizeof(simplifierOpts) / sizeof(simplifierOpts[0])),
-              "simplifierOpts is not the correct size");
+extern const SimplifierPointerTable simplifierOpts;
 
+void SimplifierPointerTable::checkTableSize()
+   {
+   static_assert((TR::NumScalarIlOps + TR::NumVectorOperations) ==
+              (sizeof(table) / sizeof(table[0])),
+              "SimplifierPointerTable::table is not the correct size");
+   }
 
 /*
  * Local helper functions
  */
-
-static void resetBlockVisitFlags(TR::Compilation *comp)
-   {
-   for (TR::Block *block = comp->getStartBlock(); block != NULL; block = block->getNextBlock())
-      {
-      block->setHasBeenVisited(false);
-      }
-   }
 
 static TR::TreeTop *findNextLegalTreeTop(TR::Compilation *comp, TR::Block *block)
    {
@@ -124,7 +119,7 @@ static void countNodes(CS2::ABitVector< TR::Allocator > & mark,
    mark[n->getGlobalIndex()] = true;
    numNodes += 1;
 
-   for (size_t i = 0; i < n->getNumChildren(); i++)
+   for (auto i = 0; i < n->getNumChildren(); i++)
       {
       countNodes(mark, n->getChild(i), numNodes);
       }
@@ -213,10 +208,6 @@ OMR::Simplifier::postPerformOnBlocks()
    {
    if (trace())
       comp()->dumpMethodTrees("Trees after simplification");
-
-#ifdef DEBUG
-   resetBlockVisitFlags(comp());
-#endif
 
    // Invalidate usedef and value number information if necessary
    //
@@ -342,15 +333,9 @@ OMR::Simplifier::simplifyExtendedBlock(TR::TreeTop * treeTop)
 
       if (b->isOSRCodeBlock() || b->isOSRCatchBlock())
          {
-         b->setHasBeenVisited();
          treeTop = b->getExit();
          continue;
          }
-
-#ifdef DEBUG
-      if (block != b)
-         b->setHasBeenVisited();
-#endif
 
       if (!block && _reassociate &&
           comp()->getFlowGraph()->getStructure() != NULL         // [99391] getStructureOf() only valid if structure isn't invalidated

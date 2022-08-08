@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2022 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -28,12 +28,9 @@ include(OmrAssert)
 include(OmrDetectSystemInformation)
 include(OmrUtility)
 
-
 omr_detect_system_information()
 
-if(NOT OMR_HOST_OS STREQUAL "zos")
-	enable_language(ASM)
-endif()
+enable_language(ASM)
 
 # pick up OS info
 include(platform/os/${OMR_HOST_OS})
@@ -46,6 +43,9 @@ include(platform/toolcfg/${OMR_TOOLCONFIG})
 
 # verify toolconfig
 include(platform/toolcfg/verify)
+
+# handle cross compilation logic
+include(OmrCrossCompile)
 
 macro(omr_platform_global_setup)
 	omr_assert(WARNING TEST NOT OMR_PLATFORM_GLOBALLY_INITIALIZED

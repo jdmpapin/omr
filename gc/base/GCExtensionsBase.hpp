@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -77,6 +77,7 @@ class MM_RememberedSetSATB;
 class MM_Scavenger;
 #endif /* OMR_GC_MODRON_SCAVENGER */
 class MM_SizeClasses;
+class MM_SparseVirtualMemory;
 class MM_SweepHeapSectioning;
 class MM_SweepPoolManager;
 class MM_SweepPoolManagerAddressOrderedList;
@@ -139,6 +140,25 @@ public:
 	MM_UserSpecifiedParameterUDATA()
 		: _wasSpecified(false)
 		, _valueSpecified(0)
+	{
+	}
+};
+
+class MM_UserSpecifiedParameterDouble {
+	/* Data Members */
+private:
+protected:
+public:
+	bool _wasSpecified; /**< True if this parameter was specified by the user, false means it is undefined */
+	double _valueSpecified; /**< The value specified by the user or undefined in _wasSpecified is false */
+
+	/* Member Functions */
+private:
+protected:
+public:
+	MM_UserSpecifiedParameterDouble()
+		: _wasSpecified(false)
+		, _valueSpecified(0.0)
 	{
 	}
 };
@@ -261,6 +281,8 @@ public:
 	bool isArrayletDoubleMapRequested;
 	bool isArrayletDoubleMapAvailable;
 #endif /* OMR_GC_DOUBLE_MAP_ARRAYLETS */
+	bool isVirtualLargeObjectHeapRequested;
+	bool isVirtualLargeObjectHeapEnabled;
 	uintptr_t requestedPageSize;
 	uintptr_t requestedPageFlags;
 	uintptr_t gcmetadataPageSize;
@@ -355,15 +377,16 @@ public:
 	int loaFreeHistorySize; /**< max size of _loaFreeRatioHistory array */
 	uintptr_t lastGlobalGCFreeBytesLOA; /**< records the LOA free memory size from after Global GC cycle */
 	ConcurrentMetering concurrentMetering;
+	uintptr_t minimumContractionRatio;
 #endif /* OMR_GC_LARGE_OBJECT_AREA */
 
 	bool disableExplicitGC;
 	uintptr_t heapAlignment;
 	uintptr_t absoluteMinimumOldSubSpaceSize;
 	uintptr_t absoluteMinimumNewSubSpaceSize;
-	
+
 	float darkMatterCompactThreshold; /**< Value used to trigger compaction when dark matter ratio reaches this percentage of memory pools memory*/
-	
+
 	uintptr_t parSweepChunkSize;
 	uintptr_t heapExpansionMinimumSize;
 	uintptr_t heapExpansionMaximumSize;
@@ -371,18 +394,20 @@ public:
 	uintptr_t heapFreeMinimumRatioMultiplier;
 	uintptr_t heapFreeMaximumRatioDivisor;
 	uintptr_t heapFreeMaximumRatioMultiplier;
-	uintptr_t heapExpansionGCTimeThreshold; /**< max percentage of time spent in gc before expansion */
-	uintptr_t heapContractionGCTimeThreshold; /**< min percentage of time spent in gc before contraction */
+
+	MM_UserSpecifiedParameterUDATA heapExpansionGCRatioThreshold; /**< max percentage of time spent in gc before expansion */
+	MM_UserSpecifiedParameterUDATA heapContractionGCRatioThreshold; /**< min percentage of time spent in gc before contraction */
+
 	uintptr_t heapExpansionStabilizationCount; /**< GC count required before the heap is allowed to expand due to excessvie time after last heap expansion */
 	uintptr_t heapContractionStabilizationCount; /**< GC count required before the heap is allowed to contract due to excessvie time after last heap expansion */
 
 	float heapSizeStartupHintConservativeFactor; /**< Use only a fraction of hints stored in SC */
-	float heapSizeStartupHintWeightNewValue;		/**< Learn slowly by historic averaging of stored hints */	
+	float heapSizeStartupHintWeightNewValue;		/**< Learn slowly by historic averaging of stored hints */
 	bool useGCStartupHints; /**< Enabled/disable usage of heap sizing startup hints from Shared Cache */
 
 	uintptr_t workpacketCount; /**< this value is ONLY set if -Xgcworkpackets is specified - otherwise the workpacket count is determined heuristically */
 	uintptr_t packetListSplit; /**< the number of ways to split packet lists, set by -XXgc:packetListLockSplit=, or determined heuristically based on the number of GC threads */
-	
+
 	uintptr_t markingArraySplitMaximumAmount; /**< maximum number of elements to split array scanning work in marking scheme */
 	uintptr_t markingArraySplitMinimumAmount; /**< minimum number of elements to split array scanning work in marking scheme */
 
@@ -443,7 +468,8 @@ public:
 
 #if defined(OMR_GC_MODRON_SCAVENGER) || defined(OMR_GC_VLHGC)
 	enum ScavengerScanOrdering {
-		OMR_GC_SCAVENGER_SCANORDERING_BREADTH_FIRST = 0,
+		OMR_GC_SCAVENGER_SCANORDERING_NONE = 0,
+		OMR_GC_SCAVENGER_SCANORDERING_BREADTH_FIRST,
 		OMR_GC_SCAVENGER_SCANORDERING_DYNAMIC_BREADTH_FIRST,
 		OMR_GC_SCAVENGER_SCANORDERING_HIERARCHICAL,
 	};
@@ -463,7 +489,7 @@ public:
 	uint32_t maxHotFieldListLength;
 	uintptr_t minCpuUtil;
 	/* End of options relating to dynamicBreadthFirstScanOrdering */
-#if defined(OMR_GC_MODRON_SCAVENGER) 
+#if defined(OMR_GC_MODRON_SCAVENGER)
 	uintptr_t scvTenureRatioHigh;
 	uintptr_t scvTenureRatioLow;
 	uintptr_t scvTenureFixedTenureAge; /**< The tenure age to use for the Fixed scavenger tenure strategy. */
@@ -477,10 +503,11 @@ public:
 	bool scavengerRsoScanUnsafe;
 	uintptr_t cacheListSplit; /**< the number of ways to split scanCache lists, set by -XXgc:cacheListLockSplit=, or determined heuristically based on the number of GC threads */
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
-	bool softwareRangeCheckReadBarrier; /**< enable software read barrier instead of hardware guarded loads when running with CS */
+	bool softwareRangeCheckReadBarrier; /**< enable software read barrier instead of hardware guarded loads when running with CS, complimentary to concurrentScavengerHWSupport with CS active */
+	bool softwareRangeCheckReadBarrierForced; /**< true if usage of softwareRangeCheckReadBarrier is requested explicitly */
 	bool concurrentScavenger; /**< CS enabled/disabled flag */
 	bool concurrentScavengerForced; /**< set to true if CS is requested (by cmdline option), but there are more checks to do before deciding whether the request is to be obeyed */
-	bool concurrentScavengerHWSupport; /**< set to true if CS runs with HW support */
+	bool concurrentScavengerHWSupport; /**< set to true if CS runs with HW support, complimentary to softwareRangeCheckReadBarrier with CS active */
 	uintptr_t concurrentScavengerBackgroundThreads; /**< number of background GC threads during concurrent phase of Scavenge */
 	bool concurrentScavengerBackgroundThreadsForced; /**< true if concurrentScavengerBackgroundThreads set via command line option */
 	uintptr_t concurrentScavengerSlack; /**< amount of bytes added on top of avearge allocated bytes during concurrent cycle, in calcualtion for survivor size */
@@ -503,8 +530,10 @@ public:
 	bool dynamicNewSpaceSizing;
 	bool debugDynamicNewSpaceSizing;
 	bool dnssAvoidMovingObjects;
-	double dnssExpectedTimeRatioMinimum;
-	double dnssExpectedTimeRatioMaximum;
+
+	MM_UserSpecifiedParameterDouble dnssExpectedRatioMinimum; /**< When the gc ratio for new/nursery space is below this value, new/nursery space should contract */
+	MM_UserSpecifiedParameterDouble dnssExpectedRatioMaximum; /**< When the gc ratio for new/nursery space is above this value, new/nursery space should expand */
+
 	double dnssWeightedTimeRatioFactorIncreaseSmall;
 	double dnssWeightedTimeRatioFactorIncreaseMedium;
 	double dnssWeightedTimeRatioFactorIncreaseLarge;
@@ -515,6 +544,13 @@ public:
 	double dnssMinimumContraction;
 	bool enableSplitHeap; /**< true if we are using gencon with -Xgc:splitheap (we will fail to boostrap if we can't allocate both ranges) */
 	double aliasInhibitingThresholdPercentage; /**< percentage of threads that can be blocked before copy cache aliasing is inhibited (set through aliasInhibitingThresholdPercentage=) */
+
+	/* Start of variables relating to Adaptive Threading */
+	bool adaptiveGCThreading; /**< Flag to indicate whether the Scavenger Adaptive Threading Optimization is enabled*/
+	float adaptiveThreadingSensitivityFactor; /**<  Used by Adaptive Model to determine sensitivity/tolerance to stalling, higher number translates to less stall being tolerated (set through adaptiveThreadingSensitivityFactor=) */
+	float adaptiveThreadingWeightActiveThreads; /**< Weight given to current active threads when averaging projected threads with current active threads (set through adaptiveThreadingWeightActiveThreads=) */
+	float adaptiveThreadBooster; /**< Used to boost calculated thread count, gives opportunity for low thread count to grow. */
+	/* End of variables relating to Adaptive Threading */
 
 	enum HeapInitializationSplitHeapSection {
 		HEAP_INITIALIZATION_SPLIT_HEAP_UNKNOWN = 0,
@@ -538,6 +574,7 @@ public:
 	float excessiveGCFreeSizeRatio;
 
 	MM_Heap* heap;
+	MM_SparseVirtualMemory *largeObjectVirtualMemory; /**< Virtual memory for large objects (objectSize > arrayletLeafSize). Live large objects are committed to this separate virtual memory space when isVirtualLargeObjectHeapEnabled is true */
 	MM_HeapRegionManager* heapRegionManager; /**< The heap region manager used to view the heap as regions of memory */
 	MM_MemoryManager* memoryManager; /**< memory manager used to access to virtual memory instances */
 	uintptr_t aggressive;
@@ -559,7 +596,6 @@ public:
 	double concurrentSlackFragmentationAdjustmentWeight; /**< weight(from 0.0 to 5.0) used for calculating free tenure space (how much percentage of the fragmentation need to remove from freeBytes) */
 	bool debugConcurrentMark;
 	bool optimizeConcurrentWB;
-	bool dirtCardDuringRSScan;
 	uintptr_t concurrentLevel;
 	uintptr_t concurrentBackground;
 	uintptr_t concurrentSlack; /**< number of bytes to add to the concurrent kickoff threshold buffer */
@@ -636,7 +672,7 @@ public:
 	MM_HeapMap* previousMarkMap; /**< the previous valid mark map. This can be used to walk marked objects in regions which have _markMapUpToDate set to true */
 
 	MM_GlobalAllocationManager* globalAllocationManager; /**< Used for attaching threads to AllocationContexts */
-	
+
 #if defined(OMR_GC_REALTIME) || defined(OMR_GC_SEGREGATED_HEAP)
 	uintptr_t managedAllocationContextCount; /**< The number of allocation contexts which will be instantiated and managed by the GlobalAllocationManagerRealtime (currently 2*cpu_count) */
 #endif /* OMR_GC_REALTIME || OMR_GC_SEGREGATED_HEAP */
@@ -715,7 +751,7 @@ public:
 	bool numaForced; /**< if true, specifies if numa is disabled or enabled (actual value stored in NUMA Manager) by command line option */
 
 	bool padToPageSize;
-	
+
 	bool fvtest_disableExplictMainThread; /**< Test option to disable creation of explicit main GC thread */
 
 #if defined(OMR_GC_VLHGC)
@@ -779,6 +815,7 @@ public:
 	};
 	ReserveRegions tarokReserveRegionsFromCollectionSet;
 	bool tarokEnableRecoverRegionTailsAfterSweep; /**< Enable recovering region tail during post sweep of GMP */
+	uintptr_t tarokTargetMaxPauseTime; /**< An optional, user specified soft max pause time for PGC's in balanced GC*/
 #if defined(OMR_GC_VLHGC_CONCURRENT_COPY_FORWARD)
 	bool _isConcurrentCopyForward;
 #endif
@@ -803,7 +840,7 @@ public:
 
 	bool alwaysCallWriteBarrier; /**< was -Xgc:alwayscallwritebarrier specified? */
 	bool alwaysCallReadBarrier; /**< was -Xgc:alwaysCallReadBarrier specified? */
-	
+
 	bool _holdRandomThreadBeforeHandlingWorkUnit; /**< Whether we should randomly hold up a thread entering MM_ParallelTask::handleNextWorkUnit() */
 	uintptr_t _holdRandomThreadBeforeHandlingWorkUnitPeriod; /**< How often (in terms of number of times MM_ParallelTask::handleNextWorkUnit() is called) to randomly hold up a thread entering MM_ParallelTask::handleNextWorkUnit() */
 	bool _forceRandomBackoutsAfterScan; /**< Whether we should force MM_Scavenger::completeScan() to randomly fail due to backout */
@@ -879,19 +916,7 @@ public:
 	 * @return true, if object references are compressed
 	 */
 	MMINLINE bool compressObjectReferences() {
-#if defined(OMR_GC_COMPRESSED_POINTERS)
-#if defined(OMR_GC_FULL_POINTERS)
-#if defined(OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES)
-		return (bool)OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES;
-#else /* defined(OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES) */
-		return _compressObjectReferences;
-#endif /* defined(OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES) */
-#else /* defined(OMR_GC_FULL_POINTERS) */
-		return true;
-#endif /* defined(OMR_GC_FULL_POINTERS) */
-#else /* defined(OMR_GC_COMPRESSED_POINTERS) */
-		return false;
-#endif /* defined(OMR_GC_COMPRESSED_POINTERS) */
+		return OMR_COMPRESS_OBJECT_REFERENCES(_compressObjectReferences);
 	}
 
 	MMINLINE uintptr_t getRememberedCount()
@@ -927,7 +952,7 @@ public:
 		return false;
 #endif /* defined(OMR_GC_CONCURRENT_SCAVENGER) */
 	}
-	
+
 	MMINLINE bool
 	isConcurrentScavengerHWSupported()
 	{
@@ -937,7 +962,7 @@ public:
 		return false;
 #endif /* defined(OMR_GC_CONCURRENT_SCAVENGER) */
 	}
-	
+
    MMINLINE bool
    isSoftwareRangeCheckReadBarrierEnabled()
    {
@@ -949,7 +974,7 @@ public:
    }
 
 	bool isConcurrentScavengerInProgress();
-	
+
 	MMINLINE bool
 	isScavengerEnabled()
 	{
@@ -1091,17 +1116,27 @@ public:
 		*start = _guaranteedNurseryStart;
 		*end = _guaranteedNurseryEnd;
 	}
-	
+
 	MMINLINE bool isRememberedSetInOverflowState() { return _isRememberedSetInOverflow; }
 	MMINLINE void setRememberedSetOverflowState() { _isRememberedSetInOverflow = true; }
 	MMINLINE void clearRememberedSetOverflowState() { _isRememberedSetInOverflow = false; }
-	
+
 	MMINLINE void setScavengerBackOutState(BackOutState backOutState) { _backOutState = backOutState; }
 	MMINLINE BackOutState getScavengerBackOutState() { return _backOutState; }
 	MMINLINE bool isScavengerBackOutFlagRaised() { return backOutFlagCleared < _backOutState; }
-	
+
 	MMINLINE bool shouldScavengeNotifyGlobalGCOfOldToOldReference() { return _concurrentGlobalGCInProgress; }
 	MMINLINE void setConcurrentGlobalGCInProgress(bool inProgress) { _concurrentGlobalGCInProgress = inProgress; }
+
+	/**
+	 * Determine whether Adaptive Threading is enabled. AdaptiveGCThreading flag
+	 * is not sufficient; Adaptive threading must be ignored if GC thread count is forced.
+	 * @return TRUE if adaptive threading routines can proceed, FALSE otherwise
+	 */
+	MMINLINE bool adaptiveThreadingEnabled()
+	{
+		return (adaptiveGCThreading && !gcThreadCountForced);
+	}
 #endif /* OMR_GC_MODRON_SCAVENGER */
 
 	/**
@@ -1125,7 +1160,7 @@ public:
 		return ((uintptr_t)baseSlotPtr >= (uintptr_t)_tenureBase) && ((uintptr_t)topSlotPtr - (uintptr_t)_tenureBase) < _tenureSize;
 	}
 
-	MMINLINE bool 
+	MMINLINE bool
 	isFvtestForce(uintptr_t *forceMax, uintptr_t *forceCntr)
 	{
 		bool result = false;
@@ -1139,25 +1174,25 @@ public:
 		return result;
 	}
 
-	MMINLINE bool 
+	MMINLINE bool
 	isFvtestForceSweepChunkArrayCommitFailure()
 	{
 		return isFvtestForce(&fvtest_forceSweepChunkArrayCommitFailure, &fvtest_forceSweepChunkArrayCommitFailureCounter);
 	}
 
-	MMINLINE bool 
+	MMINLINE bool
 	isFvtestForceMarkMapCommitFailure()
 	{
 		return isFvtestForce(&fvtest_forceMarkMapCommitFailure, &fvtest_forceMarkMapCommitFailureCounter);
 	}
 
-	MMINLINE bool 
+	MMINLINE bool
 	isFvtestForceMarkMapDecommitFailure()
 	{
 		return isFvtestForce(&fvtest_forceMarkMapDecommitFailure, &fvtest_forceMarkMapDecommitFailureCounter);
 	}
 
-	MMINLINE bool 
+	MMINLINE bool
 	isFvtestForceReferenceChainWalkerMarkMapCommitFailure()
 	{
 		return isFvtestForce(&fvtest_forceReferenceChainWalkerMarkMapCommitFailure, &fvtest_forceReferenceChainWalkerMarkMapCommitFailureCounter);
@@ -1341,6 +1376,9 @@ public:
 		return (fvtest_disableInlineAllocation || instrumentableAllocateHookEnabled || disableInlineCacheForAllocationThreshold);
 	}
 
+	bool isSATBBarrierActive();
+	bool usingSATBBarrier();
+
 	MM_GCExtensionsBase()
 		: MM_BaseVirtual()
 #if defined(OMR_GC_MODRON_SCAVENGER)
@@ -1383,7 +1421,7 @@ public:
 		, incrementScavengerStats()
 		, scavengerStats()
 		, copyScanRatio()
-#endif /* OMR_GC_MODRON_SCAVENGER */		
+#endif /* OMR_GC_MODRON_SCAVENGER */
 #if defined(OMR_GC_VLHGC)
 		, globalVLHGCStats()
 #endif /* OMR_GC_VLHGC */
@@ -1397,6 +1435,8 @@ public:
 		, isArrayletDoubleMapRequested(false)
 		, isArrayletDoubleMapAvailable(false)
 #endif /* OMR_GC_DOUBLE_MAP_ARRAYLETS */
+		, isVirtualLargeObjectHeapRequested(false)
+		, isVirtualLargeObjectHeapEnabled(false)
 		, requestedPageSize(0)
 		, requestedPageFlags(OMRPORT_VMEM_PAGE_FLAG_NOT_USED)
 		, gcmetadataPageSize(0)
@@ -1407,7 +1447,7 @@ public:
 		, freeOldHeapSizeOnLastGlobalGC(UDATA_MAX)
 		, concurrentKickoffTenuringHeadroom((float)0.02)
 		, tenureBytesDeviationBoost((float)2)
-#endif /* OMR_GC_MODRON_SCAVENGER */		
+#endif /* OMR_GC_MODRON_SCAVENGER */
 #if defined(OMR_GC_REALTIME)
 		, sATBBarrierRememberedSet(NULL)
 #endif /* defined(OMR_GC_REALTIME) */
@@ -1466,6 +1506,7 @@ public:
 		, loaFreeHistorySize(15)
 		, lastGlobalGCFreeBytesLOA(0)
 		, concurrentMetering(METER_BY_SOA)
+		, minimumContractionRatio(DEFAULT_MINIMUM_CONTRACTION_RATIO)
 #endif /* OMR_GC_LARGE_OBJECT_AREA */
 		, disableExplicitGC(false)
 		, heapAlignment(HEAP_ALIGNMENT)
@@ -1479,13 +1520,13 @@ public:
 		, heapFreeMinimumRatioMultiplier(30)
 		, heapFreeMaximumRatioDivisor(100)
 		, heapFreeMaximumRatioMultiplier(60)
-		, heapExpansionGCTimeThreshold(13)
-		, heapContractionGCTimeThreshold(5)
+		, heapExpansionGCRatioThreshold()
+		, heapContractionGCRatioThreshold()
 		, heapExpansionStabilizationCount(0)
 		, heapContractionStabilizationCount(3)
 		, heapSizeStartupHintConservativeFactor((float)0.7)
-		, heapSizeStartupHintWeightNewValue((float)0.8)	
-		, useGCStartupHints(true)	
+		, heapSizeStartupHintWeightNewValue((float)0.8)
+		, useGCStartupHints(true)
 		, workpacketCount(0) /* only set if -Xgcworkpackets specified */
 		, packetListSplit(0)
 		, markingArraySplitMaximumAmount(DEFAULT_ARRAY_SPLIT_MAXIMUM_SIZE)
@@ -1536,11 +1577,11 @@ public:
 		, gcThreadCountForced(false)
 		, dispatcherHybridNotifyThreadBound(16)
 #if defined(OMR_GC_MODRON_SCAVENGER) || defined(OMR_GC_VLHGC)
-		, scavengerScanOrdering(OMR_GC_SCAVENGER_SCANORDERING_HIERARCHICAL)
+		, scavengerScanOrdering(OMR_GC_SCAVENGER_SCANORDERING_NONE)
 		/* Start of options relating to dynamicBreadthFirstScanOrdering */
 		, gcCountBetweenHotFieldSort(1)
 		, gcCountBetweenHotFieldSortMax(6)
-		, adaptiveGcCountBetweenHotFieldSort(true)
+		, adaptiveGcCountBetweenHotFieldSort(false)
 		, depthCopyTwoPaths(true)
 		, depthCopyThreePaths(false)
 		, alwaysDepthCopyFirstOffset(false)
@@ -1568,6 +1609,7 @@ public:
 		, cacheListSplit(0)
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
 		, softwareRangeCheckReadBarrier(false)
+		, softwareRangeCheckReadBarrierForced(false)
 		, concurrentScavenger(false)
 		, concurrentScavengerForced(false)
 		, concurrentScavengerHWSupport(false)
@@ -1593,8 +1635,8 @@ public:
 		, dynamicNewSpaceSizing(true)
 		, debugDynamicNewSpaceSizing(false)
 		, dnssAvoidMovingObjects(true)
-		, dnssExpectedTimeRatioMinimum(0.01)
-		, dnssExpectedTimeRatioMaximum(0.05)
+		, dnssExpectedRatioMinimum()
+		, dnssExpectedRatioMaximum()
 		, dnssWeightedTimeRatioFactorIncreaseSmall(0.2)
 		, dnssWeightedTimeRatioFactorIncreaseMedium(0.35)
 		, dnssWeightedTimeRatioFactorIncreaseLarge(0.5)
@@ -1605,6 +1647,10 @@ public:
 		, dnssMinimumContraction(0.0)
 		, enableSplitHeap(false)
 		, aliasInhibitingThresholdPercentage(0.20)
+		, adaptiveGCThreading(true)
+		, adaptiveThreadingSensitivityFactor(1.0f)
+		, adaptiveThreadingWeightActiveThreads(0.50f)
+		, adaptiveThreadBooster(0.85f)
 		, splitHeapSection(HEAP_INITIALIZATION_SPLIT_HEAP_UNKNOWN)
 #endif /* OMR_GC_MODRON_SCAVENGER */
 		, globalMaximumContraction(0.05) /* by default, contract must be at most 5% of the committed heap */
@@ -1617,6 +1663,7 @@ public:
 		, excessiveGCratio(95)
 		, excessiveGCFreeSizeRatio((float)0.03)
 		, heap(NULL)
+		, largeObjectVirtualMemory(NULL)
 		, heapRegionManager(NULL)
 		, memoryManager(NULL)
 		, aggressive(0)
@@ -1635,7 +1682,6 @@ public:
 		, concurrentSlackFragmentationAdjustmentWeight(0.0)
 		, debugConcurrentMark(false)
 		, optimizeConcurrentWB(true)
-		, dirtCardDuringRSScan(false)
 		, concurrentLevel(8)
 		, concurrentBackground(1)
 		, concurrentSlack(0)
@@ -1802,6 +1848,7 @@ public:
 		, tarokEnableCopyForwardHybrid(true)
 		, tarokReserveRegionsFromCollectionSet(RESERVE_REGIONS_NO)
 		, tarokEnableRecoverRegionTailsAfterSweep(false)
+		, tarokTargetMaxPauseTime(200)
 #if defined(OMR_GC_VLHGC_CONCURRENT_COPY_FORWARD)
 		, _isConcurrentCopyForward(false)
 #endif /* defined(OMR_GC_VLHGC_CONCURRENT_COPY_FORWARD) */

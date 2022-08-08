@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -41,6 +41,47 @@ namespace TR { class SymbolReference; }
 #define ARM64_INSTRUCTION_LENGTH 4
 
 /*
+ * Prefetch type used in PRFM instructions
+ */
+enum class ARM64PrefetchType
+   {
+   LOAD        = 0,
+   INSTRUCTION = 1,
+   STORE       = 2
+   };
+
+/*
+ * Prefetch target used in PRFM instructions
+ */
+enum class ARM64PrefetchTarget
+   {
+   L1 = 0,
+   L2 = 1,
+   L3 = 2
+   };
+
+/*
+ * Prefetch policy used in PRFM instructions
+ */
+enum class ARM64PrefetchPolicy
+   {
+   KEEP = 0,
+   STRM = 1
+   };
+
+/*
+ * @brief returns Prefetch operation from specified type, target, and policy.
+ * @param[in] type : prefetch type
+ * @param[in] target : prefetch target
+ * @param[in] policy : prefetch policy
+ * @return prefetch operation
+ */
+inline uint32_t toPrefetchOp(ARM64PrefetchType type, ARM64PrefetchTarget target, ARM64PrefetchPolicy policy)
+   {
+   return (static_cast<uint32_t>(type) << 3) | (static_cast<uint32_t>(target) << 1) | static_cast<uint32_t>(policy);
+   }
+
+/*
  * @brief Answers if the signed integer value can be placed in 7-bit field
  * @param[in] intValue : signed integer value
  * @return true if the value can be placed in 7-bit field, false otherwise
@@ -55,7 +96,7 @@ inline bool constantIsImm7(int32_t intValue)
  * @param[in] intValue : signed integer value
  * @return true if the value can be placed in 9-bit field, false otherwise
  */
-inline bool constantIsImm9(int32_t intValue)
+inline bool constantIsImm9(int64_t intValue)
    {
    return (-256 <= intValue && intValue < 256);
    }
@@ -78,6 +119,16 @@ inline bool constantIsUnsignedImm4(uint64_t intValue)
 inline bool constantIsUnsignedImm12(uint64_t intValue)
    {
    return (intValue < (1<<12));  // 4096
+   }
+
+/*
+ * @brief Answers if the unsigned integer value can be encoded in a 12-bit field with 12 bits shift
+ * @param[in] intValue : unsigned integer value
+ * @return true if the value can be encoded in a 12-bit field with 12 bits shift, false otherwise
+ */
+inline bool constantIsUnsignedImm12Shifted(uint64_t intValue)
+   {
+   return ((intValue & (~(static_cast<uint64_t>(0xfff000)))) == 0);
    }
 
 /*
@@ -1273,6 +1324,14 @@ class ARM64AdminInstruction : public TR::Instruction
    virtual void assignRegisters(TR_RegisterKinds kindToBeAssigned);
 
    /**
+    * @brief Expand this instruction prior to binary encoding.
+    *
+    * @returns the last instruction in the expansion or this instruction if no expansion was
+    *          performed.
+    */
+   virtual TR::Instruction *expandInstruction();
+
+   /**
     * @brief Generates binary encoding of the instruction
     * @return instruction cursor
     */
@@ -1574,9 +1633,114 @@ class ARM64Trg1ImmInstruction : public ARM64Trg1Instruction
          {
          *instruction |= ((_sourceImmediate & 0x1ffffc) << 3) | ((_sourceImmediate & 0x3) << 29);
          }
+      else if (op == TR::InstOpCode::vmovi16b || op == TR::InstOpCode::vmovi8h ||
+               op == TR::InstOpCode::vmovi4s || op == TR::InstOpCode::vmovi4s_one ||
+               op == TR::InstOpCode::vmovi2s || op == TR::InstOpCode::movid ||
+               op == TR::InstOpCode::vmovi2d || op == TR::InstOpCode::vfmov4s ||
+               op == TR::InstOpCode::vfmov2d || op == TR::InstOpCode::vmvni8h ||
+               op == TR::InstOpCode::vmvni4s || op == TR::InstOpCode::vmvni4s_one ||
+               op == TR::InstOpCode::vbicimm8h || op == TR::InstOpCode::vbicimm4s ||
+               op == TR::InstOpCode::vorrimm8h || op == TR::InstOpCode::vorrimm4s)
+         {
+         *instruction |= ((_sourceImmediate & 0xe0) << 11) | ((_sourceImmediate & 0x1f) << 5);
+         }
       else
          {
          TR_ASSERT(false, "Unsupported opcode in ARM64Trg1ImmInstruction.");
+         }
+      }
+
+   /**
+    * @brief Generates binary encoding of the instruction
+    * @return instruction cursor
+    */
+   virtual uint8_t *generateBinaryEncoding();
+   };
+
+class ARM64Trg1ImmShiftedInstruction : public ARM64Trg1ImmInstruction
+   {
+   uint32_t _shiftAmount;
+
+   public:
+   /*
+    * @brief Constructor
+    * @param[in] op : instruction opcode
+    * @param[in] node : node
+    * @param[in] treg : target register
+    * @param[in] imm : immediate value
+    * @param[in] shiftAmount : shiftAmount
+    * @param[in] cg : CodeGenerator
+    */
+   ARM64Trg1ImmShiftedInstruction(TR::InstOpCode::Mnemonic op, TR::Node *node, TR::Register *treg,
+                            uint32_t imm, uint32_t shiftAmount, TR::CodeGenerator *cg)
+      : ARM64Trg1ImmInstruction(op, node, treg, imm, cg), _shiftAmount(shiftAmount)
+      {
+      }
+
+   /*
+    * @brief Constructor
+    * @param[in] op : instruction opcode
+    * @param[in] node : node
+    * @param[in] treg : target register
+    * @param[in] imm : immediate value
+    * @param[in] shiftAmount : shiftAmount
+    * @param[in] precedingInstruction : preceding instruction
+    * @param[in] cg : CodeGenerator
+    */
+   ARM64Trg1ImmShiftedInstruction(TR::InstOpCode::Mnemonic op, TR::Node *node, TR::Register *treg,
+                            uint32_t imm, uint32_t shiftAmount,
+                            TR::Instruction *precedingInstruction, TR::CodeGenerator *cg)
+      : ARM64Trg1ImmInstruction(op, node, treg, imm, precedingInstruction, cg), _shiftAmount(shiftAmount)
+      {
+      }
+
+   /**
+    * @brief Gets instruction kind
+    * @return instruction kind
+    */
+   virtual Kind getKind() { return IsTrg1ImmShifted; }
+
+   /**
+    * @brief Gets shift amount
+    * @return shift amount
+    */
+   uint32_t getShiftAmount() {return _shiftAmount;}
+   /**
+    * @brief Sets shift amount
+    * @param[in] sa : shift amount
+    * @return shift amount
+    */
+   uint32_t setShiftAmount(uint32_t sa) {return (_shiftAmount = sa);}
+
+   /**
+    * @brief Sets shift type and amount in binary encoding
+    * @param[in] instruction : instruction cursor
+    */
+   void insertShift(uint32_t *instruction)
+      {
+      TR::InstOpCode::Mnemonic op = getOpCodeValue();
+      if ((op == TR::InstOpCode::vmovi8h) || (op == TR::InstOpCode::vmvni8h) ||
+          (op == TR::InstOpCode::vbicimm8h) || (op == TR::InstOpCode::vorrimm8h))
+         {
+         TR_ASSERT_FATAL((_shiftAmount == 0) || (_shiftAmount == 8), "shiftAmount other than 0 or 8 is not allowed for vmovi8h, vmvni8h, vbicimm8h and vorrimm8h");
+         *instruction |= (_shiftAmount >> 3) << 13;
+         }
+      else if ((op == TR::InstOpCode::vmovi4s) || (op == TR::InstOpCode::vmvni4s) ||
+               (op == TR::InstOpCode::vbicimm4s) || (op == TR::InstOpCode::vorrimm4s))
+         {
+         TR_ASSERT_FATAL((_shiftAmount == 0) || (_shiftAmount == 8) || (_shiftAmount == 16) || (_shiftAmount == 24),
+                        "shiftAmount other than 0, 8, 16, or 24 is not allowed for vmovi4s, vmvni4s, vbicimm4s and vorrimm4s");
+         *instruction |= (_shiftAmount >> 3) << 13;
+         }
+      else if ((op == TR::InstOpCode::vmovi4s_one) || (op == TR::InstOpCode::vmvni4s_one))
+         {
+         TR_ASSERT_FATAL((_shiftAmount == 8) || (_shiftAmount == 16), "shiftAmount other than 8 or 16 is not allowed for vmovi8h and vmvni8h");
+
+         *instruction |= (_shiftAmount >> 4) << 12;
+         }
+      else
+         {
+         TR_ASSERT_FATAL(false, "Unsupported opcode in ARM64Trg1ImmShiftedInstruction.");
          }
       }
 
@@ -1875,6 +2039,147 @@ class ARM64Trg1ZeroSrc1Instruction : public ARM64Trg1Src1Instruction
    virtual uint8_t *generateBinaryEncoding();
    };
 
+/*
+ * This class is designated to be used for alias instruction such as movw, movx (bitmask immediate)
+ */
+class ARM64Trg1ZeroImmInstruction : public ARM64Trg1Instruction
+   {
+   uint32_t _source1Immediate;
+   bool _Nbit;
+
+   public:
+
+   /*
+    * @brief Constructor
+    * @param[in]   op : instruction opcode
+    * @param[in] node : node
+    * @param[in] treg : target register
+    * @param[in]  imm : immediate value
+    * @param[in]   cg : CodeGenerator
+    */
+   ARM64Trg1ZeroImmInstruction(TR::InstOpCode::Mnemonic op, TR::Node *node, TR::Register *treg,
+                             uint32_t imm, TR::CodeGenerator *cg)
+      : ARM64Trg1Instruction(op, node, treg, cg), _source1Immediate(imm), _Nbit(false)
+      {
+      }
+
+   /*
+    * @brief Constructor
+    * @param[in]   op : instruction opcode
+    * @param[in] node : node
+    * @param[in] treg : target register
+    * @param[in]    N : N bit value
+    * @param[in]  imm : immediate value
+    * @param[in]   cg : CodeGenerator
+    */
+   ARM64Trg1ZeroImmInstruction(TR::InstOpCode::Mnemonic op, TR::Node *node, TR::Register *treg,
+                             bool N, uint32_t imm, TR::CodeGenerator *cg)
+      : ARM64Trg1Instruction(op, node, treg, cg), _source1Immediate(imm), _Nbit(N)
+      {
+      }
+
+   /*
+    * @brief Constructor
+    * @param[in]                   op : instruction opcode
+    * @param[in]                 node : node
+    * @param[in]                 treg : target register
+    * @param[in]                  imm : immediate value
+    * @param[in] precedingInstruction : preceding instruction
+    * @param[in]                   cg : CodeGenerator
+    */
+   ARM64Trg1ZeroImmInstruction(TR::InstOpCode::Mnemonic op, TR::Node *node, TR::Register *treg,
+                             uint32_t imm,
+                             TR::Instruction *precedingInstruction, TR::CodeGenerator *cg)
+      : ARM64Trg1Instruction(op, node, treg, precedingInstruction, cg), _source1Immediate(imm), _Nbit(false)
+      {
+      }
+
+   /*
+    * @brief Constructor
+    * @param[in]                   op : instruction opcode
+    * @param[in]                 node : node
+    * @param[in]                 treg : target register
+    * @param[in]                    N : N bit value
+    * @param[in]                  imm : immediate value
+    * @param[in] precedingInstruction : preceding instruction
+    * @param[in]                   cg : CodeGenerator
+    */
+   ARM64Trg1ZeroImmInstruction(TR::InstOpCode::Mnemonic op, TR::Node *node, TR::Register *treg,
+                             bool N, uint32_t imm,
+                             TR::Instruction *precedingInstruction, TR::CodeGenerator *cg)
+      : ARM64Trg1Instruction(op, node, treg, precedingInstruction, cg), _source1Immediate(imm), _Nbit(N)
+      {
+      }
+
+   /**
+    * @brief Gets instruction kind
+    * @return instruction kind
+    */
+   virtual Kind getKind() { return IsTrg1ZeroImm; }
+
+   /**
+    * @brief Gets source immediate
+    * @return source immediate
+    */
+   uint32_t getSourceImmediate() {return _source1Immediate;}
+   /**
+    * @brief Sets source immediate
+    * @param[in] si : immediate value
+    * @return source immediate
+    */
+   uint32_t setSourceImmediate(uint32_t si) {return (_source1Immediate = si);}
+
+   /**
+    * @brief Gets the N bit (bit 22)
+    * @return N bit value
+    */
+   bool getNbit() { return _Nbit;}
+   /**
+    * @brief Sets the N bit (bit 22)
+    * @param[in] n : N bit value
+    * @return N bit value
+    */
+   bool setNbit(bool n) { return (_Nbit = n);}
+
+   /**
+    * @brief Sets zero register in binary encoding
+    * @param[in] instruction : instruction cursor
+    */
+   void insertZeroRegister(uint32_t *instruction)
+      {
+      TR::RealRegister *zeroReg = cg()->machine()->getRealRegister(TR::RealRegister::xzr);
+      zeroReg->setRegisterFieldRN(instruction);
+      }
+
+   /**
+    * @brief Sets immediate field in binary encoding
+    * @param[in] instruction : instruction cursor
+    */
+   void insertImmediateField(uint32_t *instruction)
+      {
+      *instruction |= ((_source1Immediate & 0xfff) << 10); /* imm12 */
+      }
+
+   /**
+    * @brief Sets N bit (bit 22) field in binary encoding
+    * @param[in] instruction : instruction cursor
+    */
+   void insertNbit(uint32_t *instruction)
+      {
+      if (_Nbit)
+         {
+         *instruction |= (1 << 22);
+         }
+      }
+
+   /**
+    * @brief Generates binary encoding of the instruction
+    * @return instruction cursor
+    */
+   virtual uint8_t *generateBinaryEncoding();
+   };
+
+
 class ARM64Trg1Src1ImmInstruction : public ARM64Trg1Src1Instruction
    {
    uint32_t _source1Immediate;
@@ -2019,7 +2324,24 @@ class ARM64Trg1Src1ImmInstruction : public ARM64Trg1Src1Instruction
     */
    void insertImmediateField(uint32_t *instruction)
       {
-      *instruction |= ((_source1Immediate & 0xfff) << 10); /* imm12 */
+      TR::InstOpCode::Mnemonic op = getOpCodeValue();
+
+      if ((op >= TR::InstOpCode::vshl16b) && (op <= TR::InstOpCode::vushr2d))
+         {
+         *instruction |= ((_source1Immediate & 0x7f) << 16); /* immh:immb */
+         }
+      else if ((op >= TR::InstOpCode::vdupe16b) && (op <= TR::InstOpCode::vinsxd))
+         {
+         *instruction |= ((_source1Immediate & 0x1f) << 16); /* imm5 */
+         }
+      else if ((op >= TR::InstOpCode::vinseb) && (op <= TR::InstOpCode::vinsed))
+         {
+         *instruction |= ((_source1Immediate & 0x3ff) << 11); /* imm5 and imm4 */
+         }
+      else
+         {
+         *instruction |= ((_source1Immediate & 0xfff) << 10); /* imm12 */
+         }
       }
 
    /**
@@ -2544,6 +2866,80 @@ class ARM64Trg1Src2ExtendedInstruction : public ARM64Trg1Src2Instruction
    virtual uint8_t *generateBinaryEncoding();
    };
 
+class ARM64Trg1Src2IndexedElementInstruction : public ARM64Trg1Src2Instruction
+   {
+   uint32_t _index;
+
+   public:
+
+   /*
+    * @brief Constructor
+    * @param[in] op : instruction opcode
+    * @param[in] node : node
+    * @param[in] treg : target register
+    * @param[in] s1reg : source register 1
+    * @param[in] s2reg : source register 2
+    * @param[in] index : index of element in s2reg
+    * @param[in] cg : CodeGenerator
+    */
+   ARM64Trg1Src2IndexedElementInstruction(TR::InstOpCode::Mnemonic op,
+                             TR::Node *node,
+                             TR::Register *treg,
+                             TR::Register *s1reg,
+                             TR::Register *s2reg,
+                             uint32_t index, TR::CodeGenerator *cg)
+      : ARM64Trg1Src2Instruction(op, node, treg, s1reg, s2reg, cg), _index(index)
+      {
+      }
+
+   /*
+    * @brief Constructor
+    * @param[in] op : instruction opcode
+    * @param[in] node : node
+    * @param[in] treg : target register
+    * @param[in] s1reg : source register 1
+    * @param[in] s2reg : source register 2
+    * @param[in] index : index of element in s2reg
+    * @param[in] precedingInstruction : preceding instruction
+    * @param[in] cg : CodeGenerator
+    */
+   ARM64Trg1Src2IndexedElementInstruction(TR::InstOpCode::Mnemonic op,
+                             TR::Node *node,
+                             TR::Register *treg,
+                             TR::Register *s1reg,
+                             TR::Register *s2reg,
+                             uint32_t index,
+                             TR::Instruction *precedingInstruction, TR::CodeGenerator *cg)
+      : ARM64Trg1Src2Instruction(op, node, treg, s1reg, s2reg, precedingInstruction, cg),
+        _index(index)
+      {
+      }
+
+   /**
+    * @brief Gets instruction kind
+    * @return instruction kind
+    */
+   virtual Kind getKind() { return IsTrg1Src2IndexedElement; }
+
+   /**
+    * @brief Gets index
+    * @return index of element in s2reg
+    */
+   uint32_t getIndex() {return _index;}
+
+   /**
+    * @brief Sets index in binary encoding
+    * @param[in] instruction : instruction cursor
+    */
+   void insertIndex(uint32_t *instruction);
+
+   /**
+    * @brief Generates binary encoding of the instruction
+    * @return instruction cursor
+    */
+   virtual uint8_t *generateBinaryEncoding();
+   };
+
 /*
  * This class is designated to be used for alias instruction such as mulw, mulx
  */
@@ -2892,6 +3288,14 @@ class ARM64Trg1MemInstruction : public ARM64Trg1Instruction
    virtual void assignRegisters(TR_RegisterKinds kindToBeAssigned);
 
    /**
+    * @brief Expand this instruction prior to binary encoding.
+    *
+    * @returns the last instruction in the expansion or this instruction if no expansion was
+    *          performed.
+    */
+   virtual TR::Instruction *expandInstruction();
+
+   /**
     * @brief Generates binary encoding of the instruction
     * @return instruction cursor
     */
@@ -2971,6 +3375,43 @@ class ARM64MemInstruction : public TR::Instruction
     * @return offset
     */
    virtual int32_t getOffset() {return getMemoryReference()->getOffset();}
+   /**
+    * @brief Answers whether this instruction references the given virtual register
+    * @param[in] reg : virtual register
+    * @return true when the instruction references the virtual register
+    */
+   virtual bool refsRegister(TR::Register *reg);
+   /**
+    * @brief Answers whether this instruction uses the given virtual register
+    * @param[in] reg : virtual register
+    * @return true when the instruction uses the virtual register
+    */
+   virtual bool usesRegister(TR::Register *reg);
+   /**
+    * @brief Answers whether this instruction defines the given virtual register
+    * @param[in] reg : virtual register
+    * @return true when the instruction defines the virtual register
+    */
+   virtual bool defsRegister(TR::Register *reg);
+   /**
+    * @brief Answers whether this instruction defines the given real register
+    * @param[in] reg : real register
+    * @return true when the instruction defines the real register
+    */
+   virtual bool defsRealRegister(TR::Register *reg);
+   /**
+    * @brief Assigns registers
+    * @param[in] kindToBeAssigned : register kind
+    */
+   virtual void assignRegisters(TR_RegisterKinds kindToBeAssigned);
+
+   /**
+    * @brief Expand this instruction prior to binary encoding.
+    *
+    * @returns the last instruction in the expansion or this instruction if no expansion was
+    *          performed.
+    */
+   virtual TR::Instruction *expandInstruction();
 
    /**
     * @brief Generates binary encoding of the instruction
@@ -3353,6 +3794,80 @@ class ARM64Trg1MemSrc1Instruction : public ARM64Trg1MemInstruction
     * @return estimated binary length
     */
    virtual int32_t estimateBinaryLength(int32_t currentEstimate);
+   };
+
+class ARM64MemImmInstruction : public ARM64MemInstruction
+   {
+   uint32_t _immediate; // Imm5
+
+   public:
+   /*
+    * @brief Constructor
+    * @param[in] op : instruction opcode
+    * @param[in] node : node
+    * @param[in] mr : memory reference
+    * @param[in] immediate : 5bit immediate
+    * @param[in] cg : CodeGenerator
+    */
+   ARM64MemImmInstruction(TR::InstOpCode::Mnemonic op,
+                        TR::Node *node,
+                        TR::MemoryReference *mr,
+                        uint32_t immediate,
+                        TR::CodeGenerator *cg)
+      : ARM64MemInstruction(op, node, mr, cg),  _immediate(immediate)
+      {
+      }
+
+   /*
+    * @brief Constructor
+    * @param[in] op : instruction opcode
+    * @param[in] node : node
+    * @param[in] mr : memory reference
+    * @param[in] precedingInstruction : preceding instruction
+    * @param[in] immediate : 5bit immediate
+    * @param[in] cg : CodeGenerator
+    */
+   ARM64MemImmInstruction(TR::InstOpCode::Mnemonic op,
+                        TR::Node *node,
+                        TR::MemoryReference *mr,
+                        uint32_t immediate,
+                        TR::Instruction *precedingInstruction, TR::CodeGenerator *cg)
+      : ARM64MemInstruction(op, node, mr, precedingInstruction, cg), _immediate(immediate)
+      {
+      }
+
+   /**
+    * @brief Gets instruction kind
+    * @return instruction kind
+    */
+   virtual Kind getKind() { return IsMemImm; }
+
+   /**
+    * @brief Gets immediate
+    * @return immediate
+    */
+   uint32_t getImmediate() {return _immediate;}
+   /**
+    * @brief Sets immediate
+    * @param[in] immediate : immediate value
+    * @return immediate
+    */
+   uint32_t setImmediate(uint32_t immediate) {return (_immediate = immediate);}
+
+   /**
+    * @brief Sets immediate field in binary encoding
+    * @param[in] instruction : instruction cursor
+    */
+   void insertImmediateField(uint32_t *instruction)
+      {
+      *instruction |= (_immediate & 0x1f); /* imm5 */
+      }
+
+   /**
+    * @brief Generates binary encoding of the instruction
+    * @return instruction cursor
+    */
+   virtual uint8_t *generateBinaryEncoding();
    };
 
 class ARM64Src1Instruction : public TR::Instruction
@@ -3895,7 +4410,7 @@ class ARM64VirtualGuardNOPInstruction : public TR::ARM64LabelInstruction
                                  TR::RegisterDependencyConditions *cond,
                                  TR::LabelSymbol                  *sym,
                                  TR::CodeGenerator                *cg)
-      : TR::ARM64LabelInstruction(TR::InstOpCode::vgdnop, node, sym, cond, cg),
+      : TR::ARM64LabelInstruction(TR::InstOpCode::vgnop, node, sym, cond, cg),
         _site(site)
       {
       }
@@ -3906,7 +4421,7 @@ class ARM64VirtualGuardNOPInstruction : public TR::ARM64LabelInstruction
                                  TR::LabelSymbol                  *sym,
                                  TR::Instruction                  *precedingInstruction,
                                  TR::CodeGenerator                *cg)
-      : TR::ARM64LabelInstruction(TR::InstOpCode::vgdnop, node, sym, cond, precedingInstruction, cg),
+      : TR::ARM64LabelInstruction(TR::InstOpCode::vgnop, node, sym, cond, precedingInstruction, cg),
         _site(site)
       {
       }

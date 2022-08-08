@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -26,7 +26,7 @@ if(OMR_OPT_CUDA)
 	find_package(OmrCuda REQUIRED)
 endif()
 
-if(OMR_HOST_OS STREQUAL "zos")
+if(OMR_OS_ZOS)
 	include(OmrMetalC)
 endif()
 
@@ -60,20 +60,23 @@ target_compile_definitions(omrport_obj
 		$<TARGET_PROPERTY:omr_base,INTERFACE_COMPILE_DEFINITIONS>
 )
 
-if(OMR_HOST_OS STREQUAL "aix")
+if(OMR_OS_AIX)
 	list(APPEND OBJECTS omrgetsp.s)
 endif()
 
 
-if(OMR_HOST_OS STREQUAL "zos")
+if(OMR_OS_ZOS)
 	omr_compile_metalc(
-	    zos390/omrlpdat.mc
-	    zos390/omrlpdat.o
+		zos390/omrlpdat.mc
+		zos390/omrlpdat.o
 	)
-	target_sources(omrport_obj
-		PRIVATE
-			${CMAKE_CURRENT_BINARY_DIR}/zos390/omrlpdat.o
+	# Older versions of CMake don't let you add pre-compiled objects to object-libraries.
+	# Instead create a new static library for the metal c files
+	omr_add_library(omrport_metalc STATIC
+		${CMAKE_CURRENT_BINARY_DIR}/zos390/omrlpdat.o
 	)
+	set_target_properties(omrport_metalc PROPERTIES LINKER_LANGUAGE C)
+
 	list(APPEND OBJECTS
 		omrgenerate_ieat_dump.s
 		omrget_large_pageable_pages_supported.s
@@ -93,6 +96,7 @@ if(OMR_HOST_OS STREQUAL "zos")
 			omrvmem_support_above_bar.s
 			omrvmem_support_below_bar_64.s
 			omript_ttoken64.s
+			omrcel4ro31.c
 		)
 	else()
 		list(APPEND OBJECTS omrvmem_support_below_bar_31.s)
@@ -102,25 +106,20 @@ else()
 endif()
 
 list(APPEND OBJECTS
-	omrgetjobname.c
-	omrgetjobid.c
 	omrgetasid.c
+	omrgetjobid.c
+	omrgetjobname.c
+	omrgetsysname.c
 )
 
 if(OMR_ARCH_S390)
 	list(APPEND OBJECTS omrrttime.s)
-else()
-	if(OMR_ARCH_POWER)
-		if(OMR_ENV_DATA64)
-			if(OMR_HOST_OS STREQUAL "linux")
-				list(APPEND OBJECTS omrrttime.s)
-			endif()
-		endif()
-	endif()
+elseif(OMR_ARCH_POWER AND OMR_ENV_DATA64 AND OMR_OS_LINUX)
+	list(APPEND OBJECTS omrrttime.s)
 endif()
 
 if(OMR_ARCH_S390)
-	if(OMR_HOST_OS STREQUAL "linux")
+	if(OMR_OS_LINUX)
 		list(APPEND OBJECTS omrgetstfle.s)
 	else()
 		if(OMR_ENV_DATA64)
@@ -131,10 +130,9 @@ if(OMR_ARCH_S390)
 	endif()
 endif()
 
-
 #TODO another if block @port_objects.mk:89
 
-if(OMR_HOST_OS STREQUAL "aix")
+if(OMR_OS_AIX)
 	list(APPEND OBJECTS
 		rt_divu64.s
 		rt_time.s
@@ -152,13 +150,13 @@ list(APPEND OBJECTS
 	omrfilestreamtext.c
 )
 
-if(NOT OMR_HOST_OS STREQUAL "win")
+if(NOT OMR_OS_WINDOWS)
 	list(APPEND OBJECTS omriconvhelpers.c)
 endif()
 
 list(APPEND OBJECTS omrfile_blockingasync.c)
 
-if(OMR_HOST_OS STREQUAL "win")
+if(OMR_OS_WINDOWS)
 	list(APPEND OBJECTS omrfilehelpers.c)
 endif()
 
@@ -188,7 +186,7 @@ list(APPEND OBJECTS
 	omrsockptb.c
 )
 
-if(NOT OMR_HOST_OS STREQUAL "win")
+if(NOT OMR_OS_WINDOWS)
 	list(APPEND OBJECTS omrsignal_context.c)
 endif()
 
@@ -202,7 +200,7 @@ list(APPEND OBJECTS omrsysinfo_helpers.c)
 
 list(APPEND OBJECTS omrsyslog.c)
 
-if(OMR_HOST_OS STREQUAL win)
+if(OMR_OS_WINDOWS)
 	#TODO hack to compile mc files
 	enable_language(RC)
 	add_custom_command(
@@ -223,15 +221,13 @@ list(APPEND OBJECTS
 	omrmemtag_checks.c
 )
 
-if(OMR_HOST_OS STREQUAL aix)
+if(OMR_OS_AIX)
 	list(APPEND OBJECTS omrosdump_helpers.c)
-elseif(OMR_HOST_OS STREQUAL linux)
+elseif(OMR_OS_LINUX)
 	list(APPEND OBJECTS omrosdump_helpers.c)
-elseif(OMR_HOST_OS STREQUAL osx)
+elseif(OMR_OS_OSX)
 	list(APPEND OBJECTS omrosdump_helpers.c)
-endif()
-
-if(OMR_HOST_OS STREQUAL zos)
+elseif(OMR_OS_ZOS)
 	if(NOT OMR_ENV_DATA64)
 		list(APPEND OBJECTS
 			omrsignal_ceehdlr.c
@@ -241,11 +237,15 @@ if(OMR_HOST_OS STREQUAL zos)
 endif()
 
 if(OMR_HOST_ARCH STREQUAL ppc)
-	if(OMR_HOST_OS STREQUAL linux)
+	if(OMR_OS_LINUX)
 		list(APPEND OBJECTS auxv.c)
 	endif()
 elseif(OMR_ARCH_S390)
-	if(OMR_HOST_OS STREQUAL linux)
+	if(OMR_OS_LINUX)
+		list(APPEND OBJECTS auxv.c)
+	endif()
+elseif(OMR_ARCH_AARCH64)
+	if(OMR_OS_LINUX)
 		list(APPEND OBJECTS auxv.c)
 	endif()
 endif()
@@ -264,22 +264,21 @@ if(NOT OMR_OS_WINDOWS)
 	)
 endif()
 
-
 #Setup paths and include directories
 
-if(OMR_HOST_OS STREQUAL "zos")
+if(OMR_OS_ZOS)
 	list(APPEND VPATH zos390)
 	target_include_directories(omrport_obj PRIVATE zos390)
 endif()
 
-if(OMR_HOST_OS STREQUAL "win")
+if(OMR_OS_WINDOWS)
 	if(OMR_ENV_DATA64)
 		list(APPEND VPATH win64amd)
 		target_include_directories(omrport_obj PRIVATE win64amd)
 	endif()
 endif()
 
-if(OMR_HOST_OS STREQUAL "aix")
+if(OMR_OS_AIX)
 	#ifdef I5_VERSION
 		#ifeq (1,$(OMR_ENV_DATA64))
 			#vpath % $(PORT_SRCDIR)iseries64
@@ -297,7 +296,7 @@ if(OMR_HOST_OS STREQUAL "aix")
 	target_include_directories(omrport_obj PRIVATE aix)
 endif()
 
-if(OMR_HOST_OS STREQUAL "linux")
+if(OMR_OS_LINUX)
 	if(OMR_ARCH_ARM)
 		list(APPEND VPATH linuxarm)
 		target_include_directories(omrport_obj PRIVATE linuxarm)
@@ -331,7 +330,7 @@ if(OMR_HOST_OS STREQUAL "linux")
 		list(APPEND VPATH linuxppc)
 		target_include_directories(omrport_obj PRIVATE linuxppc)
 	endif()
-	
+
 	if(OMR_ARCH_RISCV)
 		if(OMR_ENV_DATA64)
 			list(APPEND VPATH linuxriscv64)
@@ -365,14 +364,12 @@ if(OMR_HOST_OS STREQUAL "linux")
 	target_include_directories(omrport_obj PRIVATE linux)
 endif()
 
-
-if(OMR_HOST_OS STREQUAL "osx")
+if(OMR_OS_OSX)
 	list(APPEND VPATH osx)
 	target_include_directories(omrport_obj PRIVATE osx)
 endif()
 
-
-if(OMR_HOST_OS STREQUAL "win")
+if(OMR_OS_WINDOWS)
 	list(APPEND VPATH win32_include win32)
 	target_include_directories(omrport_obj PRIVATE win32_include win32)
 else()
@@ -390,7 +387,7 @@ omr_find_files(resolvedPaths
 	FILES ${OBJECTS}
 )
 
-if(OMR_HOST_OS STREQUAL "win")
+if(OMR_OS_WINDOWS)
 	list(APPEND resolvedPaths win32/omrsyslogmessages.rc)
 endif()
 
@@ -400,8 +397,17 @@ target_include_directories(omrport_obj PRIVATE
 	../nls
 )
 
+# Ensure that we pull in options associated with omr_base.
+target_compile_options(omrport_obj PUBLIC $<TARGET_PROPERTY:omr_base,INTERFACE_COMPILE_OPTIONS>)
+target_compile_definitions(omrport_obj PUBLIC $<TARGET_PROPERTY:omr_base,INTERFACE_COMPILE_DEFINITIONS>)
+target_include_directories(omrport_obj PRIVATE $<TARGET_PROPERTY:omr_base,INTERFACE_INCLUDE_DIRECTORIES>)
+
 # This flag indicates that we are compiling the port library
 target_compile_definitions(omrport_obj PRIVATE -DOMRPORT_LIBRARY_DEFINE)
+
+if(OMR_OS_AIX AND OMR_ENV_DATA64)
+	target_compile_definitions(omrport_obj PRIVATE -D__EXTABI__)
+endif()
 
 omr_add_exports(omrport_obj
 	omrport_allocate_library
@@ -418,8 +424,6 @@ ddr_add_headers(omrport_obj
 	${omr_SOURCE_DIR}/include_core/omrport.h
 )
 ddr_set_add_targets(omrddr omrport_obj)
-
-
 
 ###
 ### omrport static lib
@@ -443,6 +447,10 @@ target_link_libraries(omrport
 		${OMR_THREAD_LIB}
 		${CMAKE_DL_LIBS}
 )
+
+if(OMR_OS_ZOS)
+	target_link_libraries(omrport PRIVATE omrport_metalc)
+endif()
 
 if(OMRPORT_OMRSIG_SUPPORT)
 	target_link_libraries(omrport PRIVATE omrsig)

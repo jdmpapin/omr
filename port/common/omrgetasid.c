@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2015, 2015 IBM Corp. and others
+ * Copyright (c) 2015, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -27,7 +27,7 @@
  */
 #include <string.h>
 #include "omrport.h"
-#include "omrgetjobid.h"
+#include "omrgetasid.h"
 
 #define ASID_STRING "%asid"
 #define ASID_STRING_LENGTH sizeof(ASID_STRING)

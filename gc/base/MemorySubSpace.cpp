@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -156,34 +156,34 @@ MM_MemorySubSpace::reportSystemGCEnd(MM_EnvironmentBase* env)
  * Report the start of a heap expansion event through hooks.
  */
 void
-MM_MemorySubSpace::reportHeapResizeAttempt(MM_EnvironmentBase* env, uintptr_t amount, uintptr_t type)
+MM_MemorySubSpace::reportHeapResizeAttempt(MM_EnvironmentBase* env, uintptr_t amount, uintptr_t resizeType, uintptr_t memoryType)
 {
 	OMRPORT_ACCESS_FROM_ENVIRONMENT(env);
 
 	MM_HeapResizeStats *resizeStats = _extensions->heap->getResizeStats();
 
-	uint64_t resizeTime = (type == HEAP_EXPAND)
+	uint64_t resizeTime = (resizeType == HEAP_EXPAND)
 						  ? resizeStats->getLastExpandTime()
 						  : resizeStats->getLastContractTime();
 
 	uint32_t gcTimeRatio = 0;
 
-	if (HEAP_EXPAND == type) {
+	if (HEAP_EXPAND == resizeType) {
 		gcTimeRatio = resizeStats->getRatioExpandPercentage();
-	} else if (HEAP_CONTRACT == type) {
+	} else if (HEAP_CONTRACT == resizeType) {
 		gcTimeRatio = resizeStats->getRatioContractPercentage();
 	}
 
 	uintptr_t reason = 0;
 
-	if (HEAP_EXPAND == type) {
+	if (HEAP_EXPAND == resizeType) {
 		reason = (uintptr_t)resizeStats->getLastExpandReason();
-	} else if (HEAP_CONTRACT == type) {
+	} else if (HEAP_CONTRACT == resizeType) {
 		reason = (uintptr_t)resizeStats->getLastContractReason();
-	} else if (HEAP_LOA_EXPAND == type) {
+	} else if (HEAP_LOA_EXPAND == resizeType) {
 		reason = (uintptr_t)resizeStats->getLastLoaResizeReason();
 		Assert_MM_true(reason <= LOA_EXPAND_LAST_RESIZE_REASON);
-	} else if (HEAP_LOA_CONTRACT == type) {
+	} else if (HEAP_LOA_CONTRACT == resizeType) {
 		reason = (uintptr_t)resizeStats->getLastLoaResizeReason();
 		Assert_MM_true(reason > LOA_EXPAND_LAST_RESIZE_REASON);
 	}
@@ -193,8 +193,8 @@ MM_MemorySubSpace::reportHeapResizeAttempt(MM_EnvironmentBase* env, uintptr_t am
 		env->getOmrVMThread(),
 		omrtime_hires_clock(),
 		J9HOOK_MM_PRIVATE_HEAP_RESIZE,
-		type,
-		getTypeFlags(),
+		resizeType,
+		memoryType,
 		gcTimeRatio,
 		amount,
 		getActiveMemorySize(),
@@ -992,6 +992,22 @@ MM_MemorySubSpace::garbageCollect(MM_EnvironmentBase* env, MM_AllocateDescriptio
 		}
 
 		if (MM_GCCode(gcCode).isPercolateGC()) {
+			/* MM_EnvironmentBase::acquireExclusiveVMAccessForGC has a mechanism to ensure
+			 * that only one GC is triggered by a multiple mutators racing to acquire exclusive VM access for GC.
+			 * That mechanism works well, if original requesting Collectors are same.
+			 * However in percolate case, original Collector (for example Scavenge) the requested exclusive access and the actual performing collectors
+			 * (in same example, Global) are same.
+			 * If original requesting Collectors are different, but the actual performing collectors ended up not being same,
+			 * the mechanism will fail to prevent duplicate/unnecessary actual collections.
+			 * To help the mechanism deal with this, we will beside implicitly incrementing original Collector exclusive count,
+			 * also explicitly increment the count for the actually performing GC. It cannot be done earlier, at acquire exclusive point,
+			 * since we don't know yet that a different collector will perform GC (in the same example, that Scavenge will actually percolate).
+			 * For example, this will help with the scenario where we have on concurrent global GC in progress and one thread trying to trigger final STW Global
+			 * but  losing to initially acquire exclusive to another racing thread winning to trigger Scavenge, but actually percolating to global GC.
+			 * Although the requesting GCs are different, but actual performing GCs are same (both Global), the former losing thread will not trigger (unnecessary)
+			 * final STW Global exclusive after percolate Global completing, since exclusive count for global changed, too.
+			 */
+			_collector->incrementExclusiveAccessCount();
 			reportPercolateCollect(env);
 		}
 		if (NULL != allocDescription) {
@@ -1128,6 +1144,39 @@ MM_MemorySubSpace::canExpand(MM_EnvironmentBase* env, uintptr_t expandSize)
 }
 
 /**
+ * Compare the specified expand amount with -XsoftMX value
+ * @return Updated expand size
+ */
+uintptr_t
+MM_MemorySubSpace::adjustExpansionWithinSoftMax(MM_EnvironmentBase *env, uintptr_t expandSize, uintptr_t minimumBytesRequired, uintptr_t memoryType)
+{
+	MM_Heap *heap = env->getExtensions()->getHeap();
+	uintptr_t actualSoftMx = heap->getActualSoftMxSize(env, memoryType);
+	uintptr_t activeMemorySize = getActiveMemorySize(memoryType);
+	OMRPORT_ACCESS_FROM_OMRPORT(env->getPortLibrary());
+
+	Assert_MM_true(0 != strcmp(getName(), MEMORY_SUBSPACE_NAME_GENERIC));
+
+	if (0 != actualSoftMx) {
+		if ((0 != minimumBytesRequired) && ((activeMemorySize + minimumBytesRequired) > actualSoftMx)) {
+			if (J9_EVENT_IS_HOOKED(env->getExtensions()->omrHookInterface, J9HOOK_MM_OMR_OOM_DUE_TO_SOFTMX)) {
+				ALWAYS_TRIGGER_J9HOOK_MM_OMR_OOM_DUE_TO_SOFTMX(env->getExtensions()->omrHookInterface, env->getOmrVMThread(), omrtime_hires_clock(),
+						heap->getMaximumMemorySize(), heap->getActiveMemorySize(memoryType), actualSoftMx, minimumBytesRequired);
+				actualSoftMx = heap->getActualSoftMxSize(env, memoryType);
+			}
+		}
+		if (actualSoftMx < activeMemorySize) {
+			/* if our softmx is smaller than our currentsize, we should be contracting not expanding */
+			expandSize = 0;
+		} else if ((activeMemorySize + expandSize) > actualSoftMx) {
+			/* we would go past our -XsoftMx so just expand up to it instead */
+			expandSize = actualSoftMx - activeMemorySize;
+		}
+	}
+	return expandSize;
+}
+
+/**
  * Adjust the specified expansion amount by the specified user increment amount (i.e. -Xmoi)
  * @return the updated expand size
  */
@@ -1233,7 +1282,7 @@ MM_MemorySubSpace::expand(MM_EnvironmentBase* env, uintptr_t expandSize)
 	timeEnd = omrtime_hires_clock();
 	_extensions->heap->getResizeStats()->setLastExpandTime(timeEnd - timeStart);
 
-	reportHeapResizeAttempt(env, actualExpandAmount, HEAP_EXPAND);
+	reportHeapResizeAttempt(env, actualExpandAmount, HEAP_EXPAND, getTypeFlags());
 
 	Trc_MM_MemorySubSpace_expand_Exit2(env->getLanguageVMThread(), actualExpandAmount);
 	return actualExpandAmount;
@@ -1265,7 +1314,7 @@ MM_MemorySubSpace::contract(MM_EnvironmentBase* env, uintptr_t contractSize)
 	timeEnd = omrtime_hires_clock();
 	_extensions->heap->getResizeStats()->setLastContractTime(timeEnd - timeStart);
 
-	reportHeapResizeAttempt(env, actualContractAmount, HEAP_CONTRACT);
+	reportHeapResizeAttempt(env, actualContractAmount, HEAP_CONTRACT, getTypeFlags());
 
 	Trc_MM_MemorySubSpace_contract_Exit(env->getLanguageVMThread(), actualContractAmount);
 	return actualContractAmount;
@@ -1459,7 +1508,7 @@ MM_MemorySubSpace::getAvailableContractionSize(MM_EnvironmentBase* env, MM_Alloc
 uintptr_t
 MM_MemorySubSpace::getAvailableContractionSizeForRangeEndingAt(MM_EnvironmentBase* env, MM_AllocateDescription* allocDescription, void* lowAddr, void* highAddr)
 {
-	MM_MemoryPool* memoryPool = getMemoryPool((highAddr > lowAddr) ? (void*)(((uintptr_t)highAddr) - 1) : highAddr);
+	MM_MemoryPool* memoryPool = getMemoryPool();
 
 	Assert_MM_true(NULL != memoryPool); /* How did we get here? */
 	return memoryPool->getAvailableContractionSizeForRangeEndingAt(env, allocDescription, lowAddr, highAddr);
@@ -1833,7 +1882,7 @@ MM_MemorySubSpace::runEnqueuedCounterBalancing(MM_EnvironmentBase* env)
 			_extensions->heap->getResizeStats()->setLastExpandTime(timeEnd - timeStart);
 
 			if (0 != expandSize) {
-				reportHeapResizeAttempt(env, expandSize, HEAP_EXPAND);
+				reportHeapResizeAttempt(env, expandSize, HEAP_EXPAND, getTypeFlags());
 			}
 
 			break;

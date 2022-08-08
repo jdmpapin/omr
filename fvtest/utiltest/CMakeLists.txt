@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2017, 2017 IBM Corp. and others
+# Copyright (c) 2017, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -25,6 +25,7 @@ omr_add_executable(omrutiltest
 
 target_link_libraries(omrutiltest
 	#omrGtestGlue
+	omr_base
 	omrGtest
 	omrutil
 )
@@ -34,10 +35,6 @@ target_include_directories(omrutiltest
 	$<TARGET_PROPERTY:omrGtestGlue,INTERFACE_INCLUDE_DIRECTORIES>
 )
 
-if(OMR_HOST_OS STREQUAL "zos")
-	target_link_libraries(omrutiltest j9a2e)
-endif()
-
 set_property(TARGET omrutiltest PROPERTY FOLDER fvtest)
 
-add_test(NAME utiltest COMMAND omrutiltest --gtest_output=xml:${CMAKE_CURRENT_BINARY_DIR}/omrutiltest-results.xml)
+omr_add_test(NAME utiltest COMMAND $<TARGET_FILE:omrutiltest> --gtest_output=xml:${CMAKE_CURRENT_BINARY_DIR}/omrutiltest-results.xml)

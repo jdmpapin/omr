@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -245,7 +245,7 @@ void TR::S390zLinuxSystemLinkage::createEpilogue(TR::Instruction * cursor)
 
    TR::Node* node = cursor->getNext()->getNode();
 
-   cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::LABEL, node, generateLabelSymbol(cg()), cursor);
+   cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::label, node, generateLabelSymbol(cg()), cursor);
 
    cursor = fillFPRsInEpilogue(node, cursor);
    cursor = fillGPRsInEpilogue(node, cursor);
@@ -363,7 +363,6 @@ TR::S390zLinuxSystemLinkage::setParameterLinkageRegisterIndex(TR::ResolvedMethod
                {
                lri = numFPRArgs;
                }
-            
             numFPRArgs++;
             break;
             }
@@ -374,23 +373,24 @@ TR::S390zLinuxSystemLinkage::setParameterLinkageRegisterIndex(TR::ResolvedMethod
             break;
             }
 
-         case TR::VectorInt8:
-         case TR::VectorInt16:
-         case TR::VectorInt32:
-         case TR::VectorInt64:
-         case TR::VectorDouble:
-            {
-            if (numVRFArgs < getNumVectorArgumentRegisters())
-               {
-               lri = numVRFArgs;
-               }
-
-            numVRFArgs++;
-            break;
-            }
-
          default:
             {
+            if (paramCursor->getDataType().isVector())
+               {
+               TR::DataType elementType = paramCursor->getDataType().getVectorElementType();
+               if (elementType == TR::Int8 || elementType == TR::Int16 ||
+                   elementType == TR::Int32 || elementType == TR::Int64 || elementType == TR::Double)
+                  {
+                  if (numVRFArgs < getNumVectorArgumentRegisters())
+                     {
+                     lri = numVRFArgs;
+                     }
+
+                  numVRFArgs++;
+                  break;
+                  }
+               }
+
             TR_ASSERT_FATAL(false, "Unknown data type %s", paramCursor->getDataType().toString());
             break;
             }
@@ -488,31 +488,19 @@ TR::S390zLinuxSystemLinkage::callNativeFunction(TR::Node * callNode,
       case TR::fcalli:
       case TR::dcall:
       case TR::dcalli:
-#if defined(SUPPORT_DFP) && defined(J9_PROJECT_SPECIFIC)
-      case TR::dfcall:
-      case TR::dfcalli:
-      case TR::ddcall:
-      case TR::ddcalli:
-#endif
          returnRegister = deps->searchPostConditionRegister(getFloatReturnRegister());
          break;
-#if defined(SUPPORT_DFP) && defined(J9_PROJECT_SPECIFIC)
-      case TR::decall:
-      case TR::decalli:
-         highReg = deps->searchPostConditionRegister(getLongDoubleReturnRegister0());
-         lowReg = deps->searchPostConditionRegister(getLongDoubleReturnRegister2());
-         returnRegister = cg()->allocateFPRegisterPair(lowReg, highReg);
-         break;
-#endif
       case TR::call:
       case TR::calli:
          returnRegister = NULL;
          break;
-      case TR::vcall:
-      case TR::vcalli:
-         returnRegister = deps->searchPostConditionRegister(getVectorReturnRegister());
-         break;
       default:
+         if (callNode->getOpCode().isVectorOpCode() &&
+             (callNode->getOpCode().getVectorOperation() == TR::vcall || callNode->getOpCode().getVectorOperation() == TR::vcalli))
+            {
+            returnRegister = deps->searchPostConditionRegister(getVectorReturnRegister());
+            break;
+            }
          returnRegister = NULL;
          TR_ASSERT(0, "Unknown direct call Opcode %d.", callNode->getOpCodeValue());
       }
@@ -580,9 +568,6 @@ TR::S390zLinuxSystemLinkage::initParamOffset(TR::ResolvedMethodSymbol * method, 
             numIntegerArgs ++;
             break;
          case TR::Float:
-#ifdef J9_PROJECT_SPECIFIC
-         case TR::DecimalFloat:
-#endif
             indexInArgRegistersArray = numFloatArgs;
             argRegNum = getFloatArgumentRegister(indexInArgRegistersArray);
             numFloatArgs ++;
@@ -595,9 +580,6 @@ TR::S390zLinuxSystemLinkage::initParamOffset(TR::ResolvedMethodSymbol * method, 
                   }
              break;
          case TR::Double:
-#ifdef J9_PROJECT_SPECIFIC
-         case TR::DecimalDouble:
-#endif
             indexInArgRegistersArray = numFloatArgs;
             argRegNum = getFloatArgumentRegister(indexInArgRegistersArray);
             numFloatArgs ++;
@@ -609,16 +591,21 @@ TR::S390zLinuxSystemLinkage::initParamOffset(TR::ResolvedMethodSymbol * method, 
                      }
                   }
             break;
-         case TR::VectorInt8:
-         case TR::VectorInt16:
-         case TR::VectorInt32:
-         case TR::VectorInt64:
-         case TR::VectorDouble:
-            indexInArgRegistersArray = numVectorArgs;
-            argRegNum = getVectorArgumentRegister(indexInArgRegistersArray);
-            numVectorArgs ++;
+         default:
+            {
+            if (parmCursor->getDataType().isVector())
+               {
+               TR::DataType elementType = parmCursor->getDataType().getVectorElementType();
+               if (elementType == TR::Int8 || elementType == TR::Int16 ||
+                   elementType == TR::Int32 || elementType == TR::Int64 || elementType == TR::Double)
+                  {
+                  indexInArgRegistersArray = numVectorArgs;
+                  argRegNum = getVectorArgumentRegister(indexInArgRegistersArray);
+                  numVectorArgs++;
+                  }
+               }
             break;
-         default: break;
+            }
          }
       if (argRegNum == TR::RealRegister::NoReg)
          {

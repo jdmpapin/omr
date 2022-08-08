@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -465,9 +465,8 @@ class S390LabelInstruction : public TR::S390LabeledInstruction
                            TR::CodeGenerator *cg)
       : S390LabeledInstruction(op, n, sym, cg), _alignment(0)
       {
-      if (op==TR::InstOpCode::LABEL)
+      if (op==TR::InstOpCode::label)
          sym->setInstruction(this);
-      cg->getNextAvailableBlockIndex();
       }
 
    S390LabelInstruction(TR::InstOpCode::Mnemonic    op,
@@ -477,9 +476,8 @@ class S390LabelInstruction : public TR::S390LabeledInstruction
                            TR::CodeGenerator *cg)
       : S390LabeledInstruction(op, n, sym, cond, cg), _alignment(0)
       {
-      if (op==TR::InstOpCode::LABEL)
+      if (op==TR::InstOpCode::label)
          sym->setInstruction(this);
-      cg->getNextAvailableBlockIndex();
       }
 
    S390LabelInstruction(TR::InstOpCode::Mnemonic    op,
@@ -489,9 +487,8 @@ class S390LabelInstruction : public TR::S390LabeledInstruction
                            TR::CodeGenerator *cg)
       : S390LabeledInstruction(op, n, sym, precedingInstruction, cg), _alignment(0)
       {
-      if (op==TR::InstOpCode::LABEL)
+      if (op==TR::InstOpCode::label)
          sym->setInstruction(this);
-      cg->getNextAvailableBlockIndex();
       }
 
    S390LabelInstruction(TR::InstOpCode::Mnemonic    op,
@@ -502,9 +499,8 @@ class S390LabelInstruction : public TR::S390LabeledInstruction
                            TR::CodeGenerator *cg)
       : S390LabeledInstruction(op, n, sym, cond, precedingInstruction, cg), _alignment(0)
       {
-      if (op==TR::InstOpCode::LABEL)
+      if (op==TR::InstOpCode::label)
          sym->setInstruction(this);
-      cg->getNextAvailableBlockIndex();
       }
 
    S390LabelInstruction(TR::InstOpCode::Mnemonic     op,
@@ -628,11 +624,11 @@ class S390PseudoInstruction : public TR::Instruction
 
    virtual uint8_t *generateBinaryEncoding();
 
-   uint64_t setCallDescValue(uint64_t cdv, TR_Memory * m)
+   uint64_t setCallDescValue(uint64_t cdv, TR_Memory * m, TR::CodeGenerator *cg)
       {
       if (!_callDescLabel)
          {
-         _callDescLabel = TR::LabelSymbol::create(m->trHeapMemory());
+         _callDescLabel = TR::LabelSymbol::create(m->trHeapMemory(), cg);
          }
       return _callDescValue = cdv;
       }
@@ -685,12 +681,6 @@ public:
         _delta(delta){}
 
    /**
-   * A real register must only be assigned for DCB to use if it is guaranteed to be free at the cursor position where DCB is inserted
-   * @param ar Real Register to be assigned
-   */
-   void setAssignableReg(TR::RealRegister * ar){ _assignableReg = ar; }
-
-   /**
    * @return Assigned Real Register
    */
    TR::RealRegister * getAssignableReg(){ return _assignableReg; }
@@ -704,6 +694,8 @@ public:
    * @return The integer amount to increment the counter
    */
    int32_t getDelta(){ return _delta; }
+
+   virtual void assignRegisters(TR_RegisterKinds kindToBeAssigned);
 
    virtual uint8_t *generateBinaryEncoding();
    };
@@ -3804,6 +3796,8 @@ class S390SILInstruction : public TR::S390MemInstruction
    uint16_t getSourceImmediate() { return _sourceImmediate; }
    uint16_t setSourceImmediate(uint16_t si) { return _sourceImmediate = si; }
 
+   virtual void assignRegisters(TR_RegisterKinds kindToBeAssigned);
+
    virtual uint8_t *generateBinaryEncoding();
    virtual int32_t estimateBinaryLength(int32_t currentEstimate);
    };
@@ -4836,7 +4830,7 @@ class S390VRIInstruction : public S390VInstruction
    protected:
    S390VRIInstruction(
                        TR::CodeGenerator      * cg               = NULL,
-                       TR::InstOpCode::Mnemonic          op      = TR::InstOpCode::BAD,
+                       TR::InstOpCode::Mnemonic          op      = TR::InstOpCode::bad,
                        TR::Node               * n                = NULL,
                        TR::Register           * targetReg        = NULL,
                        uint16_t                constantImm16      = 0,
@@ -4897,7 +4891,7 @@ class S390VRIaInstruction : public S390VRIInstruction
    public:
    S390VRIaInstruction(
                           TR::CodeGenerator      * cg            = NULL,
-                          TR::InstOpCode::Mnemonic  op           = TR::InstOpCode::BAD,
+                          TR::InstOpCode::Mnemonic  op           = TR::InstOpCode::bad,
                           TR::Node               * n             = NULL,
                           TR::Register           * targetReg     = NULL,
                           uint16_t                constantImm2   = 0,  /* 16 bits */
@@ -4926,7 +4920,7 @@ class S390VRIbInstruction : public S390VRIInstruction
    public:
    S390VRIbInstruction(
                           TR::CodeGenerator      * cg             = NULL,
-                          TR::InstOpCode::Mnemonic          op    = TR::InstOpCode::BAD,
+                          TR::InstOpCode::Mnemonic          op    = TR::InstOpCode::bad,
                           TR::Node               * n              = NULL,
                           TR::Register           * targetReg      = NULL,
                           uint8_t                 constantImm2    = 0,    /*  8 bits */
@@ -4956,7 +4950,7 @@ class S390VRIcInstruction : public S390VRIInstruction
    public:
    S390VRIcInstruction(
                           TR::CodeGenerator      * cg               = NULL,
-                          TR::InstOpCode::Mnemonic          op               = TR::InstOpCode::BAD,
+                          TR::InstOpCode::Mnemonic          op               = TR::InstOpCode::bad,
                           TR::Node               * n                = NULL,
                           TR::Register           * targetReg        = NULL,
                           TR::Register           * sourceReg3       = NULL,
@@ -4989,7 +4983,7 @@ class S390VRIdInstruction : public S390VRIInstruction
    public:
    S390VRIdInstruction(
                           TR::CodeGenerator      * cg               = NULL,
-                          TR::InstOpCode::Mnemonic          op      = TR::InstOpCode::BAD,
+                          TR::InstOpCode::Mnemonic          op      = TR::InstOpCode::bad,
                           TR::Node               * n                = NULL,
                           TR::Register           * targetReg        = NULL,
                           TR::Register           * sourceReg2       = NULL,
@@ -5027,7 +5021,7 @@ class S390VRIeInstruction : public S390VRIInstruction
    public:
    S390VRIeInstruction(
                           TR::CodeGenerator      * cg               = NULL,
-                          TR::InstOpCode::Mnemonic          op               = TR::InstOpCode::BAD,
+                          TR::InstOpCode::Mnemonic          op               = TR::InstOpCode::bad,
                           TR::Node               * n                = NULL,
                           TR::Register           * targetReg        = NULL,
                           TR::Register           * sourceReg2       = NULL,
@@ -5065,7 +5059,7 @@ class S390VRIfInstruction : public S390VRIInstruction
    public:
    S390VRIfInstruction(
                           TR::CodeGenerator      * cg               = NULL,
-                          TR::InstOpCode::Mnemonic          op               = TR::InstOpCode::BAD,
+                          TR::InstOpCode::Mnemonic          op               = TR::InstOpCode::bad,
                           TR::Node               * n                = NULL,
                           TR::Register           * targetReg        = NULL,
                           TR::Register           * sourceReg2       = NULL,
@@ -5104,7 +5098,7 @@ class S390VRIgInstruction : public S390VRIInstruction
    public:
    S390VRIgInstruction(
                           TR::CodeGenerator      * cg               = NULL,
-                          TR::InstOpCode::Mnemonic          op      = TR::InstOpCode::BAD,
+                          TR::InstOpCode::Mnemonic          op      = TR::InstOpCode::bad,
                           TR::Node               * n                = NULL,
                           TR::Register           * targetReg        = NULL,
                           TR::Register           * sourceReg2       = NULL,
@@ -5139,7 +5133,7 @@ class S390VRIhInstruction : public S390VRIInstruction
    public:
    S390VRIhInstruction(
                           TR::CodeGenerator      * cg               = NULL,
-                          TR::InstOpCode::Mnemonic     op           = TR::InstOpCode::BAD,
+                          TR::InstOpCode::Mnemonic     op           = TR::InstOpCode::bad,
                           TR::Node               * n                = NULL,
                           TR::Register           * targetReg        = NULL,
                           uint16_t                constantImm2      = 0,    /*  16 bits */
@@ -5172,7 +5166,7 @@ class S390VRIiInstruction : public S390VRIInstruction
    public:
    S390VRIiInstruction(
                           TR::CodeGenerator      * cg               = NULL,
-                          TR::InstOpCode::Mnemonic          op      = TR::InstOpCode::BAD,
+                          TR::InstOpCode::Mnemonic          op      = TR::InstOpCode::bad,
                           TR::Node               * n                = NULL,
                           TR::Register           * targetReg        = NULL,
                           TR::Register           * sourceReg2       = NULL,
@@ -5236,7 +5230,7 @@ class S390VRRInstruction : public S390VInstruction
    protected:
    S390VRRInstruction(
                          TR::CodeGenerator       * cg  = NULL,
-                         TR::InstOpCode::Mnemonic           op  = TR::InstOpCode::BAD,
+                         TR::InstOpCode::Mnemonic           op  = TR::InstOpCode::bad,
                          TR::Node                * n   = NULL,
                          TR::Register            * targetReg  = NULL,
                          TR::Register            * sourceReg2 = NULL,
@@ -5307,7 +5301,7 @@ class S390VRRaInstruction: public S390VRRInstruction
    public:
    S390VRRaInstruction(
                           TR::CodeGenerator       * cg         = NULL,
-                          TR::InstOpCode::Mnemonic           op         = TR::InstOpCode::BAD,
+                          TR::InstOpCode::Mnemonic           op         = TR::InstOpCode::bad,
                           TR::Node                * n          = NULL,
                           TR::Register            * targetReg  = NULL,
                           TR::Register            * sourceReg2 = NULL,
@@ -5381,7 +5375,7 @@ class S390VRRcInstruction: public S390VRRInstruction
    public:
    S390VRRcInstruction(
                           TR::CodeGenerator       * cg  = NULL,
-                          TR::InstOpCode::Mnemonic           op  = TR::InstOpCode::BAD,
+                          TR::InstOpCode::Mnemonic           op  = TR::InstOpCode::bad,
                           TR::Node                * n   = NULL,
                           TR::Register            * targetReg  = NULL,
                           TR::Register            * sourceReg2 = NULL,
@@ -5413,15 +5407,15 @@ class S390VRRdInstruction: public S390VRRInstruction
    {
    public:
    S390VRRdInstruction(
-                          TR::CodeGenerator       * cg  = NULL,
-                          TR::InstOpCode::Mnemonic           op  = TR::InstOpCode::BAD,
-                          TR::Node                * n   = NULL,
+                          TR::CodeGenerator       * cg         = NULL,
+                          TR::InstOpCode::Mnemonic  op         = TR::InstOpCode::bad,
+                          TR::Node                * n          = NULL,
                           TR::Register            * targetReg  = NULL,
                           TR::Register            * sourceReg2 = NULL,
                           TR::Register            * sourceReg3 = NULL,
                           TR::Register            * sourceReg4 = NULL,
-                          uint8_t                  mask6 = 0,     /* 4 bits */
-                          uint8_t                  mask5 = 0)     /* 4 bits */
+                          uint8_t                  mask6       = 0,     /* 4 bits */
+                          uint8_t                  mask5       = 0)     /* 4 bits */
    : S390VRRInstruction(cg, op, n, targetReg, sourceReg2, 0, 0, mask5, mask6)
       {
       if (getOpCode().setsOperand3())
@@ -5451,15 +5445,15 @@ class S390VRReInstruction: public S390VRRInstruction
    {
    public:
    S390VRReInstruction(
-                          TR::CodeGenerator       * cg  = NULL,
-                          TR::InstOpCode::Mnemonic           op  = TR::InstOpCode::BAD,
-                          TR::Node                * n   = NULL,
+                          TR::CodeGenerator       * cg         = NULL,
+                          TR::InstOpCode::Mnemonic  op         = TR::InstOpCode::bad,
+                          TR::Node                * n          = NULL,
                           TR::Register            * targetReg  = NULL,
                           TR::Register            * sourceReg2 = NULL,
                           TR::Register            * sourceReg3 = NULL,
                           TR::Register            * sourceReg4 = NULL,
-                          uint8_t                  mask6 = 0,     /* 4 bits */
-                          uint8_t                  mask5 = 0)     /* 4 bits */
+                          uint8_t                  mask6       = 0,     /* 4 bits */
+                          uint8_t                  mask5       = 0)     /* 4 bits */
    : S390VRRInstruction(cg, op, n, targetReg, sourceReg2, 0, 0, mask5, mask6)
       {
       if (getOpCode().setsOperand3())
@@ -5489,9 +5483,9 @@ class S390VRRfInstruction: public S390VRRInstruction
    {
    public:
    S390VRRfInstruction(
-                          TR::CodeGenerator       * cg  = NULL,
-                          TR::InstOpCode::Mnemonic           op  = TR::InstOpCode::BAD,
-                          TR::Node                * n   = NULL,
+                          TR::CodeGenerator       * cg         = NULL,
+                          TR::InstOpCode::Mnemonic  op         = TR::InstOpCode::bad,
+                          TR::Node                * n          = NULL,
                           TR::Register            * targetReg  = NULL,
                           TR::Register            * sourceReg2 = NULL, /* GPR */
                           TR::Register            * sourceReg3 = NULL) /* GPR */
@@ -5520,9 +5514,9 @@ class S390VRRgInstruction: public S390VRRInstruction
    {
    public:
    S390VRRgInstruction(
-                          TR::CodeGenerator       * cg         = NULL,
-                          TR::InstOpCode::Mnemonic  op         = TR::InstOpCode::BAD,
-                          TR::Node                * n          = NULL,
+                          TR::CodeGenerator       * cg     = NULL,
+                          TR::InstOpCode::Mnemonic  op     = TR::InstOpCode::bad,
+                          TR::Node                * n      = NULL,
                           TR::Register            * v1Reg  = NULL)
    : S390VRRInstruction(cg, op, n, v1Reg, NULL, 0, 0, 0, 0)
       {
@@ -5544,12 +5538,12 @@ class S390VRRhInstruction: public S390VRRInstruction
    {
    public:
    S390VRRhInstruction(
-                          TR::CodeGenerator       * cg         = NULL,
-                          TR::InstOpCode::Mnemonic         op  = TR::InstOpCode::BAD,
-                          TR::Node                * n          = NULL,
-                          TR::Register            * v1Reg      = NULL,
-                          TR::Register            * v2Reg      = NULL,
-                          uint8_t                   mask3      = 0)
+                          TR::CodeGenerator       * cg    = NULL,
+                          TR::InstOpCode::Mnemonic  op    = TR::InstOpCode::bad,
+                          TR::Node                * n     = NULL,
+                          TR::Register            * v1Reg = NULL,
+                          TR::Register            * v2Reg = NULL,
+                          uint8_t                   mask3 = 0)
    : S390VRRInstruction(cg, op, n, v1Reg, v2Reg, mask3, 0, 0, 0)
       {
       }
@@ -5574,7 +5568,7 @@ class S390VRRiInstruction: public S390VRRInstruction
    public:
    S390VRRiInstruction(
                           TR::CodeGenerator       * cg         = NULL,
-                          TR::InstOpCode::Mnemonic   op        = TR::InstOpCode::BAD,
+                          TR::InstOpCode::Mnemonic   op        = TR::InstOpCode::bad,
                           TR::Node                * n          = NULL,
                           TR::Register            * r1Reg      = NULL, /* GPR */
                           TR::Register            * v2Reg      = NULL,
@@ -5586,6 +5580,33 @@ class S390VRRiInstruction: public S390VRRInstruction
 
    char *description() { return "S390VRRiInstruction"; }
    Kind getKind() { return IsVRRi; }
+   uint8_t * generateBinaryEncoding();
+   };
+
+/**
+ * VRR-k
+ *    _____________________________________________________________
+ *   | Op Code | V1 | V2 | ///////// | M3 | /////// | RXB | Op Code |
+ *   |_________|____|____|___________|____|_________|_____|_________|
+ *   0        8    12   16           24    28       36   40    47
+ *
+ */
+class S390VRRkInstruction: public S390VRRInstruction
+   {
+   public:
+   S390VRRkInstruction(
+                          TR::CodeGenerator       * cg         = NULL,
+                          TR::InstOpCode::Mnemonic   op        = TR::InstOpCode::bad,
+                          TR::Node                * n          = NULL,
+                          TR::Register            * targetReg  = NULL, /* VRF */
+                          TR::Register            * sourceReg  = NULL, /* VRF */
+                          uint8_t                   mask3      = 0)    /* 4 bits */
+   : S390VRRInstruction(cg, op, n, targetReg, sourceReg, mask3, 0, 0, 0)
+      {
+      }
+
+   char *description() { return "S390VRRkInstruction"; }
+   Kind getKind() { return IsVRRk; }
    uint8_t * generateBinaryEncoding();
    };
 
@@ -5695,7 +5716,7 @@ class S390VRSInstruction : public S390VInstruction
    protected:
    S390VRSInstruction(
                          TR::CodeGenerator       * cg           = NULL,
-                         TR::InstOpCode::Mnemonic           op           = TR::InstOpCode::BAD,
+                         TR::InstOpCode::Mnemonic           op           = TR::InstOpCode::bad,
                          TR::Node                * n            = NULL,
                          TR::Register            * targetReg    = NULL,   /* VRF        */
                          TR::Register            * sourceReg    = NULL,   /* VRF or GPR */
@@ -5719,7 +5740,7 @@ class S390VRSaInstruction : public S390VStorageInstruction
    public:
    S390VRSaInstruction(
                          TR::CodeGenerator       * cg           = NULL,
-                         TR::InstOpCode::Mnemonic   op          = TR::InstOpCode::BAD,
+                         TR::InstOpCode::Mnemonic   op          = TR::InstOpCode::bad,
                          TR::Node                * n            = NULL,
                          TR::Register            * targetReg    = NULL,   /* VRF */
                          TR::Register            * sourceReg    = NULL,   /* VRF */
@@ -5760,7 +5781,7 @@ class S390VRSbInstruction : public S390VStorageInstruction
    public:
    S390VRSbInstruction(
                          TR::CodeGenerator       * cg           = NULL,
-                         TR::InstOpCode::Mnemonic           op  = TR::InstOpCode::BAD,
+                         TR::InstOpCode::Mnemonic           op  = TR::InstOpCode::bad,
                          TR::Node                * n            = NULL,
                          TR::Register            * targetReg    = NULL,   /* VRF */
                          TR::Register            * sourceReg    = NULL,   /* GPR */
@@ -5801,7 +5822,7 @@ class S390VRScInstruction : public S390VStorageInstruction
    public:
    S390VRScInstruction(
                          TR::CodeGenerator       * cg           = NULL,
-                         TR::InstOpCode::Mnemonic           op           = TR::InstOpCode::BAD,
+                         TR::InstOpCode::Mnemonic           op           = TR::InstOpCode::bad,
                          TR::Node                * n            = NULL,
                          TR::Register            * targetReg    = NULL,   /* GPR */
                          TR::Register            * sourceReg    = NULL,   /* VRF */
@@ -5849,7 +5870,7 @@ class S390VRSdInstruction : public S390VStorageInstruction
    public:
    S390VRSdInstruction(
                          TR::CodeGenerator       * cg           = NULL,
-                         TR::InstOpCode::Mnemonic     op        = TR::InstOpCode::BAD,
+                         TR::InstOpCode::Mnemonic     op        = TR::InstOpCode::bad,
                          TR::Node                * n            = NULL,
                          TR::Register            * r3Reg        = NULL,   /* GPR */
                          TR::Register            * v1Reg        = NULL,   /* VRF */
@@ -5911,7 +5932,7 @@ class S390VRVInstruction : public S390VStorageInstruction
    public:
    S390VRVInstruction(
                          TR::CodeGenerator       * cg           = NULL,
-                         TR::InstOpCode::Mnemonic           op           = TR::InstOpCode::BAD,
+                         TR::InstOpCode::Mnemonic           op           = TR::InstOpCode::bad,
                          TR::Node                * n            = NULL,
                          TR::Register            * sourceReg    = NULL,   /* VRF */
                          TR::MemoryReference * mr           = NULL,
@@ -5952,7 +5973,7 @@ class S390VRXInstruction : public S390VStorageInstruction
    public:
    S390VRXInstruction(
                          TR::CodeGenerator       * cg           = NULL,
-                         TR::InstOpCode::Mnemonic           op           = TR::InstOpCode::BAD,
+                         TR::InstOpCode::Mnemonic           op           = TR::InstOpCode::bad,
                          TR::Node              * n            = NULL,
                          TR::Register            * reg          = NULL,   /* GPR */
                          TR::MemoryReference * mr           = NULL,
@@ -5993,7 +6014,7 @@ class S390VSIInstruction : public S390VStorageInstruction
    {
    public:
    S390VSIInstruction(TR::CodeGenerator       * cg           = NULL,
-                      TR::InstOpCode::Mnemonic  op           = TR::InstOpCode::BAD,
+                      TR::InstOpCode::Mnemonic  op           = TR::InstOpCode::bad,
                       TR::Node                * n            = NULL,
                       TR::Register            * v1Reg        = NULL,
                       TR::MemoryReference     * memRef       = NULL,

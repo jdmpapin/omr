@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -339,6 +339,18 @@ MM_CompactScheme::setFreeChunk(omrobjectptr_t from, omrobjectptr_t to)
 	return size;
 }
 
+MMINLINE void
+MM_CompactScheme::preObjectMove(MM_EnvironmentBase *env, omrobjectptr_t objectPtr)
+{
+	env->preObjectMoveForCompact(objectPtr);
+}
+
+MMINLINE void
+MM_CompactScheme::postObjectMove(MM_EnvironmentBase *env, omrobjectptr_t objectPtr)
+{
+	env->postObjectMoveForCompact(objectPtr, NULL);
+}
+
 void
 MM_CompactScheme::workerSetupForGC(MM_EnvironmentStandard *env, bool singleThreaded)
 {
@@ -560,7 +572,7 @@ MM_CompactScheme::compact(MM_EnvironmentBase *envBase, bool rebuildMarkBits, boo
 	 *    singlethreaded compaction per segment, and so should only be done in extreme OOM situations.
 	 *  o no worker GC threads
 	 */
-	if (aggressive || (1 == env->_currentTask->getThreadCount())) {
+	if (aggressive || (1 == env->_currentTask->getThreadCount())  || (_extensions->usingSATBBarrier())) {
 		singleThreaded = true;
 	}
 
@@ -1184,7 +1196,6 @@ MM_CompactScheme::doCompact(MM_EnvironmentStandard *env, MM_MemorySubSpace *memo
 
 	omrobjectptr_t objectPtr = 0;
 	omrobjectptr_t nextObject = 0;
-	uintptr_t evacuatedBytes = 0;
 	intptr_t page = -1; /* invalid value */
 	intptr_t counter = 0; /* obj on page, first is zero */
 	CompactTableEntry entry;
@@ -1208,7 +1219,6 @@ MM_CompactScheme::doCompact(MM_EnvironmentStandard *env, MM_MemorySubSpace *memo
 			if (pageByteCount > deadObjectSize) {
 				break;
 			}
-			evacuatedBytes += pageByteCount;
 		}
 
 		uintptr_t objectSize = _extensions->objectModel.getConsumedSizeInBytesWithHeader(objectPtr);
@@ -1231,9 +1241,7 @@ MM_CompactScheme::doCompact(MM_EnvironmentStandard *env, MM_MemorySubSpace *memo
 		nobjects++;
 		nbytes += objectSizeAfterMove;
 
-#if defined(OMR_GC_DEFERRED_HASHCODE_INSERTION)
-		_extensions->objectModel.preMove(env->getOmrVMThread(), objectPtr);
-#endif /* defined(OMR_GC_DEFERRED_HASHCODE_INSERTION) */
+		preObjectMove(env, objectPtr);
 
 		if (evacuate) {
 			deadObjectSize -= objectSizeAfterMove;
@@ -1243,9 +1251,7 @@ MM_CompactScheme::doCompact(MM_EnvironmentStandard *env, MM_MemorySubSpace *memo
 			memmove(deadObject, objectPtr, objectSize);
 		}
 
-#if defined(OMR_GC_DEFERRED_HASHCODE_INSERTION)
-		_extensions->objectModel.postMove(env->getOmrVMThread(), deadObject);
-#endif /* defined(OMR_GC_DEFERRED_HASHCODE_INSERTION) */
+		postObjectMove(env, deadObject);
 
 		deadObject = (omrobjectptr_t)((uintptr_t)deadObject+objectSizeAfterMove);
 	}
@@ -1264,8 +1270,7 @@ MM_CompactScheme::doCompact(MM_EnvironmentStandard *env, MM_MemorySubSpace *memo
 			setFreeChunkSize(deadObject, deadObjectSize);
 #if defined(DEBUG)
 		if (deadObjectSize > 2*sizeof(uintptr_t)) {
-			uintptr_t junk = _extensions->objectModel.getSizeInBytesMultiSlotDeadObject(deadObject);
-			assume0(junk == deadObjectSize);
+			assume0(_extensions->objectModel.getSizeInBytesMultiSlotDeadObject(deadObject) == deadObjectSize);
 		}
 #endif /* DEBUG */
 		}

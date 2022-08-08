@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -1689,6 +1689,153 @@ TR_YesNoMaybe OMR::ValuePropagation::isCastClassObject(TR::VPClassType *type)
    return TR_maybe;
    }
 
+
+TR_YesNoMaybe OMR::ValuePropagation::isArrayCompTypeValueType(TR::VPConstraint *arrayConstraint)
+   {
+   return TR::Compiler->om.areValueTypesEnabled() ? TR_maybe : TR_no;
+   }
+
+
+bool OMR::ValuePropagation::isArrayStoreCheckNeeded(TR::Node *arrayRef, TR::Node *objectRef, bool &mustFail,
+           TR_OpaqueClassBlock* &storeClassForCheck, TR_OpaqueClassBlock* &componentClassForCheck)
+   {
+   bool isNeeded = true;
+   mustFail = false;
+   storeClassForCheck = NULL;
+   componentClassForCheck = NULL;
+
+   if (arrayRef == objectRef)
+      {
+      isNeeded = false;
+      }
+   else
+      {
+      bool isGlobal;
+      TR::VPConstraint *object = getConstraint(objectRef, isGlobal);
+      TR::VPConstraint *array  = getConstraint(arrayRef, isGlobal);
+
+      // If the object reference is null we can remove this check
+      //
+      if (object && object->isNullObject())
+         {
+         isNeeded = false;
+         }
+
+      // If the array reference is null we can remove this check, since there
+      // will be a nullcheck on the array reference before storing into it.
+      //
+      else if (array && array->isNullObject())
+         {
+         isNeeded = false;
+         }
+
+      // If the array is a resolved class and known to be an array type we may
+      // still be able to remove the check ...
+      //
+      else if (array && array->getClass())
+         {
+         int32_t len;
+         const char *sig = array->getClassSignature(len);
+         if (sig && sig[0] == '[')
+            {
+            // If the array is known to be a fixed array of Object,
+            // the check can be removed
+            // TODO -  get a pointer to the Object class from somewhere and
+            // compare object pointers instead of signatures
+            //
+            if (len == 19 && array->isFixedClass()
+                && !strncmp(sig, "[Ljava/lang/Object;", 19))
+               {
+               isNeeded = false;
+               }
+
+            // If the object's class is resolved too, see if we can prove the
+            // check will succeed.
+            //
+            else if (object && object->getClass())
+               {
+               TR_OpaqueClassBlock *arrayComponentClass = fe()->getComponentClassFromArrayClass(array->getClass());
+               TR_OpaqueClassBlock *objectClass = object->getClass();
+               if (object->asClass() && object->isClassObject() == TR_yes)
+                  {
+                  objectClass = fe()->getClassClassPointer(objectClass);
+                  }
+
+               if (array->asClass() && array->isClassObject() == TR_yes)
+                  {
+                  arrayComponentClass = fe()->getClassClassPointer(array->getClass());
+                  }
+
+               TR_YesNoMaybe isInstance = TR_maybe;
+               if (arrayComponentClass)
+                  {
+                  isInstance = fe()->isInstanceOf(objectClass, arrayComponentClass, object->isFixedClass(), array->isFixedClass());
+                  }
+
+               if (isInstance == TR_yes)
+                  {
+                  registerPreXClass(object);
+                  isNeeded = false;
+                  }
+               else if (isInstance == TR_no && debug("enableMustFailArrayStoreCheckOpt"))
+                  {
+                  registerPreXClass(object);
+                  mustFail = true;
+                  }
+               else if (arrayComponentClass && objectClass && !TR::Compiler->cls.isClassArray(comp(), arrayComponentClass) &&
+                        (arrayComponentClass == objectClass) && !comp()->fe()->classHasBeenExtended(objectClass))
+                  {
+                  // Component class of the array is the same as that of the object reference
+                  // and not yet seen to have been extended.  Any ArrayStoreCHK can be NOPed
+                  // on whether the class is extended.
+                  //
+                  storeClassForCheck = objectClass;
+                  }
+
+              else if ( !comp()->compileRelocatableCode() &&
+                        !(comp()->getOption(TR_DisableArrayStoreCheckOpts))  &&
+                        arrayComponentClass &&
+                        objectClass  &&
+                        fe()->isInstanceOf(objectClass, arrayComponentClass,true,true)
+                        )
+                  {
+                  // If the component class of the array really is arrayComponentClass
+                  // and class of the object really is objectClass at run-time, the
+                  // assignment will succeed.  Any ArrayStoreCHK use a fast path
+                  // test of whether the component class actually is this type to
+                  // avoid further run-time testing for the object's type.
+                  //
+                  componentClassForCheck = arrayComponentClass;
+                  }
+               }
+            }
+         }
+      }
+
+   return isNeeded;
+   }
+
+
+void OMR::ValuePropagation::getArrayLengthLimits(TR::VPConstraint *constraint, int32_t &lowerBoundLimit, int32_t &upperBoundLimit, int32_t &elementSize, bool &isKnownObj)
+   {
+   lowerBoundLimit = 0;
+   upperBoundLimit = static_cast<int32_t>(TR::getMaxSigned<TR::Int32>());
+   elementSize = 0;
+   isKnownObj = false;
+
+   if (constraint)
+      {
+      TR::VPArrayInfo *arrayInfo = constraint->getArrayInfo();
+      if (arrayInfo)
+         {
+         lowerBoundLimit = arrayInfo->lowBound();
+         upperBoundLimit = arrayInfo->highBound();
+         elementSize     = arrayInfo->elementSize();
+         }
+      }
+   }
+
+
 void OMR::ValuePropagation::checkTypeRelationship(TR::VPConstraint *lhs, TR::VPConstraint *rhs,
                                                 int32_t &value, bool isInstanceOf, bool isCheckCast)
    {
@@ -1954,7 +2101,7 @@ TR::VPConstraint *OMR::ValuePropagation::mergeDefConstraints(TR::Node *node, int
             // the parameter.
             //
             TR::SymbolReference *symRef = node->getSymbolReference();
-            if (symRef && symRef->getSymbol()->getParmSymbol() && _parmValues)
+            if (symRef && symRef->getSymbol()->getParmSymbol() && _parmValues && isParmInvariant(symRef->getSymbol()))
                {
                int32_t parmNum = symRef->getSymbol()->getParmSymbol()->getOrdinal();
                defConstraint = _parmValues[parmNum];
@@ -2575,7 +2722,7 @@ TR::VPConstraint *OMR::ValuePropagation::mergeDefConstraints(TR::Node *node, int
                            if ((uint32_t) defConstraint->getHighInt() < TR::getMaxUnsigned<TR::Int32>())
                               {
                               if ((uint32_t) defConstraint->getLowInt() < (uint32_t) constraint->getLowInt() &&
-                                  (uint32_t) constraint->getLowInt() <= defConstraint->getHighInt() )
+                                  (uint32_t) constraint->getLowInt() <= unsigned(defConstraint->getHighInt()) )
                                  {
                                  TR::VPConstraint *newDefConstraint = TR::VPIntRange::create(this, constraint->getLowInt(), defConstraint->getHighInt());
                                  defConstraint = defConstraint->intersect(newDefConstraint, this);
@@ -3505,8 +3652,8 @@ void OMR::ValuePropagation::setUpInductionVariables(TR_StructureSubGraphNode *no
                }
             else if (constraint->asLongConstraint())
                {
-               high = constraint->getHighLong();
-               low = constraint->getLowLong();
+               high = static_cast<int32_t>(constraint->getHighLong());
+               low = static_cast<int32_t>(constraint->getLowLong());
                }
 
             for (int32_t i = low; i <= high; i++)
@@ -3776,7 +3923,7 @@ int32_t TR::GlobalValuePropagation::perform()
 
    initialize();
 
-   if ((_firstUnresolvedSymbolValueNumber - 1) <= comp()->getNodeCount())
+   if (unsigned(_firstUnresolvedSymbolValueNumber - 1) <= comp()->getNodeCount())
       {
       dumpOptDetails(comp(), "Can't do Global Value Propagation - too many nodes\n");
       return 0;
@@ -3838,6 +3985,16 @@ int32_t TR::GlobalValuePropagation::perform()
    if (checksWereRemoved())
       requestOpt(OMR::catchBlockRemoval);
 
+   // A reference to use/def info is cached by Global VP, but use/def info can be
+   // deleted in the optimizer if a TR::Node is discarded, unless use/def info
+   // is explicitly requested to be preserved.  This is just a safety check that
+   // the use/def info has been preserved throughout the processing of Global VP.
+   //
+   if (_useDefInfo != NULL)
+      {
+      TR_ASSERT_FATAL(optimizer()->getUseDefInfo() == _useDefInfo, "Use/def info was unexpectedly destroyed during Global Value Propagation\n");
+      }
+
    // Perform transformations that were delayed until the end of the analysis
    //
    doDelayedTransformations();
@@ -3880,7 +4037,7 @@ void OMR::ValuePropagation::getParmValues()
 bool OMR::ValuePropagation::isParmInvariant(TR::Symbol *sym)
    {
    int32_t index = sym->getParmSymbol()->getOrdinal();
-   return (_parmInfo[index] ? false : true);
+   return (_parmMayBeVariant[index] ? false : true);
    }
 
 
@@ -4075,7 +4232,6 @@ void TR::GlobalValuePropagation::processStructure(TR_StructureSubGraphNode *node
    TR_RegionStructure *region = node->getStructure()->asRegion();
    if (region)
       {
-      _defMergedNodes->empty();
       if (region->isAcyclic())
          {
          processAcyclicRegion(node, lastTimeThrough, insideLoop);
@@ -4091,6 +4247,10 @@ void TR::GlobalValuePropagation::processStructure(TR_StructureSubGraphNode *node
       }
    else
       {
+      // Only commoned nodes within a block need to be set in _defMergedNodes.
+      // So it should be reset here
+      TR_ASSERT_FATAL(!node->getStructure()->asBlock()->getBlock()->isExtensionOfPreviousBlock(), "This optimization does not run on extended blocks");
+      _defMergedNodes->empty();
       processBlock(node, lastTimeThrough, insideLoop);
       }
    }
@@ -4573,6 +4733,10 @@ TR_BitVector *TR::GlobalValuePropagation::mergeDefinedOnAllPaths(TR_StructureSub
    bool first = true;
    for (auto itr = node->getPredecessors().begin(), end = node->getPredecessors().end(); itr != end; ++itr)
       {
+      EdgeConstraints  *constraints = getEdgeConstraints(*itr);
+      if (isUnreachablePath(constraints))
+         continue;
+
       TR_BitVector *predDefinedOnAllPaths = (*_definedOnAllPaths)[*itr];
       if (trace())
          {
@@ -4899,7 +5063,7 @@ void OMR::ValuePropagation::printValueConstraints(ValueConstraints &valueConstra
 void OMR::ValuePropagation::printGlobalConstraints()
    {
    traceMsg(comp(), "   Global constraints:\n");
-   for (int32_t i = 0; i <= _globalConstraintsHTMaxBucketIndex; i++)
+   for (auto i = 0U; i <= _globalConstraintsHTMaxBucketIndex; i++)
       {
       GlobalConstraint *entry;
       for (entry = _globalConstraintsHashTable[i]; entry; entry = entry->next)
@@ -5587,7 +5751,7 @@ TR::TreeTop* TR::ArraycopyTransformation::tryToSpecializeForLength(TR::TreeTop *
 
 static TR::Node *addressSizedConst(TR::Compilation *comp, TR::Node *n, intptr_t val)
    {
-   TR::Node *node = comp->target().is64Bit()? TR::Node::lconst(n, val) : TR::Node::iconst(n, val);
+   TR::Node *node = comp->target().is64Bit()? TR::Node::lconst(n, val) : TR::Node::iconst(n, static_cast<int32_t>(val));
    if (node->getOpCodeValue() == TR::lconst)
       node->setLongInt(val);
    return node;
@@ -6413,7 +6577,7 @@ void OMR::ValuePropagation::buildBoundCheckComparisonNodes(BlockVersionInfo *blo
 
             temp.add(nextComparisonNode);
 
-            if (arrayIndex->_baseNode && arrayIndex->_instanceOfClass && 
+            if (arrayIndex->_baseNode && arrayIndex->_instanceOfClass &&
                 arrayIndex->_baseNode->getOpCode().getOpCodeValue() == TR::iloadi)
                {
                // InstanceOf check for the object we load the array index from
@@ -7564,7 +7728,7 @@ void OMR::ValuePropagation::doDelayedTransformations()
       TR::Node* oldNode = cvg->_currentTree->getNode();
 
       // !oldNode means that the branch was already removed
-      if (!oldNode || !performTransformation(comp(), "%sReplacing the old guard %p with the shiny new overridden guard %p at treetop %p\n", oldNode, cvg->_newGuardNode, cvg->_currentTree))
+      if (!oldNode || !performTransformation(comp(), "%sReplacing the old guard %p with the shiny new overridden guard %p at treetop %p\n", OPT_DETAILS, oldNode, cvg->_newGuardNode, cvg->_currentTree))
          {
          continue;
          }
@@ -7944,7 +8108,6 @@ void constrainRangeByPrecision(const int64_t low, const int64_t high, const int3
       lowResult = 0;
    }
 
-#if USE_TREES
 void OMR::ValuePropagation::ValueConstraintHandler::setVP(OMR::ValuePropagation * vp)
    {
    _vp = vp;
@@ -7972,107 +8135,6 @@ TR::Compilation * OMR::ValuePropagation::ValueConstraintHandler::comp()
    {
    return _vp->comp();
    }
-
-#else
-void OMR::ValuePropagation::ValueConstraintHandler::setVP(OMR::ValuePropagation * vp)
-   {
-   _vp = vp;
-   }
-
-OMR::ValuePropagation::ValueConstraint * OMR::ValuePropagation::ValueConstraintHandler::allocate(int32_t key)
-   {
-   return _vp->createValueConstraint(key, NULL, NULL);
-   }
-
-void OMR::ValuePropagation::ValueConstraintHandler::free(ValueConstraint * vc)
-   {
-   _vp->freeValueConstraint(vc);
-   }
-
-OMR::ValuePropagation::ValueConstraint * OMR::ValuePropagation::ValueConstraintHandler::copy(ValueConstraint * vc)
-   {
-   Relationship *rel = _vp->copyRelationships(vc->relationships.getFirst());
-   StoreRelationship *storeRel = _vp->copyStoreRelationships(vc->storeRelationships.getFirst());
-   ValueConstraint *newvc = _vp->createValueConstraint(vc->getValueNumber(), rel, storeRel);
-   return newvc;
-   }
-
-void OMR::ValuePropagation::ValueConstraintHandler::empty(ValueConstraints & valueConstraints)
-   {
-   ValueConstraint *vc;
-   while (vc = valueConstraints.pop())
-      free(vc);
-   }
-
-OMR::ValuePropagation::ValueConstraint * OMR::ValuePropagation::ValueConstraintHandler::copyAll(ValueConstraints & valueConstraints)
-   {
-   TR_LinkHeadAndTail<ValueConstraint> newList;
-   ValueConstraint *vc, *newVc;
-   for (vc = valueConstraints.getFirst(); vc; vc = vc->getNext())
-      {
-      newList.append(copy(vc));
-      }
-   return newList.getFirst();
-   }
-
-OMR::ValuePropagation::ValueConstraint * OMR::ValuePropagation::ValueConstraintHandler::getRoot(ValueConstraints & list)
-   {
-   return list.getFirst();
-   }
-
-void OMR::ValuePropagation::ValueConstraintHandler::setRoot(ValueConstraints & list, ValueConstraint * vc)
-   {
-   list.setFirst(vc);
-   }
-
-OMR::ValuePropagation::ValueConstraint * OMR::ValuePropagation::ValueConstraintHandler::find(int32_t key, ValueConstraints & list)
-   {
-   ValueConstraint *prev, *cur;
-   for (cur = list.getFirst(), prev = NULL; cur; prev = cur, cur = cur->getNext())
-      {
-      if (cur->getValueNumber() < key)
-         continue;
-      if (cur->getValueNumber() > key)
-         break;
-      return cur;
-      }
-   return NULL;
-   }
-
-OMR::ValuePropagation::ValueConstraint * OMR::ValuePropagation::ValueConstraintHandler::findOrCreate(int32_t key, ValueConstraints & list)
-   {
-   ValueConstraint *prev, *cur;
-   for (cur = list.getFirst(), prev = NULL; cur; prev = cur, cur = cur->getNext())
-      {
-      if (cur->getValueNumber() < key)
-         continue;
-      if (cur->getValueNumber() > key)
-         break;
-      return cur;
-      }
-   ValueConstraint *result = allocate(key);
-   result->setNext(cur);
-   if (prev) prev->setNext(result);
-   else list.setFirst(result);
-   return result;
-   }
-
-OMR::ValuePropagation::ValueConstraint * OMR::ValuePropagation::ValueConstraintHandler::remove(int32_t key, ValueConstraints & list)
-   {
-   ValueConstraint *prev, *cur;
-   for (cur = list.getFirst(), prev = NULL; cur; prev = cur, cur = cur->getNext())
-      {
-      if (cur->getValueNumber() < key)
-         continue;
-      if (cur->getValueNumber() > key)
-         break;
-      if (prev) prev->setNext(cur->getNext());
-      else list.setFirst(cur->getNext());
-      return cur;
-      }
-   return NULL;
-   }
-#endif
 
 OMR::ValuePropagation::InductionVariable::InductionVariable(TR::Symbol * sym, TR::Node * entryDef, int32_t incrVN, TR::VPConstraint * incr, OMR::ValuePropagation * vp)
    : _symbol(sym), _entryDef(entryDef), _entryConstraint(0), _incrementVN(incrVN), _increment(incr)

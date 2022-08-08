@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2022 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -19,11 +19,24 @@
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ###############################################################################
 
+if(CMAKE_C_COMPILER_IS_XLCLANG)
+	macro(omr_toolconfig_global_setup)
+		# For XLClang, remove any usages of -qhalt=e or -qhalt=s provided by default
+		# in the CMAKE CXX/C/ASM FLAGS, since xlclang/xlclang++ are not compatible
+		# with the e or s options.
+		omr_remove_flags(CMAKE_ASM_FLAGS -qhalt=e)
+		omr_remove_flags(CMAKE_CXX_FLAGS -qhalt=s)
+		omr_remove_flags(CMAKE_C_FLAGS   -qhalt=e)
+	endmacro(omr_toolconfig_global_setup)
+endif()
+
 if(OMR_HOST_ARCH STREQUAL "ppc")
-	set(OMR_WARNING_AS_ERROR_FLAG -qhalt=w)
+	set(OMR_C_WARNINGS_AS_ERROR_FLAG -qhalt=w)
+	set(OMR_CXX_WARNINGS_AS_ERROR_FLAG -qhalt=w)
 
 	# There is no enhanced warning for XLC right now
-	set(OMR_ENHANCED_WARNING_FLAG )
+	set(OMR_C_ENHANCED_WARNINGS_FLAG )
+	set(OMR_CXX_ENHANCED_WARNINGS_FLAG )
 
 	list(APPEND OMR_PLATFORM_COMPILE_OPTIONS
 		-qalias=noansi
@@ -53,22 +66,35 @@ if(OMR_HOST_ARCH STREQUAL "ppc")
 	list(APPEND TR_COMPILE_OPTIONS
 		-qarch=pwr7
 		-qtls
-		-qnotempinc
-		-qenum=small
-		-qmbcs
 		-qfuncsect
 		-qsuppress=1540-1087:1540-1088:1540-1090:1540-029:1500-029
 		-qdebug=nscrep
 	)
+
+	if(NOT CMAKE_C_COMPILER_IS_XLCLANG)
+		# xlc/xlc++ options
+		list(APPEND TR_COMPILE_OPTIONS
+			-qnotempinc
+			-qenum=small
+			-qmbcs
+		)
+	endif()
 
 	# Configure the platform dependent library for multithreading
 	set(OMR_PLATFORM_THREAD_LIBRARY -lpthread)
 endif()
 
 if(OMR_OS_AIX)
-	list(APPEND OMR_PLATFORM_COMPILE_OPTIONS -qinfo=pro)
 	list(APPEND OMR_PLATFORM_C_COMPILE_OPTIONS -qlanglvl=extended)
 	list(APPEND OMR_PLATFORM_CXX_COMPILE_OPTIONS -qlanglvl=extended0x)
+
+	if(CMAKE_C_COMPILER_IS_XLCLANG)
+		# xlclang/xlclang++ options
+		list(APPEND OMR_PLATFORM_COMPILE_OPTIONS -qxlcompatmacros)
+	else()
+		# xlc/xlc++ options
+		list(APPEND OMR_PLATFORM_COMPILE_OPTIONS -qinfo=pro)
+	endif()
 
 	set(CMAKE_CXX_STANDARD_LIBRARIES "${CMAKE_CXX_STANDARD_LIBRARIES} -lm -liconv -ldl -lperfstat")
 
@@ -87,18 +113,20 @@ elseif(OMR_OS_LINUX)
 		-qxflag=selinux
 	)
 elseif(OMR_OS_ZOS)
-	set(OMR_ZOS_COMPILE_ARCHITECTURE "7" CACHE STRING "z/OS compile machine architecture")
-	set(OMR_ZOS_COMPILE_TARGET "zOSV1R13" CACHE STRING "z/OS compile target operating system")
-	set(OMR_ZOS_COMPILE_TUNE "10" CACHE STRING "z/OS compile machine architecture tuning")
-	set(OMR_ZOS_LINK_COMPAT "ZOSV1R13" CACHE STRING "z/OS link compatible operating system")
+	set(OMR_ZOS_COMPILE_ARCHITECTURE "10" CACHE STRING "z/OS compile machine architecture")
+	set(OMR_ZOS_COMPILE_TARGET "ZOSV2R3" CACHE STRING "z/OS compile target operating system")
+	set(OMR_ZOS_COMPILE_TUNE "12" CACHE STRING "z/OS compile machine architecture tuning")
+	set(OMR_ZOS_LINK_COMPAT "ZOSV2R3" CACHE STRING "z/OS link compatible operating system")
 
 	# TODO: This should technically be -qhalt=w however c89 compiler used to compile the C sources does not like this
 	# flag. We'll need to investigate whether we actually need c89 for C sources or if we can use xlc and what to do
 	# with this flag. For now I'm leaving it as empty.
-	set(OMR_WARNING_AS_ERROR_FLAG )
+	set(OMR_C_WARNINGS_AS_ERROR_FLAG )
+	set(OMR_CXX_WARNINGS_AS_ERROR_FLAG )
 
 	# There is no enhanced warning for XLC right now
-	set(OMR_ENHANCED_WARNING_FLAG )
+	set(OMR_C_ENHANCED_WARNINGS_FLAG )
+	set(OMR_CXX_ENHANCED_WARNINGS_FLAG )
 
 	list(APPEND OMR_PLATFORM_COMPILE_OPTIONS
 		"\"-Wc,xplink\""               # link with xplink calling convention
@@ -124,6 +152,7 @@ elseif(OMR_OS_ZOS)
 		"\"-Wl,compat=${OMR_ZOS_LINK_COMPAT}\""
 		"\"-Wc,langlvl(extended)\""
 		-qlanglvl=extended0x
+		-qasm
 	)
 
 	list(APPEND OMR_PLATFORM_SHARED_COMPILE_OPTIONS
@@ -177,7 +206,16 @@ elseif(OMR_OS_ZOS)
 endif()
 
 set(SPP_CMD ${CMAKE_C_COMPILER})
-set(SPP_FLAGS -E -P)
+
+if(CMAKE_C_COMPILER_IS_XLCLANG)
+	# xlclang/xlclang++ options
+	# The -P option doesn't sit well with XLClang, so it's not included. It causes:
+	# "ld: 0711-317 ERROR: Undefined symbol: <SYMBOL>" when libj9jit29.so is getting linked.
+	set(SPP_FLAGS -E)
+else()
+	# xlc/xlc++ options
+	set(SPP_FLAGS -E -P)
+endif()
 
 if(OMR_OS_ZOS)
 	function(_omr_toolchain_process_exports TARGET_NAME)
@@ -196,7 +234,8 @@ if(OMR_OS_ZOS)
 		add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
 			COMMAND "${CMAKE_COMMAND}"
 				"-DLIBRARY_FILE_NAME=$<TARGET_FILE_NAME:${TARGET_NAME}>"
-				"-DLIBRARY_FOLDER=$<TARGET_FILE_DIR:${TARGET_NAME}>"
+				"-DRUNTIME_DIR=$<TARGET_FILE_DIR:${TARGET_NAME}>"
+				"-DARCHIVE_DIR=$<TARGET_PROPERTY:${TARGET_NAME},ARCHIVE_OUTPUT_DIRECTORY>"
 				-P "${omr_SOURCE_DIR}/cmake/modules/platform/toolcfg/zos_rename_exports.cmake"
 		)
 	endfunction()

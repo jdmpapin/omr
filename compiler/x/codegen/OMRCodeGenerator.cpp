@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -97,8 +97,7 @@
 #include "x/codegen/OutlinedInstructions.hpp"
 #include "x/codegen/FPTreeEvaluator.hpp"
 #include "x/codegen/X86Instruction.hpp"
-#include "x/codegen/X86Ops.hpp"
-#include "x/codegen/X86Ops_inlines.hpp"
+#include "codegen/InstOpCode.hpp"
 
 namespace OMR { class RegisterUsage; }
 namespace TR { class RegisterDependencyConditions; }
@@ -109,20 +108,20 @@ namespace TR { class RegisterDependencyConditions; }
 
 TR_X86ProcessorInfo OMR::X86::CodeGenerator::_targetProcessorInfo;
 
-void TR_X86ProcessorInfo::initialize(TR::CodeGenerator *cg)
+void TR_X86ProcessorInfo::initialize()
    {
    if (_featureFlags.testAny(TR_X86ProcessorInfoInitialized))
       return;
    // For now, we only convert the feature bits into a flags32_t, for easier querying.
    // To retrieve other information, the VM functions can be called directly.
    //
-   _featureFlags.set(cg->comp()->target().cpu.getX86ProcessorFeatureFlags());
-   _featureFlags2.set(cg->comp()->target().cpu.getX86ProcessorFeatureFlags2());
-   _featureFlags8.set(cg->comp()->target().cpu.getX86ProcessorFeatureFlags8());
+   _featureFlags.set(TR::Compiler->target.cpu.getX86ProcessorFeatureFlags());
+   _featureFlags2.set(TR::Compiler->target.cpu.getX86ProcessorFeatureFlags2());
+   _featureFlags8.set(TR::Compiler->target.cpu.getX86ProcessorFeatureFlags8());
 
    // Determine the processor vendor.
    //
-   const char *vendor = cg->comp()->target().cpu.getX86ProcessorVendorId();
+   const char *vendor = TR::Compiler->target.cpu.getX86ProcessorVendorId();
    if (!strncmp(vendor, "GenuineIntel", 12))
       _vendorFlags.set(TR_GenuineIntel);
    else if (!strncmp(vendor, "AuthenticAMD", 12))
@@ -139,7 +138,7 @@ void TR_X86ProcessorInfo::initialize(TR::CodeGenerator *cg)
 
    // set up the processor family and cache description
 
-   uint32_t _processorSignature = cg->comp()->target().cpu.getX86ProcessorSignature();
+   uint32_t _processorSignature = TR::Compiler->target.cpu.getX86ProcessorSignature();
 
    if (isGenuineIntel())
       {
@@ -206,13 +205,11 @@ void TR_X86ProcessorInfo::initialize(TR::CodeGenerator *cg)
 void
 OMR::X86::CodeGenerator::initializeX86(TR::Compilation *comp)
    {
-
    bool supportsSSE2 = false;
-   _targetProcessorInfo.initialize(self());
 
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->target().cpu.isGenuineIntel() == _targetProcessorInfo.isGenuineIntel(), "isGenuineIntel() failed\n");
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->target().cpu.isAuthenticAMD() == _targetProcessorInfo.isAuthenticAMD(), "isAuthenticAMD() failed\n");
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->target().cpu.prefersMultiByteNOP() == _targetProcessorInfo.prefersMultiByteNOP(), "prefersMultiByteNOP() failed\n");
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.isGenuineIntel() == _targetProcessorInfo.isGenuineIntel(), "isGenuineIntel() failed\n");
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.isAuthenticAMD() == _targetProcessorInfo.isAuthenticAMD(), "isAuthenticAMD() failed\n");
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.prefersMultiByteNOP() == _targetProcessorInfo.prefersMultiByteNOP(), "prefersMultiByteNOP() failed\n");
 
    // Pick a padding table
    //
@@ -230,14 +227,19 @@ OMR::X86::CodeGenerator::initializeX86(TR::Compilation *comp)
    // Determine whether or not x87 or SSE should be used for floating point.
    //
 
-#if defined(TR_TARGET_X86) && !defined(J9HAMMER)
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE2) == _targetProcessorInfo.supportsSSE2(), "supportsSSE2() failed\n");
+#if defined(TR_TARGET_X86)
+#if !defined(J9HAMMER)
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE2) == _targetProcessorInfo.supportsSSE2(), "supportsSSE2() failed\n");
 
    if (comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE2) && comp->target().cpu.testOSForSSESupport())
       supportsSSE2 = true;
-#endif // defined(TR_TARGET_X86) && !defined(J9HAMMER)
+#else
+   // 64-bit targets all support SSE2
+   supportsSSE2 = true;
+#endif // !defined(J9HAMMER)
+#endif // defined(TR_TARGET_X86)
 
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->target().cpu.supportsFeature(OMR_FEATURE_X86_RTM) == _targetProcessorInfo.supportsTM(), "supportsTM() failed\n");
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.supportsFeature(OMR_FEATURE_X86_RTM) == _targetProcessorInfo.supportsTM(), "supportsTM() failed\n");
 
    if (comp->target().cpu.supportsFeature(OMR_FEATURE_X86_RTM) && !comp->getOption(TR_DisableTM))
       {
@@ -247,7 +249,7 @@ OMR::X86::CodeGenerator::initializeX86(TR::Compilation *comp)
         *
         * TODO: Need to figure out from which mode of Broadwell start supporting TM
         */
-      TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->target().cpu.is(OMR_PROCESSOR_X86_INTELHASWELL) == _targetProcessorInfo.isIntelHaswell(), "isIntelHaswell() failed\n");
+      TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.is(OMR_PROCESSOR_X86_INTELHASWELL) == _targetProcessorInfo.isIntelHaswell(), "isIntelHaswell() failed\n");
       if (!comp->target().cpu.is(OMR_PROCESSOR_X86_INTELHASWELL))
          {
          if (comp->target().is64Bit())
@@ -257,56 +259,31 @@ OMR::X86::CodeGenerator::initializeX86(TR::Compilation *comp)
          }
       }
 
-   if (comp->target().is64Bit()
-#if defined(TR_TARGET_X86) && !defined(J9HAMMER)
-       || supportsSSE2
-#endif
-      )
-      {
-      self()->setUseSSEForSinglePrecision();
-      self()->setUseSSEForDoublePrecision();
-      self()->setSupportsAutoSIMD();
-      self()->setSupportsJavaFloatSemantics();
-      }
-   else
-      {
-      self()->setDisableFloatingPointGRA();
-      }
+   TR_ASSERT_FATAL(supportsSSE2, "Target processor/OS must support SSE2");
+
+   self()->setSupportsAutoSIMD();
+   self()->setSupportsJavaFloatSemantics();
 
    // Choose the best XMM double precision load instruction for the target architecture.
    //
-   if (self()->useSSEForDoublePrecision())
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.isAuthenticAMD() == _targetProcessorInfo.isAuthenticAMD(), "isAuthenticAMD() failed\n");
+   static char *forceMOVLPD = feGetEnv("TR_forceMOVLPDforDoubleLoads");
+   if (comp->target().cpu.isAuthenticAMD() || forceMOVLPD)
       {
-      TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->target().cpu.isAuthenticAMD() == _targetProcessorInfo.isAuthenticAMD(), "isAuthenticAMD() failed\n");
-      static char *forceMOVLPD = feGetEnv("TR_forceMOVLPDforDoubleLoads");
-      if (comp->target().cpu.isAuthenticAMD() || forceMOVLPD)
-         {
-         self()->setXMMDoubleLoadOpCode(MOVLPDRegMem);
-         }
-      else
-         {
-         self()->setXMMDoubleLoadOpCode(MOVSDRegMem);
-         }
+      self()->setXMMDoubleLoadOpCode(TR::InstOpCode::MOVLPDRegMem);
+      }
+   else
+      {
+      self()->setXMMDoubleLoadOpCode(TR::InstOpCode::MOVSDRegMem);
       }
 
-#if defined(TR_TARGET_X86) && !defined(J9HAMMER)
-   // Determine if software prefetches are supported.
-   //
-   // 32-bit platforms must check the processor and OS.
-   // 64-bit platforms unconditionally support prefetching.
-   //
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE) == _targetProcessorInfo.supportsSSE(), "supportsSSE() failed\n");
-   if (comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE) && comp->target().cpu.testOSForSSESupport())
-#endif // defined(TR_TARGET_X86) && !defined(J9HAMMER)
-      {
-      self()->setTargetSupportsSoftwarePrefetches();
-      }
+   self()->setTargetSupportsSoftwarePrefetches();
 
    // Enable software prefetch of the TLH and configure the TLH prefetching
    // geometry.
    //
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->target().cpu.is(OMR_PROCESSOR_X86_INTELCORE2) == comp->cg()->getX86ProcessorInfo().isIntelCore2(), "isIntelCore2() failed\n");
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->target().cpu.is(OMR_PROCESSOR_X86_INTELNEHALEM) == comp->cg()->getX86ProcessorInfo().isIntelNehalem(), "isIntelNehalem() failed\n");
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.is(OMR_PROCESSOR_X86_INTELCORE2) == comp->cg()->getX86ProcessorInfo().isIntelCore2(), "isIntelCore2() failed\n");
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.is(OMR_PROCESSOR_X86_INTELNEHALEM) == comp->cg()->getX86ProcessorInfo().isIntelNehalem(), "isIntelNehalem() failed\n");
    if (((!comp->getOption(TR_DisableTLHPrefetch) && (comp->target().cpu.is(OMR_PROCESSOR_X86_INTELCORE2) || comp->target().cpu.is(OMR_PROCESSOR_X86_INTELNEHALEM))) ||
        (comp->getOption(TR_TLHPrefetch) && self()->targetSupportsSoftwarePrefetches())))
       {
@@ -396,20 +373,20 @@ OMR::X86::CodeGenerator::initializeX86(TR::Compilation *comp)
          {
          self()->setSupportsArraySet();
          }
-      static bool disableX86TRTO = (bool)feGetEnv("TR_disableX86TRTO");
+      static bool disableX86TRTO = feGetEnv("TR_disableX86TRTO") != NULL;
       if (!disableX86TRTO)
          {
-         TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1) == self()->getX86ProcessorInfo().supportsSSE4_1(), "supportsSSE4_1() failed\n");
+         TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1) == self()->getX86ProcessorInfo().supportsSSE4_1(), "supportsSSE4_1() failed\n");
          if (comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1))
             {
             self()->setSupportsArrayTranslateTRTO();
             }
          }
-      static bool disableX86TROT = (bool)feGetEnv("TR_disableX86TROT");
+      static bool disableX86TROT = feGetEnv("TR_disableX86TROT") != NULL;
       if (!disableX86TROT)
          {
-         TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1) == self()->getX86ProcessorInfo().supportsSSE4_1(), "supportsSSE4_1() failed\n");
-         TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE2) == self()->getX86ProcessorInfo().supportsSSE2(), "supportsSSE4_1() failed\n");
+         TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1) == self()->getX86ProcessorInfo().supportsSSE4_1(), "supportsSSE4_1() failed\n");
+         TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE2) == self()->getX86ProcessorInfo().supportsSSE2(), "supportsSSE4_1() failed\n");
          if (comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1))
             {
             self()->setSupportsArrayTranslateTROT();
@@ -450,9 +427,9 @@ OMR::X86::CodeGenerator::initializeX86(TR::Compilation *comp)
    // Make a conservative estimate of the boundary over which an executable instruction cannot
    // be patched.
    //
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->target().cpu.isGenuineIntel() == _targetProcessorInfo.isGenuineIntel(), "isGenuineIntel() failed\n");
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->target().cpu.isAuthenticAMD() == _targetProcessorInfo.isAuthenticAMD(), "isAuthenticAMD() failed\n");
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->target().cpu.is(OMR_PROCESSOR_X86_AMDFAMILY15H) == _targetProcessorInfo.isAMD15h(), "isAMD15h() failed\n");
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.isGenuineIntel() == _targetProcessorInfo.isGenuineIntel(), "isGenuineIntel() failed\n");
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.isAuthenticAMD() == _targetProcessorInfo.isAuthenticAMD(), "isAuthenticAMD() failed\n");
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.is(OMR_PROCESSOR_X86_AMDFAMILY15H) == _targetProcessorInfo.isAMD15h(), "isAMD15h() failed\n");
    int32_t boundary;
    if (comp->target().cpu.isGenuineIntel() || (comp->target().cpu.isAuthenticAMD() && comp->target().cpu.is(OMR_PROCESSOR_X86_AMDFAMILY15H)))
       boundary = 32;
@@ -608,30 +585,30 @@ OMR::X86::CodeGenerator::beginInstructionSelection()
       {
       // linkageInfo word
       if (self()->getAppendInstruction())
-         _returnTypeInfoInstruction = generateImmInstruction(DDImm4, startNode, 0, self());
+         _returnTypeInfoInstruction = generateImmInstruction(TR::InstOpCode::DDImm4, startNode, 0, self());
       else
-         _returnTypeInfoInstruction = new (self()->trHeapMemory()) TR::X86ImmInstruction((TR::Instruction *)NULL, DDImm4, 0, self());
+         _returnTypeInfoInstruction = new (self()->trHeapMemory()) TR::X86ImmInstruction((TR::Instruction *)NULL, TR::InstOpCode::DDImm4, 0, self());
       }
 
    if (methodSymbol->getLinkageConvention() == TR_System && !_returnTypeInfoInstruction)
       {
       // linkageInfo word
       if (self()->getAppendInstruction())
-         _returnTypeInfoInstruction = generateImmInstruction(DDImm4, startNode, 0, self());
+         _returnTypeInfoInstruction = generateImmInstruction(TR::InstOpCode::DDImm4, startNode, 0, self());
       else
-         _returnTypeInfoInstruction = new (self()->trHeapMemory()) TR::X86ImmInstruction((TR::Instruction *)NULL, DDImm4, 0, self());
+         _returnTypeInfoInstruction = new (self()->trHeapMemory()) TR::X86ImmInstruction((TR::Instruction *)NULL, TR::InstOpCode::DDImm4, 0, self());
       }
 
    if (self()->getAppendInstruction())
-      generateInstruction(PROCENTRY, startNode, self());
+      generateInstruction(TR::InstOpCode::proc, startNode, self());
    else
-      new (self()->trHeapMemory()) TR::Instruction(PROCENTRY, (TR::Instruction *)NULL, self());
+      new (self()->trHeapMemory()) TR::Instruction(TR::InstOpCode::proc, (TR::Instruction *)NULL, self());
 
    // Set the default FPCW to single precision mode if we are allowed to.
    //
    if (self()->enableSinglePrecisionMethods() && comp->getJittedMethodSymbol()->usesSinglePrecisionMode())
       {
-      generateMemInstruction(LDCWMem, startNode, generateX86MemoryReference(self()->findOrCreate2ByteConstant(startNode, SINGLE_PRECISION_ROUND_TO_NEAREST), self()), self());
+      generateMemInstruction(TR::InstOpCode::LDCWMem, startNode, generateX86MemoryReference(self()->findOrCreate2ByteConstant(startNode, SINGLE_PRECISION_ROUND_TO_NEAREST), self()), self());
       }
    }
 
@@ -654,7 +631,7 @@ OMR::X86::CodeGenerator::endInstructionSelection()
       {
       TR_ASSERT(self()->getLastCatchAppendInstruction(),
              "endInstructionSelection() ==> Could not find the dummy finally block!\n");
-      generateMemInstruction(self()->getLastCatchAppendInstruction(), LDCWMem, generateX86MemoryReference(self()->findOrCreate2ByteConstant(self()->getLastCatchAppendInstruction()->getNode(), DOUBLE_PRECISION_ROUND_TO_NEAREST), self()), self());
+      generateMemInstruction(self()->getLastCatchAppendInstruction(), TR::InstOpCode::LDCWMem, generateX86MemoryReference(self()->findOrCreate2ByteConstant(self()->getLastCatchAppendInstruction()->getNode(), DOUBLE_PRECISION_ROUND_TO_NEAREST), self()), self());
       }
    }
 
@@ -724,21 +701,23 @@ static bool willNotInlineCompareAndSwapNative(TR::Node *node,
  */
 bool OMR::X86::CodeGenerator::willBeEvaluatedAsCallByCodeGen(TR::Node *node, TR::Compilation *comp)
    {
+#ifdef J9_PROJECT_SPECIFIC
    TR::SymbolReference *callSymRef = node->getSymbolReference();
    TR::MethodSymbol *methodSymbol = callSymRef->getSymbol()->castToMethodSymbol();
    switch (methodSymbol->getRecognizedMethod())
       {
-#ifdef J9_PROJECT_SPECIFIC
       case TR::sun_misc_Unsafe_compareAndSwapLong_jlObjectJJJ_Z:
          return willNotInlineCompareAndSwapNative(node, 8, comp);
       case TR::sun_misc_Unsafe_compareAndSwapInt_jlObjectJII_Z:
          return willNotInlineCompareAndSwapNative(node, 4, comp);
       case TR::sun_misc_Unsafe_compareAndSwapObject_jlObjectJjlObjectjlObject_Z:
          return willNotInlineCompareAndSwapNative(node, (comp->target().is64Bit() && !comp->useCompressedPointers()) ? 8 : 4, comp);
-#endif
+
       default:
-         return true;
+         break;
       }
+#endif
+   return true;
    }
 
 int32_t OMR::X86::CodeGenerator::getMaximumNumbersOfAssignableFPRs()
@@ -1006,69 +985,86 @@ bool OMR::X86::CodeGenerator::supportsAddressRematerialization()         { stati
 #undef ALLOWED_TO_REMATERIALIZE
 #undef CAN_REMATERIALIZE
 
-bool
-OMR::X86::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::ILOpCode opcode, TR::DataType dt)
+bool OMR::X86::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::ILOpCode opcode)
    {
+   TR_ASSERT_FATAL(opcode.isVectorOpCode(), "getSupportsOpCodeForAutoSIMD expects vector opcode\n");
+
    /*
     * Most of the vector evaluators for opcodes used in AutoSIMD have been implemented.
     * The cases that return false are placeholders that should be updated as support for more vector evaluators is added.
     */
-   // implemented vector opcodes
-   switch (opcode.getOpCodeValue())
+
+    TR::DataType ot = opcode.getVectorResultDataType();
+    TR::DataType et = ot.getVectorElementType();
+    TR::InstOpCode nativeOpcode = TR::TreeEvaluator::getNativeSIMDOpcode(opcode.getOpCodeValue(), ot, false);
+
+   if (nativeOpcode.getMnemonic() != TR::InstOpCode::bad)
       {
-      case TR::vadd:
-      case TR::vsub:
-         if (dt == TR::Int32 || dt == TR::Int64 || dt == TR::Float || dt == TR::Double)
-            return true;
-         else
-            return false;
-      case TR::vmul:
-         TR_ASSERT_FATAL(self()->comp()->compileRelocatableCode() || self()->comp()->isOutOfProcessCompilation() || self()->getX86ProcessorInfo().supportsSSE4_1() == self()->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1), "supportsSSE4_1() failed\n");
-         if (dt == TR::Float || dt == TR::Double || (dt == TR::Int32 && self()->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1)))
-            return true;
-         else
-            return false;
-      case TR::vdiv:
-         if (dt == TR::Float || dt == TR::Double)
-            return true;
-         else
-            return false;
+      return nativeOpcode.getSIMDEncoding(cpu, ot.getVectorLength()) != OMR::X86::Bad;
+      }
+
+   TR_ASSERT_FATAL(et == TR::Int8 || et == TR::Int16 || et == TR::Int32 || et == TR::Int64 || et == TR::Float || et == TR::Double,
+                   "Unexpected vector element type\n");
+
+   // implemented vector opcodes
+   switch (opcode.getVectorOperation())
+      {
       case TR::vneg:
-      case TR::vrem:
-         return false;
-      case TR::vxor:
-      case TR::vor:
-      case TR::vand:
-         if (dt == TR::Int32 || dt == TR::Int64)
-            return true;
-         else
-            return false;
+         switch (ot.getVectorLength()) {
+            case TR::VectorLength128:
+               return true;
+            case TR::VectorLength256:
+               return cpu->supportsFeature(OMR_FEATURE_X86_AVX2);
+            case TR::VectorLength512:
+               return cpu->supportsFeature(OMR_FEATURE_X86_AVX512F);
+            default:
+               return false;
+         }
       case TR::vload:
       case TR::vloadi:
       case TR::vstore:
       case TR::vstorei:
+         switch (ot.getVectorLength())
+            {
+            case TR::VectorLength512:
+               if (!cpu->supportsFeature(OMR_FEATURE_X86_AVX512F))
+                  return false;
+               return true;
+            case TR::VectorLength256:
+               if (!cpu->supportsAVX())
+                  return false;
+               return true;
+            case TR::VectorLength128:
+               return true;
+            default:
+                return false;
+            }
       case TR::vsplats:
-         if (dt == TR::Int32 || dt == TR::Int64 || dt == TR::Float || dt == TR::Double)
-            return true;
+         if (et == TR::Int32 || et == TR::Int64 || et == TR::Float || et == TR::Double)
+            return ot.getVectorLength() == TR::VectorLength128;
          else
             return false;
-      /*
+
+       /*
        * GRA does not work with vector registers on 32 bit due to a bug where xmm registers are not being assigned.
        * This can potentially cause a performance problem in autosimd reductions.
-       * This function is where AutoSIMD checks to see if getvelem is suppored for use in reductions.
-       * The getvelem case was changed to disable the use of getvelem on 32 bit x86.
+       * This function is where AutoSIMD checks to see if vgetelem is suppored for use in reductions.
+       * The vgetelem case was changed to disable the use of vgetelem on 32 bit x86.
        * This code will be reenabled as part of Issue 2035 which tracks the progress of fixing the GRA bug.
        * GRA does not work with vector registers on 64 bit either.
-       * getvelem is now being disabled on 64 bit for the same reasons as 32 bit.
+       * vgetelem is now being disabled on 64 bit for the same reasons as 32 bit.
        * This code will be reenabled as part of Issue 2280
+       *
+       * TODO: disable GRA directly and enable vgetelem here so that it can be used by VectorAPIExpansion
        */
-      case TR::getvelem:
+       case TR::vgetelem:
 #if 0
-         if (self()->comp()->target().is64Bit() && (dt == TR::Int32 || dt == TR::Int64 || dt == TR::Float || dt == TR::Double))
+         if (self()->comp()->target().is64Bit() && (et == TR::Int32 || et == TR::Int64 || et == TR::Float || et == TR::Double))
             return true;
          else
 #endif //closes the if 0
             return false;
+
       default:
          return false;
       }
@@ -1076,11 +1072,16 @@ OMR::X86::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::ILOpCode opcode, TR::D
    return false;
    }
 
+bool
+OMR::X86::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::ILOpCode opcode)
+   {
+   return TR::CodeGenerator::getSupportsOpCodeForAutoSIMD(&self()->comp()->target().cpu, opcode);
+   }
 
 bool
 OMR::X86::CodeGenerator::getSupportsEncodeUtf16LittleWithSurrogateTest()
    {
-   TR_ASSERT_FATAL(self()->comp()->compileRelocatableCode() || self()->comp()->isOutOfProcessCompilation() || self()->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1) == TR::CodeGenerator::getX86ProcessorInfo().supportsSSE4_1(), "supportsSSE4_1()");
+   TR_ASSERT_FATAL(self()->comp()->compileRelocatableCode() || self()->comp()->isOutOfProcessCompilation() || self()->comp()->compilePortableCode() || self()->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1) == TR::CodeGenerator::getX86ProcessorInfo().supportsSSE4_1(), "supportsSSE4_1()");
    return self()->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1) &&
           !self()->comp()->getOption(TR_DisableSIMDUTF16LEEncoder);
    }
@@ -1088,7 +1089,7 @@ OMR::X86::CodeGenerator::getSupportsEncodeUtf16LittleWithSurrogateTest()
 bool
 OMR::X86::CodeGenerator::getSupportsEncodeUtf16BigWithSurrogateTest()
    {
-   TR_ASSERT_FATAL(self()->comp()->compileRelocatableCode() || self()->comp()->isOutOfProcessCompilation() || self()->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1) == TR::CodeGenerator::getX86ProcessorInfo().supportsSSE4_1(), "supportsSSE4_1()");
+   TR_ASSERT_FATAL(self()->comp()->compileRelocatableCode() || self()->comp()->isOutOfProcessCompilation() || self()->comp()->compilePortableCode() || self()->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1) == TR::CodeGenerator::getX86ProcessorInfo().supportsSSE4_1(), "supportsSSE4_1()");
    return self()->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1) &&
           !self()->comp()->getOption(TR_DisableSIMDUTF16BEEncoder);
    }
@@ -1112,6 +1113,18 @@ OMR::X86::CodeGenerator::supportsNonHelper(TR::SymbolReferenceTable::CommonNonhe
          return true;
       default:
          return false;
+      }
+   }
+
+bool
+OMR::X86::CodeGenerator::isILOpCodeSupported(TR::ILOpCodes o)
+   {
+   switch(o)
+      {
+      case TR::a2i:
+         return false;
+      default:
+         return OMR::CodeGenerator::isILOpCodeSupported(o);
       }
    }
 
@@ -1202,6 +1215,10 @@ void OMR::X86::CodeGenerator::saveBetterSpillPlacements(TR::Instruction * branch
 
 void OMR::X86::CodeGenerator::removeBetterSpillPlacementCandidate(TR::RealRegister * realReg)
    {
+   // This mechanism only supports GPR's due to interference between GPR and vector register masks
+   if (realReg->getKind() != TR_GPR)
+      return;
+
    // Remove the given real register as a candidate for better spill placement
    // of any virtual registers.
    //
@@ -1243,6 +1260,11 @@ OMR::X86::CodeGenerator::findBetterSpillPlacement(
    {
    TR::Instruction          * placement;
    TR_BetterSpillPlacement * info;
+
+   // This mechanism only supports GPR's due to interference between GPR and vector register masks
+   if (virtReg->getKind() != TR_GPR)
+      return NULL;
+
    for (info = _betterSpillPlacements; info; info = info->_next)
       {
       if (info->_virtReg == virtReg)
@@ -1321,11 +1343,11 @@ OMR::X86::CodeGenerator::performNonLinearRegisterAssignmentAtBranch(
    if (deps)
       {
       TR::Instruction *ins =
-         generateLabelInstruction(oi->getFirstInstruction(), LABEL, generateLabelSymbol(self()), deps, self());
+         generateLabelInstruction(oi->getFirstInstruction(), TR::InstOpCode::label, generateLabelSymbol(self()), deps, self());
 
       if (self()->comp()->getOption(TR_TraceNonLinearRegisterAssigner))
          {
-         traceMsg(self()->comp(), "creating LABEL instruction %p for dependencies\n", ins);
+         traceMsg(self()->comp(), "creating TR::InstOpCode::label instruction %p for dependencies\n", ins);
          }
       }
 
@@ -1500,7 +1522,7 @@ void OMR::X86::CodeGenerator::doBackwardsRegisterAssignment(
       instructionCursor->assignRegisters(kindsToAssign);
       //code to increment or decrement counter when a internal control flow end or start label is hit
       TR::LabelSymbol *label;
-      if (((TR::X86LabelInstruction *)instructionCursor)->getOpCodeValue() == LABEL && (label = ((TR::X86LabelInstruction *)instructionCursor)->getLabelSymbol()))
+      if (((TR::X86LabelInstruction *)instructionCursor)->getOpCodeValue() == TR::InstOpCode::label && (label = ((TR::X86LabelInstruction *)instructionCursor)->getLabelSymbol()))
       {
          if (label->isStartInternalControlFlow())
          {
@@ -1629,9 +1651,9 @@ void OMR::X86::CodeGenerator::doRegisterAssignment(TR_RegisterKinds kindsToAssig
 
 bool OMR::X86::CodeGenerator::isReturnInstruction(TR::Instruction *instr)
    {
-   if (instr->getOpCodeValue() == RET ||
-       instr->getOpCodeValue() == RETImm2 ||
-       instr->getOpCodeValue() == ReturnMarker
+   if (instr->getOpCodeValue() == TR::InstOpCode::RET ||
+       instr->getOpCodeValue() == TR::InstOpCode::RETImm2 ||
+       instr->getOpCodeValue() == TR::InstOpCode::retn
       )
       return true;
    else
@@ -1640,7 +1662,7 @@ bool OMR::X86::CodeGenerator::isReturnInstruction(TR::Instruction *instr)
 
 bool OMR::X86::CodeGenerator::isBranchInstruction(TR::Instruction *instr)
    {
-   return (instr->getOpCode().isBranchOp() || instr->getOpCode().getOpCodeValue() == CALLImm4 ? true : false);
+   return (instr->getOpCode().isBranchOp() || instr->getOpCode().getOpCodeValue() == TR::InstOpCode::CALLImm4 ? true : false);
    }
 
 struct DescendingSortX86DataSnippetByDataSize
@@ -1654,10 +1676,10 @@ void OMR::X86::CodeGenerator::doBinaryEncoding()
    {
    LexicalTimer pt1("code generation", self()->comp()->phaseTimer());
 
-   // Generate fixup code for the interpreter entry point right before PROCENTRY
+   // Generate fixup code for the interpreter entry point right before TR::InstOpCode::proc
    //
    TR::Instruction * procEntryInstruction = self()->getFirstInstruction();
-   while (procEntryInstruction && procEntryInstruction->getOpCodeValue() != PROCENTRY)
+   while (procEntryInstruction && procEntryInstruction->getOpCodeValue() != TR::InstOpCode::proc)
       {
       procEntryInstruction = procEntryInstruction->getNext();
       }
@@ -1720,9 +1742,9 @@ void OMR::X86::CodeGenerator::doBinaryEncoding()
    TR::Instruction * estimateCursor = self()->getFirstInstruction();
    int32_t estimate = 0;
 
-   // Estimate the binary length up to PROCENTRY
+   // Estimate the binary length up to TR::InstOpCode::proc
    //
-   while (estimateCursor && estimateCursor->getOpCodeValue() != PROCENTRY)
+   while (estimateCursor && estimateCursor->getOpCodeValue() != TR::InstOpCode::proc)
       {
       estimate       = estimateCursor->estimateBinaryLength(estimate);
       estimateCursor = estimateCursor->getNext();
@@ -1816,7 +1838,7 @@ void OMR::X86::CodeGenerator::doBinaryEncoding()
             }
          }
 
-      // Insert epilogue before each RET.
+      // Insert epilogue before each TR::InstOpCode::RET.
       //
       if (self()->isReturnInstruction(estimateCursor))
          {
@@ -1837,7 +1859,7 @@ void OMR::X86::CodeGenerator::doBinaryEncoding()
                {
                estimateCursor = temp->getNext();
 
-               // Make sure we don't process the same RET again when we hit it
+               // Make sure we don't process the same TR::InstOpCode::RET again when we hit it
                // at the end of the epilogue.
                //
                skipOneReturn = true;
@@ -1846,7 +1868,7 @@ void OMR::X86::CodeGenerator::doBinaryEncoding()
             }
          else
             {
-            // We've already seen this RET; don't process it again.
+            // We've already seen this TR::InstOpCode::RET; don't process it again.
             //
             skipOneReturn = false;
             }
@@ -1940,11 +1962,11 @@ void OMR::X86::CodeGenerator::doBinaryEncoding()
               self()->getBinaryBufferCursor() - instructionStart);
 
       if (self()->comp()->target().is64Bit() &&
-          (cursorInstruction->getOpCodeValue() == PROCENTRY))
+          (cursorInstruction->getOpCodeValue() == TR::InstOpCode::proc))
          {
          // A hack to set the linkage info word
          //
-         TR_ASSERT(_returnTypeInfoInstruction->getOpCodeValue() == DDImm4, "assertion failure");
+         TR_ASSERT(_returnTypeInfoInstruction->getOpCodeValue() == TR::InstOpCode::DDImm4, "assertion failure");
          uint32_t linkageInfoWord = self()->initializeLinkageInfo(_returnTypeInfoInstruction->getBinaryEncoding());
          _returnTypeInfoInstruction->setSourceImmediate(linkageInfoWord);
          }
@@ -1957,8 +1979,8 @@ void OMR::X86::CodeGenerator::doBinaryEncoding()
    //
    for(auto oiIterator = self()->getOutlinedInstructionsList().begin(); oiIterator != self()->getOutlinedInstructionsList().end(); ++oiIterator)
       {
-      uint32_t startOffset = (*oiIterator)->getFirstInstruction()->getBinaryEncoding() - self()->getCodeStart();
-      uint32_t endOffset   = (*oiIterator)->getAppendInstruction()->getBinaryEncoding() - self()->getCodeStart();
+      uint32_t startOffset = static_cast<uint32_t>((*oiIterator)->getFirstInstruction()->getBinaryEncoding() - self()->getCodeStart());
+      uint32_t endOffset   = static_cast<uint32_t>((*oiIterator)->getAppendInstruction()->getBinaryEncoding() - self()->getCodeStart());
 
       TR::Block* block = (*oiIterator)->getBlock();
       TR::Node*  node  = (*oiIterator)->getCallNode();
@@ -1993,7 +2015,7 @@ void OMR::X86::CodeGenerator::doBinaryEncoding()
    }
 
 // different from evaluate in that it returns a clobberable register
-TR::Register *OMR::X86::CodeGenerator::gprClobberEvaluate(TR::Node * node, TR_X86OpCodes movRegRegOpCode)
+TR::Register *OMR::X86::CodeGenerator::gprClobberEvaluate(TR::Node * node, TR::InstOpCode::Mnemonic movRegRegOpCode)
    {
    TR::Register *sourceRegister = self()->evaluate(node);
 
@@ -2061,14 +2083,14 @@ TR::Register *OMR::X86::CodeGenerator::intClobberEvaluate(TR::Node * node)
    {
    TR_ASSERT(!node->getOpCode().is8Byte() || node->getOpCode().isRef(), "Non-ref 8bytes must use longClobberEvaluate");
    TR_ASSERT(!node->getOpCode().isRef() || self()->comp()->target().is32Bit() || self()->comp()->useCompressedPointers(), "64-bit references must use longClobberEvaluate unless under compression");
-   return self()->gprClobberEvaluate(node, MOV4RegReg);
+   return self()->gprClobberEvaluate(node, TR::InstOpCode::MOV4RegReg);
    }
 
 TR::Register *OMR::X86::CodeGenerator::shortClobberEvaluate(TR::Node * node)
    {
    TR_ASSERT(!node->getOpCode().is4Byte() && !node->getOpCode().is8Byte(), "Ints/Longs must use int/longClobberEvaluate");
    TR_ASSERT(!(node->getOpCode().isRef() && self()->comp()->target().is64Bit()), "64-bit references must use longClobberEvaluate");
-   return self()->gprClobberEvaluate(node, MOV2RegReg);
+   return self()->gprClobberEvaluate(node, TR::InstOpCode::MOV2RegReg);
    }
 
 TR::Register *OMR::X86::CodeGenerator::floatClobberEvaluate(TR::Node * node)
@@ -2079,16 +2101,7 @@ TR::Register *OMR::X86::CodeGenerator::floatClobberEvaluate(TR::Node * node)
       TR::Register * temp           = self()->evaluate(node);
       TR::Register * targetRegister = self()->allocateSinglePrecisionRegister(temp->getKind());
 
-      if (temp->needsPrecisionAdjustment())
-         TR::TreeEvaluator::insertPrecisionAdjustment(temp, node, self());
-
-      if (temp->mayNeedPrecisionAdjustment())
-         targetRegister->setMayNeedPrecisionAdjustment();
-
-      if (temp->getKind() == TR_FPR)
-         generateRegRegInstruction(MOVAPSRegReg, node, targetRegister, temp, self());
-      else
-         generateFPST0STiRegRegInstruction(FLDRegReg, node, targetRegister, temp, self());
+      generateRegRegInstruction(TR::InstOpCode::MOVAPSRegReg, node, targetRegister, temp, self());
 
       return targetRegister;
       }
@@ -2106,16 +2119,7 @@ TR::Register *OMR::X86::CodeGenerator::doubleClobberEvaluate(TR::Node * node)
       TR::Register * temp           = self()->evaluate(node);
       TR::Register * targetRegister = self()->allocateRegister(temp->getKind());
 
-      if (temp->needsPrecisionAdjustment())
-         TR::TreeEvaluator::insertPrecisionAdjustment(temp, node, self());
-
-      if (temp->mayNeedPrecisionAdjustment())
-         targetRegister->setMayNeedPrecisionAdjustment();
-
-      if (temp->getKind() == TR_FPR)
-         generateRegRegInstruction(MOVAPDRegReg, node, targetRegister, temp, self());
-      else
-         generateFPST0STiRegRegInstruction(DLDRegReg, node, targetRegister, temp, self());
+      generateRegRegInstruction(TR::InstOpCode::MOVAPDRegReg, node, targetRegister, temp, self());
 
       return targetRegister;
       }
@@ -2188,7 +2192,7 @@ int32_t OMR::X86::CodeGenerator::setEstimatedLocationsForDataSnippetLabels(int32
    for (auto iterator = _dataSnippetList.begin(); iterator != _dataSnippetList.end(); ++iterator)
       {
       auto size = (*iterator)->getDataSize();
-      estimatedSnippetStart = ((estimatedSnippetStart+size-1)/size) * size;
+      estimatedSnippetStart = static_cast<int32_t>(((estimatedSnippetStart+size-1)/size) * size);
       (*iterator)->getSnippetLabel()->setEstimatedCodeLocation(estimatedSnippetStart);
       estimatedSnippetStart += (*iterator)->getLength(estimatedSnippetStart);
       }
@@ -2328,7 +2332,7 @@ OMR::X86::CodeGenerator::estimateBinaryLength(TR::MemoryReference *mr)
 
 void OMR::X86::CodeGenerator::apply32BitLabelRelativeRelocation(int32_t * cursor, TR::LabelSymbol * label)
    {
-   *cursor += ((uintptr_t)label->getCodeLocation());
+   *cursor += static_cast<int32_t>((reinterpret_cast<uintptr_t>(label->getCodeLocation())));
    }
 
 
@@ -2336,12 +2340,13 @@ void OMR::X86::CodeGenerator::apply32BitLabelRelativeRelocation(int32_t * cursor
 // instruction or the disp32 to a trampoline that can reach the helper.
 //
 int32_t OMR::X86::CodeGenerator::branchDisplacementToHelperOrTrampoline(
-   uint8_t            *nextInstructionAddress,
+   uint8_t *branchInstructionAddress,
    TR::SymbolReference *helper)
    {
    intptr_t helperAddress = (intptr_t)helper->getMethodAddress();
+   uint8_t *nextInstructionAddress = branchInstructionAddress + 5;  // 5 == length of wide displacement direct call or jump instruction
 
-   if (self()->directCallRequiresTrampoline(helperAddress, (intptr_t)nextInstructionAddress))
+   if (self()->directCallRequiresTrampoline(helperAddress, (intptr_t)branchInstructionAddress))
       {
       helperAddress = TR::CodeCacheManager::instance()->findHelperTrampoline(helper->getReferenceNumber(), (void *)(nextInstructionAddress-4));
 
@@ -2380,8 +2385,8 @@ TR::RealRegister::RegNum OMR::X86::CodeGenerator::pickNOPRegister(TR::Instructio
       static const int32_t WINDOW_SIZE = 5;
       while (j <= WINDOW_SIZE && cursor)
          {
-         if (cursor->getOpCodeValue() != FENCE &&
-             cursor->getOpCodeValue() != LABEL)
+         if (cursor->getOpCodeValue() != TR::InstOpCode::fence &&
+             cursor->getOpCodeValue() != TR::InstOpCode::label)
             {
             ++j;
 
@@ -2703,7 +2708,7 @@ uint8_t *OMR::X86::CodeGenerator::generatePadding(uint8_t              *cursor,
    if (length <= _paddingTable->_biggestEncoding)
       {
       // Copy bytes from the appropriate template
-      memcpy(cursor, paddingTableEncoding(_paddingTable, length), length);
+      memcpy(cursor, paddingTableEncoding(_paddingTable, static_cast<uint8_t>(length)), length);
 
       if (_paddingTable->_flags.testAny(TR_X86PaddingTable::registerMatters))
          {
@@ -2743,18 +2748,18 @@ uint8_t *OMR::X86::CodeGenerator::generatePadding(uint8_t              *cursor,
          if (length >= 5)
             {
             length -= 5;
-            cursor = TR_X86OpCode(JMP4).binary(cursor);
-            *(int32_t*)cursor = length;
+            cursor = TR::InstOpCode(TR::InstOpCode::JMP4).binary(cursor, X86::Encoding::Default);
+            *(int32_t*)cursor = static_cast<int32_t>(length);
             cursor += 4;
             }
          else
             {
             length -= 2;
-            cursor = TR_X86OpCode(JMP1).binary(cursor);
-            *(int8_t*)cursor = length;
+            cursor = TR::InstOpCode(TR::InstOpCode::JMP1).binary(cursor, X86::Encoding::Default);
+            *(int8_t*)cursor = static_cast<int8_t>(length);
             cursor += 1;
             }
-         memset(cursor, length, 0xcc); // Fill the rest with int3s
+         memset(cursor, static_cast<int32_t>(length), 0xcc); // Fill the rest with int3s
          cursor += length;
          }
       else
@@ -2846,9 +2851,9 @@ uint8_t *OMR::X86::CodeGenerator::generatePadding(uint8_t              *cursor,
                      TR::DebugCounter::incStaticDebugCounter(self()->comp(), TR::DebugCounter::debugCounterName(self()->comp(), "vgnopNoPatchReason/%d/staticPIC", blockFrequency));
                      break;
                      }
-                  if (ninst->isPatchBarrier())
+                  if (ninst->isPatchBarrier(self()))
                      {
-                     if (ninst->getOpCodeValue() != LABEL)
+                     if (ninst->getOpCodeValue() != TR::InstOpCode::label)
                         TR::DebugCounter::incStaticDebugCounter(self()->comp(), TR::DebugCounter::debugCounterName(self()->comp(), "vgnopNoPatchReason/%d/patchBarrier", blockFrequency));
                      else
                         TR::DebugCounter::incStaticDebugCounter(self()->comp(), TR::DebugCounter::debugCounterName(self()->comp(), "vgnopNoPatchReason/%d/controlFlowMerge", blockFrequency));
@@ -2911,12 +2916,12 @@ TR::Instruction *OMR::X86::CodeGenerator::generateDebugCounterBump(TR::Instructi
    {
    if (delta == 1)
       return generateMemInstruction(cursor,
-         INC4Mem,
+         TR::InstOpCode::INC4Mem,
          generateX86MemoryReference(counter->getBumpCountSymRef(self()->comp()), self()),
          self());
    else
       return generateMemImmInstruction(cursor,
-         (-128 <= delta && delta <= 127)? ADD4MemImms : ADD4MemImm4,
+         (-128 <= delta && delta <= 127)? TR::InstOpCode::ADD4MemImms : TR::InstOpCode::ADD4MemImm4,
          generateX86MemoryReference(counter->getBumpCountSymRef(self()->comp()), self()),
          delta,
          self());
@@ -2925,7 +2930,7 @@ TR::Instruction *OMR::X86::CodeGenerator::generateDebugCounterBump(TR::Instructi
 TR::Instruction *OMR::X86::CodeGenerator::generateDebugCounterBump(TR::Instruction *cursor, TR::DebugCounterBase *counter, TR::Register *deltaReg, TR::RegisterDependencyConditions *cond)
    {
    if (deltaReg)
-      return generateMemRegInstruction(cursor, ADD4MemReg,
+      return generateMemRegInstruction(cursor, TR::InstOpCode::ADD4MemReg,
          generateX86MemoryReference(counter->getBumpCountSymRef(self()->comp()), self()),
          deltaReg,
          self());
@@ -3087,24 +3092,6 @@ void OMR::X86::CodeGenerator::dumpPostGPRegisterAssignment(TR::Instruction * ins
       }
    }
 #endif
-
-bool
-OMR::X86::CodeGenerator::useSSEFor(TR::DataType type)
-   {
-   if (type == TR::Float)
-      return self()->useSSEForSinglePrecision();
-   else if (type == TR::Double)
-      return self()->useSSEForDoublePrecision();
-   else
-      return false;
-   }
-
-bool
-OMR::X86::CodeGenerator::needToAvoidCommoningInGRA()
-   {
-   if (!self()->useSSEForSinglePrecision() && !self()->useSSEForDoublePrecision()) return true;
-   return false;
-   }
 
 int32_t
 OMR::X86::CodeGenerator::arrayTranslateMinimumNumberOfElements(bool isByteSource, bool isByteTarget)

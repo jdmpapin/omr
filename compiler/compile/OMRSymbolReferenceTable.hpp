@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -70,8 +70,6 @@ class SymbolReferenceTable
 
    TR_ALLOC(TR_Memory::SymbolReferenceTable)
 
-   TR::SymbolReferenceTable *self();
-
    TR::Compilation *comp() { return _compilation; }
    TR_FrontEnd *fe() { return _fe; }
    TR_Memory *trMemory() { return _trMemory; }
@@ -97,9 +95,11 @@ class SymbolReferenceTable
 
       firstArrayShadowSymbol,
 
-      firstArrayletShadowSymbol = firstArrayShadowSymbol + TR::NumTypes,
+      firstArrayletShadowSymbol = firstArrayShadowSymbol + TR::NumAllTypes,
 
-      firstCommonNonhelperNonArrayShadowSymbol = firstArrayletShadowSymbol + TR::NumTypes,
+      firstCommonNonhelperNonArrayShadowSymbol = firstArrayletShadowSymbol + TR::NumAllTypes,
+
+      OMRfirstPrintableCommonNonhelperSymbol = firstCommonNonhelperNonArrayShadowSymbol,
 
       contiguousArraySizeSymbol = firstCommonNonhelperNonArrayShadowSymbol,
       discontiguousArraySizeSymbol,
@@ -128,6 +128,7 @@ class SymbolReferenceTable
       reverseLoadSymbol,
       reverseStoreSymbol,
       currentTimeMaxPrecisionSymbol,
+      encodeASCIISymbol,
       headerFlagsSymbol,
       singlePrecisionSQRTSymbol,
       threadPrivateFlagsSymbol,  // private flags slot on j9vmthread
@@ -206,12 +207,38 @@ class SymbolReferenceTable
       startPCLinkageInfoSymbol,
       instanceShapeFromROMClassSymbol,
 
-      /** \brief Performs an equality comparison between two objects.
+      /**
+       * \brief Performs an equality comparison between two objects.
        *
        * The comparison takes two references to objects as arguments.
-       * It is up to users to define to define and implement the semantics of this operation.
+       * It is up to users to define and implement the semantics of this operation.
+       *
+       * \see objectInequalityComparisonSymbol
        */
       objectEqualityComparisonSymbol,
+
+      /**
+       * \brief Performs a test for inequality between two objects.
+       *
+       * The comparison takes two references to objects as arguments.
+       * It is up to users to define and implement the semantics of this operation.
+       *
+       * \see objectEqualityComparisonSymbol
+       */
+      objectInequalityComparisonSymbol,
+
+      /**
+       * \brief Tests, in some consumer-specific way, whether the array operand has a component type that
+       * is a non-nullable class, and if so, performs a NULLCHK on the value that needs to be assigned to
+       * an element of the array
+       *
+       * \code
+       *   call <nonNullableArrayNullStoreCheck>
+       *     value-reference-to-be-stored
+       *     array-reference-to-which-value-will-be-stored
+       * \endcode
+       */
+      nonNullableArrayNullStoreCheckSymbol,
 
       /** \brief
        *
@@ -388,6 +415,74 @@ class SymbolReferenceTable
        */
       j9VMThreadTempSlotFieldSymbol,
 
+      /** \brief
+       * This symbol represents a computed static call for methods that have not been compiled yet, but may
+       * get compiled in the future. This provides a mechanism to create a much faster alternate path in the
+       * trees to invoke methods that have been compiled that would otherwise require going down a more
+       * expensive path (such as through invocation of a VM internal native method, for example).
+       *
+       * \code
+       *    ificmpeq goto block_2
+       *       <object field storing the address of the compiled method>
+       *       iconst 0
+       *
+       *block_1:
+       *   icalli <computedStaticCallSymbol>
+       *       <address of compiled method>
+       *       <param1>
+       *       <param2>
+       *       .
+       *       .
+       *   goto block_3
+       *
+       *block_2:
+       *   icall <original call to VM internal native method>
+       *       <param1>
+       *       <param2>
+       *       .
+       *       .
+       *
+       *block_3:
+       *       .
+       *       .
+       *
+       * \endcode
+       *
+       */
+      computedStaticCallSymbol,
+
+      /** \brief
+       * This symbol represents the floatTemp1 field in j9vmthread. It will provide another mechanism for the
+       * compiler to insert temporary information at run-time that the VM can use, similar to how tempSlot is
+       * used. While the name suggests this field would contain floats, other data types could also be stored.
+       *
+       * \code
+       *    istore  <j9VMThreadTempSlotFieldSymbol>
+       *       iconst <value1>
+       *    istore  <j9VMThreadFloatTemp1Symbol>
+       *       dconst <value2>
+       *    icall <VM internal native method>
+       *       <parm1>
+       *       <parm2>
+       *       .
+       *       .
+       * \endcode
+       */
+      j9VMThreadFloatTemp1Symbol,
+
+
+      /** \brief
+       * This symbol represents the vTableIndex field in struct J9JNIMethodID
+       */
+      J9JNIMethodIDvTableIndexFieldSymbol,
+
+      /** \brief
+       * This symbol is used to access the default instance associated with a class, if any exists
+       */
+      defaultValueSymbol,
+
+      OMRlastPrintableCommonNonhelperSymbol = defaultValueSymbol,
+
       firstPerCodeCacheHelperSymbol,
       lastPerCodeCacheHelperSymbol = firstPerCodeCacheHelperSymbol + TR_numCCPreLoadedCode - 1,
 
@@ -486,6 +581,15 @@ class SymbolReferenceTable
          }
       }
 
+   /**
+    * @brief Retrieve the textual name of the given NonHelperSymbol
+    *
+    * @param[in] nonHelper : the nonHelper symbol
+    *
+    * @return Textual name of the NonHelperSymbol
+    */
+   static const char *getNonHelperSymbolName(CommonNonhelperSymbol nonHelper);
+
    // --------------------------------------------------------------------------
 
    TR::SymbolReference * & element(TR_RuntimeHelper s);
@@ -573,6 +677,26 @@ class SymbolReferenceTable
     *     Returns a symbol reference fabricated for the field.
     */
    TR::SymbolReference * findOrFabricateShadowSymbol(TR_OpaqueClassBlock *containingClass, TR::DataType type, uint32_t offset, bool isVolatile, bool isPrivate, bool isFinal, const char * name, const char * signature);
+
+   /** \brief
+    *     Returns an array shadow symbol reference fabricated for the field of a flattened array element.
+    *
+    *  \param arrayComponentClass
+    *     The array component class that contains the field.
+    *  \param type
+    *     The data type of the field.
+    *  \param fieldOffset
+    *     The offset of the field.
+    *  \param isPrivate
+    *     Specifies whether the field is private.
+    *  \param fieldName
+    *     The name of the field.
+    *  \param fieldSignature
+    *     The signature of the field.
+    *  \return
+    *     Returns an array shadow symbol reference fabricated for the field of a flattened array element.
+    */
+   TR::SymbolReference * findOrFabricateFlattenedArrayElementFieldShadowSymbol(TR_OpaqueClassBlock *arrayComponentClass, TR::DataType type, uint32_t fieldOffset, bool isPrivate, const char *fieldName, const char *fieldSignature);
 
    // --------------------------------------------------------------------------
    // OMR
@@ -748,6 +872,9 @@ class SymbolReferenceTable
    TR::SymbolReference *getOriginalUnimprovedSymRef(TR::SymbolReference *symRef);
 
    protected:
+
+   TR::SymbolReferenceTable *self();
+
    /** \brief
     *    This function creates the symbol reference given a temp symbol and the known object index
     *
@@ -840,6 +967,10 @@ class SymbolReferenceTable
 
    // J9
 #define _numNonUserFieldClasses 4
+
+   private:
+
+   static const char *_commonNonHelperSymbolNames[];
 
    };
 
