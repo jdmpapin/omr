@@ -153,12 +153,12 @@ TR::IDTPriorityQueue::IDTPriorityQueue(TR::IDT* idt, TR::Region& region)  :
    _pQueue.push(idt->getRoot());
    }
 
-TR::IDTNode* TR::IDTPreorderPriorityQueue::get(uint32_t index)
+TR::IDTNode* TR::IDTPriorityQueue::get(uint32_t index)
    {
    const size_t entriesSize = _entries.size();
 
    const uint32_t idtSize = size();
-   TR_ASSERT_FATAL(index < idtSize, "IDTPreorderPriorityQueue::get index out of bound!");
+   TR_ASSERT_FATAL(index < idtSize, "IDTPriorityQueue::get index out of bound!");
    // already in entries
    if (entriesSize > index) 
       return _entries.at(index);
