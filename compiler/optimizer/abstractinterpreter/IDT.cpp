@@ -43,7 +43,7 @@ void TR::IDT::print()
    const uint32_t candidates = getNumNodes() - 1;
    // print header line
    TR::StringBuf line(comp()->trMemory()->currentStackRegion());
-   line.appendf("#IDT: %d candidate methods inlinable into %s with a budget %d\n",
+   line.appendf("#IDT: %d candidate methods inlinable into %s with a budget %d",
                candidates,
                getRoot()->getName(comp()->trMemory()),
                getRoot()->getBudget());
