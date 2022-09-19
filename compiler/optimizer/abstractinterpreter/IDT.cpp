@@ -145,7 +145,7 @@ TR::IDTNode *TR::IDT::getNodeByGlobalIndex(int32_t index)
    return _indices[index + 1];
    }
 
-TR::IDTPreorderPriorityQueue::IDTPreorderPriorityQueue(TR::IDT* idt, TR::Region& region)  :
+TR::IDTPriorityQueue::IDTPriorityQueue(TR::IDT* idt, TR::Region& region)  :
       _entries(region),
       _idt(idt),
       _pQueue(IDTNodeCompare(), IDTNodeVector(region))
