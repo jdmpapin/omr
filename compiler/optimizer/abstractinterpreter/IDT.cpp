@@ -48,26 +48,21 @@ void TR::IDT::print()
                getRoot()->getName(comp()->trMemory()),
                getRoot()->getBudget());
 
+   TR_VerboseLog::CriticalSection vlogLock(verboseInlining);
    if (verboseInlining)
       {
-      TR_VerboseLog::vlogAcquire();
       TR_VerboseLog::writeLine(TR_Vlog_BI, "%s", line.text());
       }
    if (traceBIIDTGen)
       traceMsg(comp(), "%s\n", line.text());
 
    if (candidates <= 0) 
-      {
-       if (verboseInlining)
-           TR_VerboseLog::vlogRelease();
       return;
-      }
 
    // print the IDT nodes in BFS
    TR::deque<TR::IDTNode*, TR::Region&> idtNodeQueue(comp()->trMemory()->currentStackRegion());
 
    idtNodeQueue.push_back(getRoot());
-   line.clear();
    while (!idtNodeQueue.empty())
       {
       TR::IDTNode* currentNode = idtNodeQueue.front();
@@ -78,7 +73,8 @@ void TR::IDT::print()
       // skip root node
       if (index != -1) 
          {
-         line.appendf("#IDT: #%d: #%d inlinable @%d -> bcsz=%d %s target %s, static benefit = %d, benefit = %f, cost = %d, budget = %d, callratio = %f, rootcallratio = %f\n",
+         line.clear();
+         line.appendf("#IDT: #%d: #%d inlinable @%d -> bcsz=%d %s target %s, static benefit = %d, benefit = %f, cost = %d, budget = %d, callratio = %f, rootcallratio = %f",
                      index,
                      currentNode->getParentGlobalIndex(),
                      currentNode->getByteCodeIndex(),
@@ -103,9 +99,6 @@ void TR::IDT::print()
       for (uint32_t i = 0; i < currentNode->getNumChildren(); i ++)
          idtNodeQueue.push_back(currentNode->getChild(i));
       }
-   if (verboseInlining)
-       TR_VerboseLog::vlogRelease();
-   }
 
 void TR::IDT::flattenIDT()
    {

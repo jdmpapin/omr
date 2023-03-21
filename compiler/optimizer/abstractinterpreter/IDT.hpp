@@ -43,7 +43,7 @@ class IDT
    public:
    IDT(TR::Region& region, TR_CallTarget*, TR::ResolvedMethodSymbol* symbol, uint32_t budget, TR::Compilation* comp);
 
-   TR::IDTNode* getRoot() { return _root; };
+   TR::IDTNode* getRoot() { return _root; }
 
    TR::Region& getRegion() { return _region; }
 
@@ -112,14 +112,14 @@ class IDTPriorityQueue
 
    private:
    struct IDTNodeCompare 
-   {
+      {
       bool operator()(TR::IDTNode *left, TR::IDTNode *right)
          {
          TR_ASSERT_FATAL(left && right, "Comparing against null");
          return left->getCost() < right->getCost()
             || (left->getCost() == right->getCost() && left->getBenefit() < right->getBenefit());
-         };
-   };
+         }
+      };
 
    typedef TR::vector<IDTNode*, TR::Region&> IDTNodeVector;
    typedef std::priority_queue<IDTNode*, IDTNodeVector, IDTNodeCompare> IDTNodePriorityQueue;
