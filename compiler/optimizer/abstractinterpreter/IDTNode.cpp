@@ -116,7 +116,7 @@ uint32_t TR::IDTNode::getNumChildren()
    if (getOnlyChild() != NULL)
       return 1;
 
-   size_t num = _children->size();
+   uint32_t num = static_cast<uint32_t>(_children->size());
    return num;
    }
 
