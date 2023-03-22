@@ -37,7 +37,6 @@
 #include "codegen/RegisterDependency.hpp"
 #include "codegen/RegisterPair.hpp"
 #include "codegen/TreeEvaluator.hpp"
-#include "codegen/X86Evaluator.hpp"
 #include "compile/Compilation.hpp"
 #include "compile/ResolvedMethod.hpp"
 #include "control/Options.hpp"
@@ -1543,12 +1542,6 @@ OMR::X86::I386::TreeEvaluator::vsplatsEvaluator(TR::Node *node, TR::CodeGenerato
    }
 
 TR::Register*
-OMR::X86::I386::TreeEvaluator::vfmaEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-   {
-   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
-   }
-
-TR::Register*
 OMR::X86::I386::TreeEvaluator::vabsEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    return TR::TreeEvaluator::unaryVectorArithmeticEvaluator(node, cg);
@@ -1574,12 +1567,6 @@ OMR::X86::I386::TreeEvaluator::vaddEvaluator(TR::Node *node, TR::CodeGenerator *
 
 TR::Register*
 OMR::X86::I386::TreeEvaluator::vsubEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-   {
-   return TR::TreeEvaluator::vectorBinaryArithmeticEvaluator(node, cg);
-   }
-
-TR::Register*
-OMR::X86::I386::TreeEvaluator::vmulEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    return TR::TreeEvaluator::vectorBinaryArithmeticEvaluator(node, cg);
    }

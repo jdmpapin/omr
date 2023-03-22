@@ -63,6 +63,8 @@
 #include "x/codegen/OutlinedInstructions.hpp"
 #include "codegen/InstOpCode.hpp"
 #include "x/codegen/X86Register.hpp"
+#include "OMRX86Instruction.hpp"
+
 
 class TR_VirtualGuardSite;
 
@@ -1163,23 +1165,25 @@ TR::X86RegImmSymInstruction::autoSetReloKind()
 // TR::X86RegRegImmInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
-TR::X86RegRegImmInstruction::X86RegRegImmInstruction(TR::InstOpCode::Mnemonic     op,
-                                                       TR::Node          *node,
-                                                       TR::Register      *treg,
-                                                       TR::Register      *sreg,
-                                                       int32_t           imm,
-                                                       TR::CodeGenerator *cg)
-   : TR::X86RegRegInstruction(sreg, treg, node, op, cg), _sourceImmediate(imm)
+TR::X86RegRegImmInstruction::X86RegRegImmInstruction(TR::InstOpCode::Mnemonic op,
+                                                       TR::Node               *node,
+                                                       TR::Register           *treg,
+                                                       TR::Register           *sreg,
+                                                       int32_t                imm,
+                                                       TR::CodeGenerator      *cg,
+                                                       OMR::X86::Encoding     encoding)
+   : TR::X86RegRegInstruction(sreg, treg, node, op, cg, encoding), _sourceImmediate(imm)
    {
    }
 
-TR::X86RegRegImmInstruction::X86RegRegImmInstruction(TR::Instruction   *precedingInstruction,
-                                                       TR::InstOpCode::Mnemonic     op,
-                                                       TR::Register      *treg,
-                                                       TR::Register      *sreg,
-                                                       int32_t           imm,
-                                                       TR::CodeGenerator *cg)
-   : TR::X86RegRegInstruction(sreg, treg, op, precedingInstruction, cg), _sourceImmediate(imm)
+TR::X86RegRegImmInstruction::X86RegRegImmInstruction(TR::Instruction            *precedingInstruction,
+                                                       TR::InstOpCode::Mnemonic op,
+                                                       TR::Register             *treg,
+                                                       TR::Register             *sreg,
+                                                       int32_t                  imm,
+                                                       TR::CodeGenerator        *cg,
+                                                       OMR::X86::Encoding       encoding)
+   : TR::X86RegRegInstruction(sreg, treg, op, precedingInstruction, cg, encoding), _sourceImmediate(imm)
    {
    }
 
@@ -1456,6 +1460,483 @@ void TR::X86RegRegRegInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssi
          getTargetRegister()->unblock();
          getSourceRegister()->unblock();
          getSource2ndRegister()->unblock();
+         }
+      }
+   }
+
+////////////////////////////////////////////////////////////////////////////////
+// TR::X86RegMaskRegInstruction:: member functions
+////////////////////////////////////////////////////////////////////////////////
+
+bool TR::X86RegMaskRegInstruction::refsRegister(TR::Register *reg)
+   {
+   if (reg == getTargetRegister() || reg == getSourceRegister() || reg == getMaskRegister())
+      {
+      return true;
+      }
+   else if (getDependencyConditions())
+      {
+      return getDependencyConditions()->refsRegister(reg);
+      }
+
+   return false;
+   }
+
+bool TR::X86RegMaskRegInstruction::defsRegister(TR::Register *reg)
+   {
+   if ((reg == getTargetRegister() && getOpCode().modifiesTarget()) ||
+       (reg == getSourceRegister() && getOpCode().modifiesSource()))
+      {
+      return true;
+      }
+   else if (getDependencyConditions())
+      {
+      return getDependencyConditions()->defsRegister(reg);
+      }
+
+   return false;
+   }
+
+bool TR::X86RegMaskRegInstruction::usesRegister(TR::Register *reg)
+   {
+   if ((reg == getTargetRegister() &&
+        getOpCode().usesTarget())  ||
+       reg == getSourceRegister() ||
+       reg == getMaskRegister())
+      {
+      return true;
+      }
+   else if (getDependencyConditions())
+      {
+      return getDependencyConditions()->usesRegister(reg);
+      }
+
+   return false;
+   }
+
+
+
+void TR::X86RegMaskRegInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigned)
+   {
+   if (getDependencyConditions())
+      {
+      if ((cg()->getAssignmentDirection() == cg()->Backward))
+         {
+         getTargetRegister()->block();
+         getSourceRegister()->block();
+         getMaskRegister()->block();
+         getDependencyConditions()->assignPostConditionRegisters(this, kindsToBeAssigned, cg());
+         getTargetRegister()->unblock();
+         getSourceRegister()->unblock();
+         getMaskRegister()->unblock();
+         }
+      }
+
+   if (kindsToBeAssigned & getMaskRegister()->getKindAsMask())
+      {
+      if (getDependencyConditions())
+         {
+         getDependencyConditions()->blockPreConditionRegisters();
+         getDependencyConditions()->blockPostConditionRegisters();
+         }
+
+      TR::Register *maskRegister = getMaskRegister();
+      TR::RealRegister *assignedMaskRegister = maskRegister->getAssignedRealRegister();
+
+      if (assignedMaskRegister == NULL)
+         {
+         assignedMaskRegister = assignGPRegister(this, maskRegister, TR_QuadWordReg, cg());
+         }
+
+      if (maskRegister->decFutureUseCount() == 0                      &&
+          assignedMaskRegister->getState() != TR::RealRegister::Locked &&
+          maskRegister == getMaskRegister())
+         {
+         cg()->traceRegFreed(maskRegister, assignedMaskRegister);
+         maskRegister->setAssignedRegister(NULL);
+         assignedMaskRegister->setState(TR::RealRegister::Unlatched);
+         }
+
+      setMaskRegister(assignedMaskRegister);
+
+      if (getDependencyConditions())
+         {
+         getDependencyConditions()->unblockPreConditionRegisters();
+         getDependencyConditions()->unblockPostConditionRegisters();
+         }
+      }
+
+   if (kindsToBeAssigned & getTargetRegister()->getKindAsMask())
+      {
+      TR::Register *firstRegister  = getTargetRegister();
+      TR::Register *secondRegister = getSourceRegister();
+
+      OMR::X86::Encoding encoding = getEncodingMethod();
+      TR_RegisterSizes firstRequestedRegSize = encoding == OMR::X86::EVEX_L512 ? TR_VectorReg512 :
+                                               encoding == OMR::X86::EVEX_L256 ? TR_VectorReg256 : TR_VectorReg128;
+
+      TR_RegisterSizes secondRequestedRegSize = firstRequestedRegSize;
+
+      bool regRegCopy = isRegRegMove();
+      TR::InstOpCode::Mnemonic opCode = getOpCodeValue();
+
+      if (getDependencyConditions())
+         {
+         getDependencyConditions()->blockPreConditionRegisters();
+         getDependencyConditions()->blockPostConditionRegisters();
+         }
+
+      secondRegister->block();
+
+      TR::RealRegister *assignedFirstRegister = firstRegister->getAssignedRealRegister();
+
+      if (assignedFirstRegister == NULL)
+         {
+         assignedFirstRegister = assignGPRegister(this, firstRegister, firstRequestedRegSize, cg());
+         }
+
+      if (firstRegister->decFutureUseCount() == 0 &&
+          assignedFirstRegister->getState() != TR::RealRegister::Locked)
+         {
+         cg()->traceRegFreed(firstRegister, assignedFirstRegister);
+         firstRegister->setAssignedRegister(NULL);
+         assignedFirstRegister->setState(TR::RealRegister::Unlatched);
+         }
+
+      secondRegister->unblock();
+      firstRegister->block();
+
+      TR::RealRegister *assignedSecondRegister = secondRegister->getAssignedRealRegister();
+
+      if (assignedSecondRegister == NULL)
+         {
+         TR::Machine *machine = cg()->machine();
+
+         cg()->clearRegisterAssignmentFlags();
+         cg()->setRegisterAssignmentFlag(TR_NormalAssignment);
+
+         // If first use, totaluse and futureuse will be the same
+         //
+         if (secondRegister->getTotalUseCount() == secondRegister->getFutureUseCount())
+            {
+            if (regRegCopy && assignedFirstRegister->getState() == TR::RealRegister::Unlatched)
+               {
+               assignedSecondRegister = assignedFirstRegister;
+               }
+            else if ((assignedSecondRegister = machine->findBestFreeGPRegister(this, secondRegister, secondRequestedRegSize, true)))
+               {
+               if (cg()->enableBetterSpillPlacements())
+                  cg()->removeBetterSpillPlacementCandidate(toRealRegister(assignedSecondRegister));
+               }
+            else
+               {
+               cg()->setRegisterAssignmentFlag(TR_RegisterSpilled);
+               assignedSecondRegister = machine->freeBestGPRegister(this, secondRegister, secondRequestedRegSize);
+               }
+            }
+
+         // Depending on direction of assignment, must get register back from spilled state
+         //
+         else
+            {
+            cg()->setRegisterAssignmentFlag(TR_RegisterReloaded);
+            assignedSecondRegister = machine->reverseGPRSpillState(this, secondRegister, NULL, secondRequestedRegSize);
+            }
+
+         secondRegister->setAssignedRegister(assignedSecondRegister);
+         secondRegister->setAssignedAsByteRegister(secondRequestedRegSize == TR_ByteReg);
+         assignedSecondRegister->setAssignedRegister(secondRegister);
+         assignedSecondRegister->setState(TR::RealRegister::Assigned, secondRegister->isPlaceholderReg());
+         cg()->traceRegAssigned(secondRegister, assignedSecondRegister);
+         }
+
+      if (secondRegister->decFutureUseCount() == 0 &&
+          assignedSecondRegister->getState() != TR::RealRegister::Locked)
+         {
+         cg()->traceRegFreed(secondRegister, assignedSecondRegister);
+         secondRegister->setAssignedRegister(NULL);
+         assignedSecondRegister->setState(TR::RealRegister::Unlatched);
+         }
+
+      firstRegister->unblock();
+
+      if (getDependencyConditions())
+         {
+         getDependencyConditions()->unblockPreConditionRegisters();
+         getDependencyConditions()->unblockPostConditionRegisters();
+         }
+
+      setTargetRegister(assignedFirstRegister);
+      setSourceRegister(assignedSecondRegister);
+      }
+
+   if (getDependencyConditions())
+      {
+      if ((cg()->getAssignmentDirection() == cg()->Backward))
+         {
+         getTargetRegister()->block();
+         getSourceRegister()->block();
+         getMaskRegister()->block();
+         getDependencyConditions()->assignPreConditionRegisters(this, kindsToBeAssigned, cg());
+         getTargetRegister()->unblock();
+         getSourceRegister()->unblock();
+         getMaskRegister()->unblock();
+         }
+      }
+   }
+
+bool TR::X86RegMaskRegRegInstruction::refsRegister(TR::Register *reg)
+   {
+   if (reg == getTargetRegister() ||
+       reg == getSourceRegister() ||
+       reg == getSource2ndRegister() ||
+       reg == getMaskRegister())
+      {
+      return true;
+      }
+   else if (getDependencyConditions())
+      {
+      return getDependencyConditions()->refsRegister(reg);
+      }
+
+   return false;
+   }
+
+bool TR::X86RegMaskRegRegInstruction::defsRegister(TR::Register *reg)
+   {
+   if (reg == getTargetRegister() && getOpCode().modifiesTarget())
+      {
+      return true;
+      }
+   else if (getDependencyConditions())
+      {
+      return getDependencyConditions()->defsRegister(reg);
+      }
+
+   return false;
+   }
+
+bool TR::X86RegMaskRegRegInstruction::usesRegister(TR::Register *reg)
+   {
+   if ((reg == getTargetRegister() &&
+        getOpCode().usesTarget()) ||
+        reg == getSourceRegister() ||
+        reg == getSource2ndRegister())
+      {
+      return true;
+      }
+   else if (getDependencyConditions())
+      {
+      return getDependencyConditions()->usesRegister(reg);
+      }
+
+   return false;
+   }
+
+void TR::X86RegMaskRegRegInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigned)
+   {
+   if ((cg()->getAssignmentDirection() == cg()->Backward))
+      {
+      if (getDependencyConditions())
+         {
+         getTargetRegister()->block();
+         getSourceRegister()->block();
+         getSource2ndRegister()->block();
+         getMaskRegister()->block();
+         getDependencyConditions()->assignPostConditionRegisters(this, kindsToBeAssigned, cg());
+         getTargetRegister()->unblock();
+         getSourceRegister()->unblock();
+         getSource2ndRegister()->unblock();
+         getMaskRegister()->unblock();
+         }
+      }
+
+   OMR::X86::Encoding encoding = getEncodingMethod();
+   TR_RegisterSizes firstRequestedRegSize = encoding == OMR::X86::EVEX_L512 ? TR_VectorReg512 :
+                                            encoding == OMR::X86::EVEX_L256 ? TR_VectorReg256 : TR_VectorReg128;
+
+   TR_RegisterSizes secondRequestedRegSize = firstRequestedRegSize;
+   TR_RegisterSizes thirdRequestedRegSize  = secondRequestedRegSize;
+
+   if (kindsToBeAssigned & getMaskRegister()->getKindAsMask())
+      {
+      if (getDependencyConditions())
+         {
+         getDependencyConditions()->blockPreConditionRegisters();
+         getDependencyConditions()->blockPostConditionRegisters();
+         }
+
+      TR::Register *maskRegister = getMaskRegister();
+      TR::RealRegister *assignedMaskRegister = maskRegister->getAssignedRealRegister();
+
+      if (assignedMaskRegister == NULL)
+         {
+         assignedMaskRegister = assignGPRegister(this, maskRegister, TR_QuadWordReg, cg());
+         }
+
+      if (maskRegister->decFutureUseCount() == 0                      &&
+          assignedMaskRegister->getState() != TR::RealRegister::Locked &&
+          maskRegister == getMaskRegister())
+         {
+         cg()->traceRegFreed(maskRegister, assignedMaskRegister);
+         maskRegister->setAssignedRegister(NULL);
+         assignedMaskRegister->setState(TR::RealRegister::Unlatched);
+         }
+
+         setMaskRegister(assignedMaskRegister);
+
+      if (getDependencyConditions())
+         {
+         getDependencyConditions()->unblockPreConditionRegisters();
+         getDependencyConditions()->unblockPostConditionRegisters();
+         }
+      }
+
+   if (kindsToBeAssigned & getTargetRegister()->getKindAsMask())
+      {
+      TR::Register *firstRegister;
+      TR::Register *secondRegister;
+      TR::Register *thirdRegister;
+
+      firstRegister  = getTargetRegister();
+      secondRegister = getSourceRegister();
+      thirdRegister  = getSource2ndRegister();
+
+      secondRegister->block();
+      thirdRegister->block();
+
+      if (getDependencyConditions())
+         {
+         getDependencyConditions()->blockPreConditionRegisters();
+         getDependencyConditions()->blockPostConditionRegisters();
+         }
+
+      TR::RealRegister *assignedFirstRegister = firstRegister->getAssignedRealRegister();
+
+      if (assignedFirstRegister == NULL)
+         {
+         assignedFirstRegister = assignGPRegister(this, firstRegister, firstRequestedRegSize, cg());
+         }
+      else if (firstRequestedRegSize == TR_ByteReg)
+         {
+         assignedFirstRegister = assign8BitGPRegister(this, firstRegister, cg());
+         }
+
+      if (firstRegister->decFutureUseCount() == 0                      &&
+          assignedFirstRegister->getState() != TR::RealRegister::Locked &&
+          firstRegister == getTargetRegister())
+         {
+         cg()->traceRegFreed(firstRegister, assignedFirstRegister);
+         firstRegister->setAssignedRegister(NULL);
+         assignedFirstRegister->setState(TR::RealRegister::Unlatched);
+         }
+
+      if (getDependencyConditions())
+         {
+         getDependencyConditions()->unblockPreConditionRegisters();
+         getDependencyConditions()->unblockPostConditionRegisters();
+         }
+
+      secondRegister->unblock();
+
+      if (getDependencyConditions())
+         getDependencyConditions()->blockPreConditionRegisters();
+
+      firstRegister->block();
+
+      TR::RealRegister *assignedSecondRegister = secondRegister->getAssignedRealRegister();
+
+      if (assignedSecondRegister == NULL)
+         {
+         assignedSecondRegister = assignGPRegister(this, secondRegister, secondRequestedRegSize, cg());
+         }
+      else if (secondRequestedRegSize == TR_ByteReg)
+         {
+         assignedSecondRegister = assign8BitGPRegister(this, secondRegister, cg());
+         }
+
+      secondRegister->decFutureUseCount();
+
+      if (thirdRegister == getTargetRegister())
+         {
+         if (secondRegister->getFutureUseCount() == 0 &&
+             assignedSecondRegister->getState() != TR::RealRegister::Locked)
+            {
+            cg()->traceRegFreed(secondRegister, assignedSecondRegister);
+            secondRegister->setAssignedRegister(NULL);
+            assignedSecondRegister->setState(TR::RealRegister::Unlatched);
+            }
+         if (firstRegister->getFutureUseCount() == 0 &&
+             assignedFirstRegister->getState() != TR::RealRegister::Locked)
+            {
+            cg()->traceRegFreed(firstRegister, assignedFirstRegister);
+            firstRegister->setAssignedRegister(NULL);
+            assignedFirstRegister->setState(TR::RealRegister::Unlatched);
+            }
+         }
+
+      secondRegister->block();
+      thirdRegister->unblock();
+
+      TR::RealRegister *assignedThirdRegister = thirdRegister->getAssignedRealRegister();
+
+      if (assignedThirdRegister == NULL)
+         {
+         assignedThirdRegister = assignGPRegister(this, thirdRegister, thirdRequestedRegSize, cg());
+         }
+      else if (thirdRequestedRegSize == TR_ByteReg)
+         {
+         assignedThirdRegister = assign8BitGPRegister(this, thirdRegister, cg());
+         }
+
+      if (thirdRegister->decFutureUseCount() == 0 &&
+          assignedThirdRegister->getState() != TR::RealRegister::Locked)
+         {
+         cg()->traceRegFreed(thirdRegister, assignedThirdRegister);
+         thirdRegister->setAssignedRegister(NULL);
+         assignedThirdRegister->setState(TR::RealRegister::Unlatched);
+         }
+
+      if (firstRegister == getTargetRegister())
+         {
+         if (secondRegister->getFutureUseCount() == 0 &&
+             assignedSecondRegister->getState() != TR::RealRegister::Locked)
+            {
+            cg()->traceRegFreed(secondRegister, assignedSecondRegister);
+            secondRegister->setAssignedRegister(NULL);
+            assignedSecondRegister->setState(TR::RealRegister::Unlatched);
+            }
+         if (thirdRegister->getFutureUseCount() == 0 &&
+             assignedThirdRegister->getState() != TR::RealRegister::Locked)
+            {
+            cg()->traceRegFreed(thirdRegister, assignedThirdRegister);
+            thirdRegister->setAssignedRegister(NULL);
+            assignedThirdRegister->setState(TR::RealRegister::Unlatched);
+            }
+         }
+
+         setTargetRegister(assignedFirstRegister);
+         setSourceRegister(assignedSecondRegister);
+         setSource2ndRegister(assignedThirdRegister);
+         secondRegister->unblock();
+         firstRegister->unblock();
+         if (getDependencyConditions())
+            getDependencyConditions()->unblockPreConditionRegisters();
+      }
+
+   if ((cg()->getAssignmentDirection() == cg()->Backward))
+      {
+      if (getDependencyConditions())
+         {
+         getTargetRegister()->block();
+         getSourceRegister()->block();
+         getSource2ndRegister()->block();
+         getMaskRegister()->block();
+         getDependencyConditions()->assignPreConditionRegisters(this, kindsToBeAssigned, cg());
+         getTargetRegister()->unblock();
+         getSourceRegister()->unblock();
+         getSource2ndRegister()->unblock();
+         getMaskRegister()->unblock();
          }
       }
    }
@@ -2118,6 +2599,221 @@ void TR::X86MemRegInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigne
    }
 
 ////////////////////////////////////////////////////////////////////////////////
+// TR::X86MemMaskRegInstruction:: member functions
+////////////////////////////////////////////////////////////////////////////////
+
+bool TR::X86MemMaskRegInstruction::refsRegister(TR::Register *reg)
+   {
+   if (getMemoryReference()->refsRegister(reg) ||
+       reg == getSourceRegister())
+      {
+      return true;
+      }
+   else if (getDependencyConditions())
+      {
+      return getDependencyConditions()->refsRegister(reg);
+      }
+
+   return false;
+   }
+
+bool TR::X86MemMaskRegInstruction::defsRegister(TR::Register *reg)
+   {
+   if (reg == getSourceRegister() && getOpCode().modifiesSource())
+      {
+      return true;
+      }
+   else if (getDependencyConditions())
+      {
+      return getDependencyConditions()->defsRegister(reg);
+      }
+
+   return false;
+   }
+
+bool TR::X86MemMaskRegInstruction::usesRegister(TR::Register *reg)
+   {
+   if (getMemoryReference()->refsRegister(reg) ||
+       reg == getSourceRegister())
+      {
+      return true;
+      }
+   else if (getDependencyConditions())
+      {
+      return getDependencyConditions()->usesRegister(reg);
+      }
+
+   return false;
+   }
+
+void TR::X86MemMaskRegInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigned)
+   {
+   if ((cg()->getAssignmentDirection() == cg()->Backward))
+      {
+      if (getDependencyConditions())
+         {
+         getSourceRegister()->block();
+         getMaskRegister()->block();
+         getMemoryReference()->blockRegisters();
+         getDependencyConditions()->assignPostConditionRegisters(this, kindsToBeAssigned, cg());
+         getMemoryReference()->unblockRegisters();
+         getSourceRegister()->unblock();
+         getMaskRegister()->unblock();
+         }
+
+   if (kindsToBeAssigned & getMaskRegister()->getKindAsMask())
+      {
+      if (getDependencyConditions())
+         {
+         getDependencyConditions()->blockPreConditionRegisters();
+         getDependencyConditions()->blockPostConditionRegisters();
+         }
+
+      TR::Register *maskRegister = getMaskRegister();
+      TR::RealRegister *assignedMaskRegister = maskRegister->getAssignedRealRegister();
+
+      if (assignedMaskRegister == NULL)
+         {
+         assignedMaskRegister = assignGPRegister(this, maskRegister, TR_QuadWordReg, cg());
+         }
+
+      if (maskRegister->decFutureUseCount() == 0                      &&
+          assignedMaskRegister->getState() != TR::RealRegister::Locked &&
+          maskRegister == getMaskRegister())
+         {
+         cg()->traceRegFreed(maskRegister, assignedMaskRegister);
+         maskRegister->setAssignedRegister(NULL);
+         assignedMaskRegister->setState(TR::RealRegister::Unlatched);
+         }
+
+         setMaskRegister(assignedMaskRegister);
+
+      if (getDependencyConditions())
+         {
+         getDependencyConditions()->unblockPreConditionRegisters();
+         getDependencyConditions()->unblockPostConditionRegisters();
+         }
+      }
+
+      TR::RealRegister  *assignedRegister = NULL;
+      OMR::X86::Encoding encoding = getEncodingMethod();
+      TR_RegisterSizes requestedRegSize = encoding == OMR::X86::EVEX_L512 ? TR_VectorReg512 :
+                                          encoding == OMR::X86::EVEX_L256 ? TR_VectorReg256 : TR_VectorReg128;
+
+      if (kindsToBeAssigned & getSourceRegister()->getKindAsMask())
+         {
+         assignedRegister = getSourceRegister()->getAssignedRealRegister();
+         TR::RealRegister::RegState oldState = TR::RealRegister::Free;
+         bool blockedEbp = false;
+         if ((getMemoryReference()->getBaseRegister() == cg()->getVMThreadRegister()) ||
+             (getMemoryReference()->getIndexRegister() == cg()->getVMThreadRegister()))
+            {
+            blockedEbp = true;
+            oldState = cg()->machine()->getRealRegister(TR::RealRegister::ebp)->getState();
+            cg()->machine()->getRealRegister(TR::RealRegister::ebp)->setState(TR::RealRegister::Locked); //(TR::RealRegister::Locked);
+            }
+         getMemoryReference()->blockRegisters();
+         if (getDependencyConditions())
+            {
+            getDependencyConditions()->blockPreConditionRegisters();
+            getDependencyConditions()->blockPostConditionRegisters();
+            }
+
+
+
+         if (assignedRegister == NULL)
+            {
+            assignedRegister = assignGPRegister(this, getSourceRegister(), requestedRegSize, cg());
+            }
+
+         // If the source register became discardable because of this instruction, reset
+         // its rematerializability before we allocate registers for this instruction.
+         //
+         if (cg()->enableRematerialisation() &&
+             getSourceRegister()->isDiscardable() &&
+             getSourceRegister()->getRematerializationInfo()->getDefinition() == this)
+            {
+            if (debug("dumpRemat"))
+               {
+               diagnostic("---> Deactivating %s discardable register %s at instruction %p\n",
+                     cg()->getDebug()->toString(getSourceRegister()->getRematerializationInfo()),
+                     cg()->getDebug()->getName(getSourceRegister()), this);
+               }
+
+            getSourceRegister()->resetIsDiscardable();
+            getSourceRegister()->getRematerializationInfo()->resetRematerialized();
+            }
+
+#ifdef J9_PROJECT_SPECIFIC
+         TR::UnresolvedDataSnippet *snippet = getMemoryReference()->getUnresolvedDataSnippet();
+         if (snippet)
+            {
+            if (kindsToBeAssigned & (TR_FPR_Mask | TR_VRF_Mask))
+               snippet->setHasLiveXMMRegisters((cg()->machine()->fpGetNumberOfLiveXMMRs() > 0) ? true : false);
+            }
+#endif
+
+         if (blockedEbp)
+            {
+            switch (oldState)
+               {
+               case TR::RealRegister::Free :
+                  cg()->machine()->getRealRegister(TR::RealRegister::ebp)->resetState(TR::RealRegister::Free); break;
+               case TR::RealRegister::Unlatched :
+                  cg()->machine()->getRealRegister(TR::RealRegister::ebp)->resetState(TR::RealRegister::Unlatched); break;
+               case TR::RealRegister::Assigned :
+                  cg()->machine()->getRealRegister(TR::RealRegister::ebp)->resetState(TR::RealRegister::Assigned); break;
+               case TR::RealRegister::Blocked :
+                  cg()->machine()->getRealRegister(TR::RealRegister::ebp)->resetState(TR::RealRegister::Blocked); break;
+               case TR::RealRegister::Locked :
+                  cg()->machine()->getRealRegister(TR::RealRegister::ebp)->resetState(TR::RealRegister::Locked); break;
+               }
+            }
+
+         getMemoryReference()->unblockRegisters();
+
+         if (getSourceRegister()->decFutureUseCount() == 0 &&
+             assignedRegister->getState() != TR::RealRegister::Locked)
+            {
+            cg()->traceRegFreed(getSourceRegister(), assignedRegister);
+            getSourceRegister()->setAssignedRegister(NULL);
+            assignedRegister->setState(TR::RealRegister::Unlatched);
+            }
+
+         setSourceRegister(assignedRegister);
+
+         if (assignedRegister != NULL)
+            {
+            assignedRegister->block();
+            getMemoryReference()->assignRegisters(this, cg());
+            assignedRegister->unblock();
+            }
+         else
+            {
+            getMemoryReference()->assignRegisters(this, cg());
+            }
+
+         if (getDependencyConditions())
+            {
+            getDependencyConditions()->unblockPreConditionRegisters();
+            getDependencyConditions()->unblockPostConditionRegisters();
+            }
+         }
+
+      if (getDependencyConditions())
+         {
+         getSourceRegister()->block();
+         getMaskRegister()->block();
+         getMemoryReference()->blockRegisters();
+         getDependencyConditions()->assignPreConditionRegisters(this, kindsToBeAssigned, cg());
+         getMemoryReference()->unblockRegisters();
+         getSourceRegister()->unblock();
+         getMaskRegister()->unblock();
+         }
+      }
+   }
+
+////////////////////////////////////////////////////////////////////////////////
 // TR::X86MemRegImmInstruction:: member functions
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -2408,20 +3104,22 @@ void TR::X86RegMemInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigne
 TR::X86RegMemImmInstruction::X86RegMemImmInstruction(TR::InstOpCode::Mnemonic          op,
                                                        TR::Node               *node,
                                                        TR::Register           *treg,
-                                                       TR::MemoryReference *mr,
+                                                       TR::MemoryReference    *mr,
                                                        int32_t                imm,
-                                                       TR::CodeGenerator      *cg)
-   : TR::X86RegMemInstruction(mr, treg, node, op, cg), _sourceImmediate(imm)
+                                                       TR::CodeGenerator      *cg,
+                                                       OMR::X86::Encoding     encoding)
+   : TR::X86RegMemInstruction(mr, treg, node, op, cg, encoding), _sourceImmediate(imm)
    {
    }
 
-TR::X86RegMemImmInstruction::X86RegMemImmInstruction(TR::Instruction        *precedingInstruction,
-                                                       TR::InstOpCode::Mnemonic          op,
-                                                       TR::Register           *treg,
-                                                       TR::MemoryReference *mr,
-                                                       int32_t                imm,
-                                                       TR::CodeGenerator      *cg)
-   : TR::X86RegMemInstruction(mr, treg, op, precedingInstruction, cg), _sourceImmediate(imm)
+TR::X86RegMemImmInstruction::X86RegMemImmInstruction(TR::Instruction            *precedingInstruction,
+                                                       TR::InstOpCode::Mnemonic op,
+                                                       TR::Register             *treg,
+                                                       TR::MemoryReference      *mr,
+                                                       int32_t                  imm,
+                                                       TR::CodeGenerator        *cg,
+                                                       OMR::X86::Encoding       encoding)
+   : TR::X86RegMemInstruction(mr, treg, op, precedingInstruction, cg, encoding), _sourceImmediate(imm)
    {
    }
 
@@ -2584,6 +3282,171 @@ void TR::X86RegRegMemInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssi
          getMemoryReference()->unblockRegisters();
          getTargetRegister()->unblock();
          getSource2ndRegister()->unblock();
+         }
+      }
+   }
+
+////////////////////////////////////////////////////////////////////////////////
+// TR::X86RegMaskMemInstruction:: member functions
+////////////////////////////////////////////////////////////////////////////////
+
+bool TR::X86RegMaskMemInstruction::refsRegister(TR::Register *reg)
+   {
+   if (getMemoryReference()->refsRegister(reg) ||
+       reg == getTargetRegister()              ||
+       reg == getSource2ndRegister()           ||
+       reg == getMaskRegister())
+      {
+      return true;
+      }
+   else if (getDependencyConditions())
+      {
+      return getDependencyConditions()->refsRegister(reg);
+      }
+
+   return false;
+   }
+
+bool TR::X86RegMaskMemInstruction::usesRegister(TR::Register *reg)
+   {
+   if (getMemoryReference()->refsRegister(reg) ||
+       reg == getTargetRegister()              ||
+       reg == getSource2ndRegister()           ||
+       reg == getMaskRegister())
+      {
+      return true;
+      }
+   else if (getDependencyConditions())
+      {
+      return getDependencyConditions()->usesRegister(reg);
+      }
+
+   return false;
+   }
+
+void TR::X86RegMaskMemInstruction::assignRegisters(TR_RegisterKinds kindsToBeAssigned)
+   {
+   if (getDependencyConditions())
+      {
+      if (cg()->getAssignmentDirection() == cg()->Backward)
+         {
+         getTargetRegister()->block();
+         getMaskRegister()->block();
+         getMemoryReference()->blockRegisters();
+         getDependencyConditions()->assignPostConditionRegisters(this, kindsToBeAssigned, cg());
+         getTargetRegister()->unblock();
+         getMaskRegister()->unblock();
+         getMemoryReference()->unblockRegisters();
+         }
+      }
+
+   if (kindsToBeAssigned & getMaskRegister()->getKindAsMask())
+      {
+      if (getDependencyConditions())
+         {
+         getDependencyConditions()->blockPreConditionRegisters();
+         getDependencyConditions()->blockPostConditionRegisters();
+         }
+
+      TR::Register *maskRegister = getMaskRegister();
+      TR::RealRegister *assignedMaskRegister = maskRegister->getAssignedRealRegister();
+
+      if (assignedMaskRegister == NULL)
+         {
+         assignedMaskRegister = assignGPRegister(this, maskRegister, TR_QuadWordReg, cg());
+         }
+
+      if (maskRegister->decFutureUseCount() == 0                      &&
+          assignedMaskRegister->getState() != TR::RealRegister::Locked &&
+          maskRegister == getMaskRegister())
+         {
+         cg()->traceRegFreed(maskRegister, assignedMaskRegister);
+         maskRegister->setAssignedRegister(NULL);
+         assignedMaskRegister->setState(TR::RealRegister::Unlatched);
+         }
+
+         setMaskRegister(assignedMaskRegister);
+
+      if (getDependencyConditions())
+         {
+         getDependencyConditions()->unblockPreConditionRegisters();
+         getDependencyConditions()->unblockPostConditionRegisters();
+         }
+      }
+
+   if (kindsToBeAssigned & getTargetRegister()->getKindAsMask())
+      {
+      OMR::X86::Encoding encoding = getEncodingMethod();
+      TR_RegisterSizes requestedRegSize = encoding == OMR::X86::EVEX_L512 ? TR_VectorReg512 :
+                                          encoding == OMR::X86::EVEX_L256 ? TR_VectorReg256 : TR_VectorReg128;
+
+      if (getDependencyConditions())
+         {
+         getDependencyConditions()->blockPreConditionRegisters();
+         getDependencyConditions()->blockPostConditionRegisters();
+         }
+      getMemoryReference()->blockRegisters();
+
+      TR::RealRegister *assignedRegister = getTargetRegister()->getAssignedRealRegister();
+
+      if (assignedRegister == NULL)
+         {
+         assignedRegister = assignGPRegister(this, getTargetRegister(), requestedRegSize, cg());
+         }
+
+      getMemoryReference()->unblockRegisters();
+      if (getDependencyConditions())
+         {
+         getDependencyConditions()->unblockPreConditionRegisters();
+         getDependencyConditions()->unblockPostConditionRegisters();
+         }
+
+      if (getTargetRegister()->decFutureUseCount() == 0 &&
+          assignedRegister->getState() != TR::RealRegister::Locked)
+         {
+         cg()->traceRegFreed(getTargetRegister(), assignedRegister);
+         getTargetRegister()->setAssignedRegister(NULL);
+         assignedRegister->setState(TR::RealRegister::Unlatched);
+         }
+
+      if (getDependencyConditions())
+         getDependencyConditions()->blockPreConditionRegisters();
+
+      setTargetRegister(assignedRegister);
+
+      getTargetRegister()->block();
+      getMemoryReference()->assignRegisters(this, cg());
+      getTargetRegister()->unblock();
+
+      if (getDependencyConditions())
+         getDependencyConditions()->unblockPreConditionRegisters();
+
+      }
+
+#ifdef J9_PROJECT_SPECIFIC
+   if (kindsToBeAssigned & (TR_X87_Mask | TR_FPR_Mask | TR_VRF_Mask))
+      {
+      TR::UnresolvedDataSnippet *snippet = getMemoryReference()->getUnresolvedDataSnippet();
+      if (snippet)
+         {
+         if (kindsToBeAssigned & TR_X87_Mask)
+            snippet->setNumLiveX87Registers(cg()->machine()->fpGetNumberOfLiveFPRs());
+
+         if (kindsToBeAssigned & (TR_FPR_Mask | TR_VRF_Mask))
+            snippet->setHasLiveXMMRegisters((cg()->machine()->fpGetNumberOfLiveXMMRs() > 0) ? true : false);
+         }
+      }
+#endif
+
+   if (getDependencyConditions())
+      {
+      if (cg()->getAssignmentDirection() == cg()->Backward)
+         {
+         getTargetRegister()->block();
+         getMemoryReference()->blockRegisters();
+         getDependencyConditions()->assignPreConditionRegisters(this, kindsToBeAssigned, cg());
+         getTargetRegister()->unblock();
+         getMemoryReference()->unblockRegisters();
          }
       }
    }
@@ -3576,6 +4439,8 @@ TR::AMD64RegImm64SymInstruction::autoSetReloKind()
    TR::Symbol *symbol = getSymbolReference()->getSymbol();
    if (symbol->isDebugCounter())
       setReloKind(TR_DebugCounter);
+   else if (symbol->isStaticDefaultValueInstance())
+      setReloKind(TR_StaticDefaultValueInstance);
    else if (symbol->isConst() || symbol->isConstantPoolAddress())
       setReloKind(TR_ConstantPool);
    else if (symbol->isStatic() && !getSymbolReference()->isUnresolved() && !symbol->isClassObject() && !symbol->isNotDataAddress())
@@ -4068,6 +4933,133 @@ generateRegRegRegInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::R
    return new (cg->trHeapMemory()) TR::X86RegRegRegInstruction(op, node, reg1, reg2, reg3, cg, encoding);
    }
 
+TR::X86RegMaskRegRegInstruction *
+generateRegMaskRegRegInstruction(TR::InstOpCode::Mnemonic op,
+                                 TR::Node * node,
+                                 TR::Register * reg1,
+                                 TR::Register * mreg,
+                                 TR::Register * reg2,
+                                 TR::Register * reg3,
+                                 TR::CodeGenerator *cg,
+                                 OMR::X86::Encoding encoding,
+                                 bool zeroMask)
+   {
+   TR_ASSERT_FATAL(encoding != OMR::X86::Bad && encoding >= OMR::X86::Encoding::EVEX_L128, "Must use EVEX encoding for AVX-512 instructions");
+   TR_ASSERT_FATAL(mreg->getKind() == TR_VMR, "Mask register must be a VMR");
+
+   return new (cg->trHeapMemory()) TR::X86RegMaskRegRegInstruction(reg1, mreg, reg2, reg3, node, op, cg, encoding, zeroMask);
+   }
+
+TR::X86RegMaskRegRegInstruction *
+generateRegMaskRegRegInstruction(TR::InstOpCode::Mnemonic op,
+                                 TR::Node * node,
+                                 TR::Register * reg1,
+                                 TR::Register * mreg,
+                                 TR::Register * reg2,
+                                 TR::Register * reg3,
+                                 TR::RegisterDependencyConditions *deps,
+                                 TR::CodeGenerator *cg,
+                                 OMR::X86::Encoding encoding)
+   {
+   TR_ASSERT_FATAL(encoding != OMR::X86::Bad && encoding >= OMR::X86::Encoding::EVEX_L128, "Must use EVEX encoding for AVX-512 instructions");
+   TR_ASSERT_FATAL(mreg->getKind() == TR_VMR, "Mask register must be a VMR");
+
+   return new (cg->trHeapMemory()) TR::X86RegMaskRegRegInstruction(reg3, mreg, reg2, reg1, node, op, deps, cg, encoding);
+   }
+
+TR::X86RegMaskRegInstruction *
+generateRegMaskRegInstruction(TR::InstOpCode::Mnemonic op,
+                                 TR::Node * node,
+                                 TR::Register * reg1,
+                                 TR::Register * mreg,
+                                 TR::Register * reg2,
+                                 TR::CodeGenerator *cg,
+                                 OMR::X86::Encoding encoding,
+                                 bool zeroMask)
+   {
+   TR_ASSERT_FATAL(encoding != OMR::X86::Bad && encoding >= OMR::X86::Encoding::EVEX_L128, "Must use EVEX encoding for AVX-512 instructions");
+   TR_ASSERT_FATAL(mreg->getKind() == TR_VMR, "Mask register must be a VMR");
+
+   return new (cg->trHeapMemory()) TR::X86RegMaskRegInstruction(reg1, mreg, reg2, node, op, cg, encoding, zeroMask);
+   }
+
+TR::X86RegMaskRegInstruction *
+generateRegMaskRegInstruction(TR::InstOpCode::Mnemonic op,
+                                 TR::Node * node,
+                                 TR::Register * reg1,
+                                 TR::Register * mreg,
+                                 TR::Register * reg2,
+                                 TR::RegisterDependencyConditions *deps,
+                                 TR::CodeGenerator *cg,
+                                 OMR::X86::Encoding encoding,
+                                 bool zeroMask)
+   {
+   TR_ASSERT_FATAL(encoding != OMR::X86::Bad && encoding >= OMR::X86::Encoding::EVEX_L128, "Must use EVEX encoding for AVX-512 instructions");
+   TR_ASSERT_FATAL(mreg->getKind() == TR_VMR, "Mask register must be a VMR");
+
+   return new (cg->trHeapMemory()) TR::X86RegMaskRegInstruction(reg1, mreg, reg2, node, op, deps, cg, encoding, zeroMask);
+   }
+
+TR::X86RegMaskMemInstruction *
+generateRegMaskMemInstruction(TR::InstOpCode::Mnemonic op,
+                              TR::Node * node,
+                              TR::Register *reg1,
+                              TR::Register *mreg,
+                              TR::MemoryReference *mr,
+                              TR::CodeGenerator *cg,
+                              OMR::X86::Encoding encoding,
+                              bool zeroMask)
+   {
+   TR_ASSERT_FATAL(encoding != OMR::X86::Bad && encoding >= OMR::X86::Encoding::EVEX_L128, "Must use EVEX encoding for AVX-512 instructions");
+   TR_ASSERT_FATAL(mreg->getKind() == TR_VMR, "Mask register must be a VMR");
+
+   return new (cg->trHeapMemory()) TR::X86RegMaskMemInstruction(op, node, reg1, mreg, mr, cg, encoding, zeroMask);
+   }
+
+TR::X86RegMaskMemInstruction *
+generateRegMaskMemInstruction(TR::InstOpCode::Mnemonic op,
+                              TR::Node *node,
+                              TR::Register *reg1,
+                              TR::Register *mreg,
+                              TR::MemoryReference *mr,
+                              TR::RegisterDependencyConditions *deps,
+                              TR::CodeGenerator *cg,
+                              OMR::X86::Encoding encoding,
+                              bool zeroMask)
+   {
+   TR_ASSERT_FATAL(encoding != OMR::X86::Bad && encoding >= OMR::X86::Encoding::EVEX_L128, "Must use EVEX encoding for AVX-512 instructions");
+   TR_ASSERT_FATAL(mreg->getKind() == TR_VMR, "Mask register must be a VMR");
+
+   return new (cg->trHeapMemory()) TR::X86RegMaskMemInstruction(op, node, reg1, mreg, mr, deps, cg, encoding, zeroMask);
+   }
+
+TR::X86MemMaskRegInstruction  *
+generateMemMaskRegInstruction(TR::InstOpCode::Mnemonic op,
+                              TR::Node * node,
+                              TR::MemoryReference *mr,
+                              TR::Register * mreg,
+                              TR::Register * sreg,
+                              TR::CodeGenerator *cg,
+                              OMR::X86::Encoding encoding,
+                              bool zeroMask)
+   {
+   return new (cg->trHeapMemory()) TR::X86MemMaskRegInstruction(op, node, mr, mreg, sreg, cg, encoding, zeroMask);
+   }
+
+TR::X86MemMaskRegInstruction  *
+generateMemMaskRegInstruction(TR::InstOpCode::Mnemonic op,
+                              TR::Node *node,
+                              TR::MemoryReference *mr,
+                              TR::Register *mreg,
+                              TR::Register *sreg,
+                              TR::RegisterDependencyConditions  *cond,
+                              TR::CodeGenerator *cg,
+                              OMR::X86::Encoding encoding,
+                              bool zeroMask)
+   {
+   return new (cg->trHeapMemory()) TR::X86MemMaskRegInstruction(op, node, mr, mreg, sreg, cond, cg, encoding, zeroMask);
+   }
+
 TR::X86RegRegRegInstruction  *
 generateRegRegRegInstruction(TR::InstOpCode::Mnemonic            op,
                              TR::Node                         *node,
@@ -4177,15 +5169,15 @@ generateImmSnippetInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, int3
    }
 
 TR::X86RegMemImmInstruction  *
-generateRegMemImmInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * reg, TR::MemoryReference  * mr, int32_t imm, TR::CodeGenerator *cg)
+generateRegMemImmInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * reg, TR::MemoryReference  * mr, int32_t imm, TR::CodeGenerator *cg, OMR::X86::Encoding encoding)
    {
-   return new (cg->trHeapMemory()) TR::X86RegMemImmInstruction(op, node, reg, mr, imm, cg);
+   return new (cg->trHeapMemory()) TR::X86RegMemImmInstruction(op, node, reg, mr, imm, cg, encoding);
    }
 
 TR::X86RegRegImmInstruction  *
-generateRegRegImmInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * treg, TR::Register * sreg, int32_t imm, TR::CodeGenerator *cg)
+generateRegRegImmInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * treg, TR::Register * sreg, int32_t imm, TR::CodeGenerator *cg, OMR::X86::Encoding encoding)
    {
-   return new (cg->trHeapMemory()) TR::X86RegRegImmInstruction(op, node, treg, sreg, imm, cg);
+   return new (cg->trHeapMemory()) TR::X86RegRegImmInstruction(op, node, treg, sreg, imm, cg, encoding);
    }
 
 TR::X86CallMemInstruction  *

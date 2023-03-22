@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -68,10 +68,9 @@ MM_ConfigurationGenerational::tearDown(MM_EnvironmentBase* env)
 {
 	MM_GCExtensionsBase* extensions = env->getExtensions();
 
-	/* Set pointer to scavenger in extensions to NULL
-	 * before Scavenger is teared down as part of clean up of defaultMemorySpace
+	/* unregisterScavenger before Scavenger is teared down as part of clean up of defaultMemorySpace
 	 * in MM_Configuration::tearDown. */
-	extensions->scavenger = NULL;
+	extensions->unregisterScavenger();
 
 	MM_ConfigurationStandard::tearDown(env);
 }
@@ -202,8 +201,7 @@ MM_ConfigurationGenerational::createDefaultMemorySpace(MM_EnvironmentBase *envBa
 		return NULL;
 	}
 	
-	/* register the scavenger in GCExtensionsBase */
-	ext->scavenger = scavenger;
+	ext->registerScavenger(scavenger);
 
 	return MM_MemorySpace::newInstance(env, heap, physicalArena, memorySubSpaceGenerational, parameters, MEMORY_SPACE_NAME_GENERATIONAL, MEMORY_SPACE_DESCRIPTION_GENERATIONAL);
 }
@@ -217,7 +215,6 @@ MM_ConfigurationGenerational::createHeapWithManager(MM_EnvironmentBase *env, UDA
 	MM_GCExtensionsBase *extensions = env->getExtensions();
 	MM_Heap *heap = NULL;
 
-#if defined(OMR_GC_MODRON_SCAVENGER)
 	/* gencon supports split heaps so check that flag here when deciding what kind of MM_Heap to create */
 	if (extensions->enableSplitHeap) {
 		UDATA lowSize = extensions->oldSpaceSize;
@@ -228,9 +225,7 @@ MM_ConfigurationGenerational::createHeapWithManager(MM_EnvironmentBase *env, UDA
 		 * set and "inverted" flag in the extensions and check that in the PSA attach code when determining attachment policy.
 		 * May allow more versatile use cases of the split heaps, though.
 		 */
-	} else
-#endif /* OMR_GC_MODRON_SCAVENGER */
-	{
+	} else {
 		heap = MM_ConfigurationStandard::createHeapWithManager(env, heapBytesRequested, regionManager);
 	}
 	return heap;

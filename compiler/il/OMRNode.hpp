@@ -36,6 +36,7 @@ namespace OMR { typedef OMR::Node NodeConnector; }
 #include <stdint.h>
 #include <string.h>
 #include "codegen/RegisterConstants.hpp"
+#include "compile/VirtualGuard.hpp"
 #include "cs2/hashtab.h"
 #include "env/KnownObjectTable.hpp"
 #include "env/TRMemory.hpp"
@@ -148,6 +149,8 @@ protected:
    static void copyValidProperties(TR::Node *fromNode, TR::Node *toNode);
 
    static TR::Node *createInternal(TR::Node *originatingByteCodeNode, TR::ILOpCodes op, uint16_t numChildren, TR::Node *originalNode = 0);
+
+   TR_YesNoMaybe computeIsCollectedReferenceImpl(TR::NodeChecklist &processedNodesCollected, TR::NodeChecklist &processedNodesNotCollected);
 
 /**
  * Public constructors and helpers
@@ -1374,61 +1377,35 @@ public:
 
    bool isStopTheWorldGuard();
 
-   bool isProfiledGuard();
-   void setIsProfiledGuard();
-   const char * printIsProfiledGuard();
-
-   bool isInterfaceGuard();
-   void setIsInterfaceGuard();
-   const char * printIsInterfaceGuard();
-
-   bool isAbstractGuard();
-   void setIsAbstractGuard();
-   const char * printIsAbstractGuard();
-
-   bool isHierarchyGuard();
-   void setIsHierarchyGuard();
-   const char * printIsHierarchyGuard();
-
-   bool isNonoverriddenGuard();
-   void setIsNonoverriddenGuard();
-   const char * printIsNonoverriddenGuard();
-
-   bool isSideEffectGuard();
-   void setIsSideEffectGuard();
-   const char * printIsSideEffectGuard();
-
-   bool isDummyGuard();
-   void setIsDummyGuard();
-   const char * printIsDummyGuard();
-
-   bool isHCRGuard();
-   void setIsHCRGuard();
-   const char * printIsHCRGuard();
-
+   TR_VirtualGuard *virtualGuardInfo(); // null for non-guard nodes
+   void setVirtualGuardInfo(TR_VirtualGuard *guard, TR::Compilation *comp);
+   void copyVirtualGuardInfoTo(TR::Node *dupNode, TR::Compilation *comp);
    bool isTheVirtualGuardForAGuardedInlinedCall();
-   void resetIsTheVirtualGuardForAGuardedInlinedCall();
    bool isNopableInlineGuard();
 
-   bool isMutableCallSiteTargetGuard();
-   void setIsMutableCallSiteTargetGuard();
-   const char * printIsMutableCallSiteTargetGuard();
+   bool vftEntryIsInBounds();
+   void setVFTEntryIsInBounds(bool inBounds);
+   const char * printVFTEntryIsInBounds();
 
-   bool isMethodEnterExitGuard();
-   void setIsMethodEnterExitGuard(bool b = true);
-   const char * printIsMethodEnterExitGuard();
+   bool isGuardOfKind(TR_VirtualGuardKind kind)
+      {
+      TR_VirtualGuard *guard = virtualGuardInfo();
+      return guard != NULL && guard->getKind() == kind;
+      }
 
-   bool isDirectMethodGuard();
-   void setIsDirectMethodGuard(bool b = true);
-   const char * printIsDirectMethodGuard();
-
-   bool isOSRGuard();
-   void setIsOSRGuard();
-   const char * printIsOSRGuard();
-
-   bool isBreakpointGuard();
-   void setIsBreakpointGuard();
-   const char * printIsBreakpointGuard();
+   bool isProfiledGuard() { return isGuardOfKind(TR_ProfiledGuard); }
+   bool isInterfaceGuard() { return isGuardOfKind(TR_InterfaceGuard); }
+   bool isAbstractGuard() { return isGuardOfKind(TR_AbstractGuard); }
+   bool isHierarchyGuard() { return isGuardOfKind(TR_HierarchyGuard); }
+   bool isNonoverriddenGuard() { return isGuardOfKind(TR_NonoverriddenGuard); }
+   bool isSideEffectGuard() { return isGuardOfKind(TR_SideEffectGuard); }
+   bool isDummyGuard() { return isGuardOfKind(TR_DummyGuard); }
+   bool isHCRGuard() { return isGuardOfKind(TR_HCRGuard); }
+   bool isMutableCallSiteTargetGuard() { return isGuardOfKind(TR_MutableCallSiteTargetGuard); }
+   bool isMethodEnterExitGuard() { return isGuardOfKind(TR_MethodEnterExitGuard); }
+   bool isDirectMethodGuard() { return isGuardOfKind(TR_DirectMethodGuard); }
+   bool isOSRGuard() { return isGuardOfKind(TR_OSRGuard); }
+   bool isBreakpointGuard() { return isGuardOfKind(TR_BreakpointGuard); }
 
    bool childrenWereSwapped();
    void setSwappedChildren(bool v);
@@ -1438,10 +1415,6 @@ public:
 
    bool isVersionableIfWithMinExpr();
    void setIsVersionableIfWithMinExpr(TR::Compilation * c);
-
-   // Can be set on int loads and arithmetic operations
-   bool isPowerOfTwo()          { return _flags.testAny(IsPowerOfTwo); }
-   void setIsPowerOfTwo(bool b) { _flags.set(IsPowerOfTwo, b); }
 
    // Flags used by indirect stores and wrtbars for references
    bool isStoreAlreadyEvaluated();
@@ -1799,6 +1772,14 @@ protected:
        * even- evaluated into a register
        */
       TR::Register * _register;
+
+      /**
+       * The virtual guard info for a guard node, i.e. a node that satisfies
+       * isTheVirtualGuardForAGuardedInlinedCall(). These are top-level if
+       * nodes, so they have neither a use-def index nor a register. Must be
+       * assigned and non-null when the guard flag is set.
+       */
+      TR_VirtualGuard *_guard;
       };
 
    // Union Property verification helpers
@@ -1868,25 +1849,23 @@ protected:
 // Private functionality.
 private:
    TR::Node * getExtendedChild(int32_t c);
-   TR_YesNoMaybe computeIsCollectedReferenceImpl(TR::NodeChecklist &processedNodesCollected, TR::NodeChecklist &processedNodesNotCollected);
-
    friend class TR::NodePool;
-
 
 // flag bits
 protected:
    enum
       {
-      // Here's map of how the flag bits have been allocated
+      // Flag bits allocation map (inclusive ranges):
       //
-      // 0x00000000 - 0x00000400 are general node flags (6 bits)
-      // 0x00000400 - 0x00008000 are node specific flags (10 bits)
-      // 0x00001000 - 0x10000000 are unallocated (13 bits)
-      // 0x20000000 - 0x80000000 are frontend specific general node flags (3 bits)
+      // 0x00000001 - 0x00000200 are general node flags (10 bits)
+      // 0x00000400 - 0x00400000 are node specific flags (13 bits)
+      // 0x00800000 - 0x40000000 are unallocated (8 bits)
+      // 0x80000000 - 0x80000000 are frontend specific general node flags (1 bit)
       //
 
       //---------------------------------------- general flags ---------------------------------------
 
+      // available                          = 0x00000001,
       nodeIsZero                            = 0x00000002,
       nodeIsNonZero                         = 0x00000004,
       nodeIsNull                            = 0x00000002,
@@ -2031,26 +2010,11 @@ protected:
 
       // Flags used by TR_if
       maxLoopIterationGuard                 = 0x00000800,  ///< allows redundant async check removal to remove ac's
-      inlineGuardMask                       = 0x0000F000,
-      inlineProfiledGuard                   = 0x00001000,
-      inlineInterfaceGuard                  = 0x00002000,
-      inlineAbstractGuard                   = 0x00003000,
-      inlineHierarchyGuard                  = 0x00004000,
-      inlineNonoverriddenGuard              = 0x00005000,
-      sideEffectGuard                       = 0x00006000,
-      dummyGuard                            = 0x00007000,
-      inlineHCRGuard                        = 0x00008000,
-      mutableCallSiteTargetGuard            = 0x00009000,
-      methodEnterExitGuard                  = 0x0000A000,
-      directMethodGuard                     = 0x0000B000,
-      osrGuard                              = 0x0000C000,
-      breakpointGuard                       = 0x0000D000,
+      inlineGuard                           = 0x00001000,
       swappedChildren                       = 0x00020000,
       versionIfWithMaxExpr                  = 0x00010000,
       versionIfWithMinExpr                  = 0x00040000,
-
-      // Can be set on int loads and arithmetic operations
-      IsPowerOfTwo                          = 0x10000000,
+      vftEntryIsInBoundsFlag                = 0x00080000, ///< For guards with method test
 
       // Flags used by indirect stores & wrtbars for references
       storeAlreadyEvaluated                 = 0x00001000,

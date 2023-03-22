@@ -1894,7 +1894,8 @@ TR_InlinerBase::addGuardForVirtual(
 
    getUtil()->refineInlineGuard(callNode, block1, block2, appendTestToBlock1, callerSymbol, cursorTree, virtualGuard, block4);
 
-   if ((guard->_kind == TR_ProfiledGuard) || (guard->_kind == TR_InnerGuard))
+   if ((guard->_kind == TR_ProfiledGuard || guard->_kind == TR_InnerGuard)
+       && !guard->_forceTakenSideCold)
       {
       if (block1->getFrequency() < 0)
          block4->setFrequency(block1->getFrequency());
@@ -6215,10 +6216,11 @@ OMR_InlinerPolicy::checkIfTargetInlineable(TR_CallTarget* target, TR_CallSite* c
    }
 
 /**
- * Do not perform privated inliner argument rematerialization on high probability profiled
- * guards when distrusted
+ * Determine whether to perform privatized inliner argument rematerialization
+ * on the given profiled guard.
  *
- * @return true if privatized inliner argumetn rematerialization should be suppressed
+ * @return true if privatized inliner argument rematerialization should be
+ *         performed, false otherwise
  */
 bool
 OMR_InlinerPolicy::suitableForRemat(TR::Compilation *comp, TR::Node *node, TR_VirtualGuardSelection *guard)

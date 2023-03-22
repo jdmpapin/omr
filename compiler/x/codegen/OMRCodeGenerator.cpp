@@ -46,7 +46,6 @@
 #include "codegen/RegisterRematerializationInfo.hpp"
 #include "codegen/Snippet.hpp"
 #include "codegen/TreeEvaluator.hpp"
-#include "codegen/X86Evaluator.hpp"
 #ifdef TR_TARGET_64BIT
 #include "x/amd64/codegen/AMD64SystemLinkage.hpp"
 #else
@@ -105,13 +104,26 @@ namespace TR { class RegisterDependencyConditions; }
 // Hack markers
 #define CANT_REMATERIALIZE_ADDRESSES(cg) (cg->comp()->target().is64Bit()) // AMD64 produces a memref with an unassigned addressRegister
 
-
-TR_X86ProcessorInfo OMR::X86::CodeGenerator::_targetProcessorInfo;
-
-void TR_X86ProcessorInfo::initialize()
+void TR_X86ProcessorInfo::reset()
    {
-   if (_featureFlags.testAny(TR_X86ProcessorInfoInitialized))
+   _vendorFlags = 0;
+   _featureFlags = 0;
+   _featureFlags2 = 0;
+   _featureFlags8 = 0;
+   _processorDescription = 0;
+   }
+
+void TR_X86ProcessorInfo::initialize(bool force)
+   {
+   if (force)
+      {
+      reset();
+      }
+   else if (_featureFlags.testAny(TR_X86ProcessorInfoInitialized))
+      {
       return;
+      }
+
    // For now, we only convert the feature bits into a flags32_t, for easier querying.
    // To retrieve other information, the VM functions can be called directly.
    //
@@ -207,9 +219,9 @@ OMR::X86::CodeGenerator::initializeX86(TR::Compilation *comp)
    {
    bool supportsSSE2 = false;
 
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.isGenuineIntel() == _targetProcessorInfo.isGenuineIntel(), "isGenuineIntel() failed\n");
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.isAuthenticAMD() == _targetProcessorInfo.isAuthenticAMD(), "isAuthenticAMD() failed\n");
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.prefersMultiByteNOP() == _targetProcessorInfo.prefersMultiByteNOP(), "prefersMultiByteNOP() failed\n");
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.isGenuineIntel() == getX86ProcessorInfo().isGenuineIntel(), "isGenuineIntel() failed\n");
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.isAuthenticAMD() == getX86ProcessorInfo().isAuthenticAMD(), "isAuthenticAMD() failed\n");
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.prefersMultiByteNOP() == getX86ProcessorInfo().prefersMultiByteNOP(), "prefersMultiByteNOP() failed\n");
 
    // Pick a padding table
    //
@@ -229,7 +241,7 @@ OMR::X86::CodeGenerator::initializeX86(TR::Compilation *comp)
 
 #if defined(TR_TARGET_X86)
 #if !defined(J9HAMMER)
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE2) == _targetProcessorInfo.supportsSSE2(), "supportsSSE2() failed\n");
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE2) == getX86ProcessorInfo().supportsSSE2(), "supportsSSE2() failed\n");
 
    if (comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE2) && comp->target().cpu.testOSForSSESupport())
       supportsSSE2 = true;
@@ -239,7 +251,7 @@ OMR::X86::CodeGenerator::initializeX86(TR::Compilation *comp)
 #endif // !defined(J9HAMMER)
 #endif // defined(TR_TARGET_X86)
 
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.supportsFeature(OMR_FEATURE_X86_RTM) == _targetProcessorInfo.supportsTM(), "supportsTM() failed\n");
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.supportsFeature(OMR_FEATURE_X86_RTM) == getX86ProcessorInfo().supportsTM(), "supportsTM() failed\n");
 
    if (comp->target().cpu.supportsFeature(OMR_FEATURE_X86_RTM) && !comp->getOption(TR_DisableTM))
       {
@@ -249,7 +261,7 @@ OMR::X86::CodeGenerator::initializeX86(TR::Compilation *comp)
         *
         * TODO: Need to figure out from which mode of Broadwell start supporting TM
         */
-      TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.is(OMR_PROCESSOR_X86_INTELHASWELL) == _targetProcessorInfo.isIntelHaswell(), "isIntelHaswell() failed\n");
+      TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.is(OMR_PROCESSOR_X86_INTELHASWELL) == getX86ProcessorInfo().isIntelHaswell(), "isIntelHaswell() failed\n");
       if (!comp->target().cpu.is(OMR_PROCESSOR_X86_INTELHASWELL))
          {
          if (comp->target().is64Bit())
@@ -266,7 +278,7 @@ OMR::X86::CodeGenerator::initializeX86(TR::Compilation *comp)
 
    // Choose the best XMM double precision load instruction for the target architecture.
    //
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.isAuthenticAMD() == _targetProcessorInfo.isAuthenticAMD(), "isAuthenticAMD() failed\n");
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.isAuthenticAMD() == getX86ProcessorInfo().isAuthenticAMD(), "isAuthenticAMD() failed\n");
    static char *forceMOVLPD = feGetEnv("TR_forceMOVLPDforDoubleLoads");
    if (comp->target().cpu.isAuthenticAMD() || forceMOVLPD)
       {
@@ -427,9 +439,9 @@ OMR::X86::CodeGenerator::initializeX86(TR::Compilation *comp)
    // Make a conservative estimate of the boundary over which an executable instruction cannot
    // be patched.
    //
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.isGenuineIntel() == _targetProcessorInfo.isGenuineIntel(), "isGenuineIntel() failed\n");
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.isAuthenticAMD() == _targetProcessorInfo.isAuthenticAMD(), "isAuthenticAMD() failed\n");
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.is(OMR_PROCESSOR_X86_AMDFAMILY15H) == _targetProcessorInfo.isAMD15h(), "isAMD15h() failed\n");
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.isGenuineIntel() == getX86ProcessorInfo().isGenuineIntel(), "isGenuineIntel() failed\n");
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.isAuthenticAMD() == getX86ProcessorInfo().isAuthenticAMD(), "isAuthenticAMD() failed\n");
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.is(OMR_PROCESSOR_X86_AMDFAMILY15H) == getX86ProcessorInfo().isAMD15h(), "isAMD15h() failed\n");
    int32_t boundary;
    if (comp->target().cpu.isGenuineIntel() || (comp->target().cpu.isAuthenticAMD() && comp->target().cpu.is(OMR_PROCESSOR_X86_AMDFAMILY15H)))
       boundary = 32;
@@ -485,6 +497,7 @@ OMR::X86::CodeGenerator::initializeX86(TR::Compilation *comp)
       {
       self()->setGPRegisterIterator(new (self()->trHeapMemory()) TR::RegisterIterator(self()->machine(), TR::RealRegister::FirstGPR, TR::RealRegister::LastAssignableGPR));
       self()->setFPRegisterIterator(new (self()->trHeapMemory()) TR::RegisterIterator(self()->machine(), TR::RealRegister::FirstXMMR, TR::RealRegister::LastXMMR));
+      self()->setVMRegisterIterator(new (self()->trHeapMemory()) TR::RegisterIterator(self()->machine(), TR::RealRegister::k1, TR::RealRegister::k7));
       }
 
    self()->setSupportsProfiledInlining();
@@ -633,6 +646,13 @@ OMR::X86::CodeGenerator::endInstructionSelection()
              "endInstructionSelection() ==> Could not find the dummy finally block!\n");
       generateMemInstruction(self()->getLastCatchAppendInstruction(), TR::InstOpCode::LDCWMem, generateX86MemoryReference(self()->findOrCreate2ByteConstant(self()->getLastCatchAppendInstruction()->getNode(), DOUBLE_PRECISION_ROUND_TO_NEAREST), self()), self());
       }
+   }
+
+TR_X86ProcessorInfo &
+OMR::X86::CodeGenerator::getX86ProcessorInfo()
+   {
+   static TR_X86ProcessorInfo processorInfo = TR_X86ProcessorInfo();
+   return processorInfo;
    }
 
 int32_t OMR::X86::CodeGenerator::getMaximumNumbersOfAssignableGPRs()
@@ -996,12 +1016,6 @@ bool OMR::X86::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::ILO
 
     TR::DataType ot = opcode.getVectorResultDataType();
     TR::DataType et = ot.getVectorElementType();
-    TR::InstOpCode nativeOpcode = TR::TreeEvaluator::getNativeSIMDOpcode(opcode.getOpCodeValue(), ot, false);
-
-   if (nativeOpcode.getMnemonic() != TR::InstOpCode::bad)
-      {
-      return nativeOpcode.getSIMDEncoding(cpu, ot.getVectorLength()) != OMR::X86::Bad;
-      }
 
    TR_ASSERT_FATAL(et == TR::Int8 || et == TR::Int16 || et == TR::Int32 || et == TR::Int64 || et == TR::Float || et == TR::Double,
                    "Unexpected vector element type\n");
@@ -1009,6 +1023,54 @@ bool OMR::X86::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::ILO
    // implemented vector opcodes
    switch (opcode.getVectorOperation())
       {
+      case TR::vmin:
+      case TR::vmax:
+         if (et.isFloatingPoint() && ot.getVectorLength() == TR::VectorLength512)
+            return false;
+         break;
+      case TR::vabs:
+         if (et.isFloatingPoint())
+            {
+            switch (ot.getVectorLength())
+               {
+               case TR::VectorLength128:
+                  return true;
+               case TR::VectorLength256:
+                  return cpu->supportsFeature(OMR_FEATURE_X86_AVX2);
+               case TR::VectorLength512:
+                  return cpu->supportsFeature(OMR_FEATURE_X86_AVX512F);
+               default:
+                  return false;
+               }
+            }
+         break;
+      case TR::vfma:
+         {
+         TR::InstOpCode fmaOpcode = TR::InstOpCode::VFMADD213PRegRegReg(et.isDouble());
+
+         if (fmaOpcode.getSIMDEncoding(cpu, ot.getVectorLength()))
+            return true;
+
+         TR::ILOpCodes vMul = TR::ILOpCode::createVectorOpCode(TR::vmul, opcode.getType());
+         TR::ILOpCode vAdd = TR::ILOpCode::createVectorOpCode(TR::vadd, opcode.getType());
+
+         return getSupportsOpCodeForAutoSIMD(cpu, vMul) && getSupportsOpCodeForAutoSIMD(cpu, vAdd);
+         }
+      case TR::vmul:
+         if (et != TR::Int8)
+            break;
+         switch (ot.getVectorLength())
+            {
+            case TR::VectorLength128:
+               return true;
+            case TR::VectorLength256:
+               return cpu->supportsFeature(OMR_FEATURE_X86_AVX2);
+            case TR::VectorLength512:
+               return cpu->supportsFeature(OMR_FEATURE_X86_AVX512F);
+            default:
+               return false;
+            }
+         break;
       case TR::vneg:
          switch (ot.getVectorLength()) {
             case TR::VectorLength128:
@@ -1037,13 +1099,20 @@ bool OMR::X86::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::ILO
             case TR::VectorLength128:
                return true;
             default:
-                return false;
+               return false;
             }
       case TR::vsplats:
-         if (et == TR::Int32 || et == TR::Int64 || et == TR::Float || et == TR::Double)
-            return ot.getVectorLength() == TR::VectorLength128;
-         else
-            return false;
+         switch (ot.getVectorLength())
+            {
+            case TR::VectorLength128:
+               return true;
+            case TR::VectorLength256:
+               return cpu->supportsFeature(OMR_FEATURE_X86_AVX2);
+            case TR::VectorLength512:
+               return cpu->supportsFeature(OMR_FEATURE_X86_AVX512F);
+            default:
+               return false;
+            }
 
        /*
        * GRA does not work with vector registers on 32 bit due to a bug where xmm registers are not being assigned.
@@ -1066,7 +1135,35 @@ bool OMR::X86::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::ILO
             return false;
 
       default:
-         return false;
+         break;
+      }
+
+   // Leave floating-point reductions disabled due to a precision tolerance
+   // issue in openjdk tests. Min/max f/d reductions cannot be enabled at
+   // 512-bits until vector masking support is enabled.
+   if (opcode.isVectorReduction() && !et.isFloatingPoint())
+      {
+      TR::ILOpCodes ilOp = OMR::ILOpCode::reductionToVerticalOpcode(opcode.getOpCodeValue(), ot.getVectorLength());
+      TR::InstOpCode nativeOpcode = TR::TreeEvaluator::getNativeSIMDOpcode(ilOp, ot, false);
+      // Some SIMD operations cannot be mapped into a single x86 instruction
+      // and are implemented as a sequence. Since the reduction evaluator can
+      // only handle 1-to-1 relationship, we must query the opcode table instead
+      // of calling getSupportsOpcodeForAutoSIMD(cpu, ilOp)
+      if (nativeOpcode.getMnemonic() != TR::InstOpCode::bad)
+         {
+         return nativeOpcode.getSIMDEncoding(cpu, ot.getVectorLength()) != OMR::X86::Bad;
+         }
+
+      return false;
+      }
+
+   TR::InstOpCode nativeOpcode = TR::TreeEvaluator::getNativeSIMDOpcode(opcode.getOpCodeValue(), ot, false);
+
+   // check if the operation can be mapped to a single native instruction,
+   // and that instruction is supported on the target cpu
+   if (nativeOpcode.getMnemonic() != TR::InstOpCode::bad)
+      {
+      return nativeOpcode.getSIMDEncoding(cpu, ot.getVectorLength()) != OMR::X86::Bad;
       }
 
    return false;
@@ -1632,7 +1729,7 @@ void OMR::X86::CodeGenerator::doRegisterAssignment(TR_RegisterKinds kindsToAssig
    LexicalTimer pt2("GP register assignment", self()->comp()->phaseTimer());
    // Assign GPRs and XMMRs in a backward pass
    //
-   kindsToAssign = TR_RegisterKinds(kindsToAssign & (TR_GPR_Mask | TR_FPR_Mask | TR_VRF_Mask));
+   kindsToAssign = TR_RegisterKinds(kindsToAssign & (TR_GPR_Mask | TR_VMR_Mask | TR_FPR_Mask | TR_VRF_Mask));
    if (kindsToAssign)
       {
       self()->getVMThreadRegister()->setFutureUseCount(self()->getVMThreadRegister()->getTotalUseCount());

@@ -73,9 +73,7 @@ class MM_RememberedSetCardBucket;
 #if defined(OMR_GC_REALTIME)
 class MM_RememberedSetSATB;
 #endif /* defined(OMR_GC_REALTIME) */
-#if defined(OMR_GC_MODRON_SCAVENGER)
 class MM_Scavenger;
-#endif /* OMR_GC_MODRON_SCAVENGER */
 class MM_SizeClasses;
 class MM_SparseVirtualMemory;
 class MM_SweepHeapSectioning;
@@ -222,8 +220,8 @@ private:
 	bool debugConcurrentScavengerPageAlignment; /**< if true allows debug output prints for Concurrent Scavenger Page Alignment logic */
 	uintptr_t concurrentScavengerPageSectionSize; /**< selected section size for Concurrent Scavenger Page */
 	void *concurrentScavengerPageStartAddress; /**< start address for Concurrent Scavenger Page, UDATA_MAX if it is not initialized */
-#endif	/* OMR_GC_CONCURRENT_SCAVENGER */
-#endif /* OMR_GC_MODRON_SCAVENGER */
+#endif /* defined(OMR_GC_CONCURRENT_SCAVENGER) */
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
 
 protected:
 #if defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)
@@ -253,26 +251,26 @@ public:
 	MM_Scavenger *scavenger;
 	void *_mainThreadTenureTLHRemainderBase;  /**< base and top pointers of the last unused tenure TLH copy cache, that will be loaded to thread env during main setup */
 	void *_mainThreadTenureTLHRemainderTop;
-#endif /* OMR_GC_MODRON_SCAVENGER */
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
 
 	J9Pool* environments;
 	MM_ExcessiveGCStats excessiveGCStats;
 #if defined(OMR_GC_MODRON_STANDARD) || defined(OMR_GC_REALTIME)
 	MM_GlobalGCStats globalGCStats;
-#endif /* OMR_GC_MODRON_STANDARD || OMR_GC_REALTIME */
+#endif /* defined(OMR_GC_MODRON_STANDARD) || defined(OMR_GC_REALTIME) */
 #if defined(OMR_GC_MODRON_SCAVENGER)
 	MM_ScavengerStats incrementScavengerStats; /**< scavengerStats for the current phase/increment; typically just used for reporting purposes */
 	MM_ScavengerStats scavengerStats; /**< cumulative scavengerStats for all phases/increments (STW and concurrent) within a single cycle; typically used for various heursitics at the end of GC */
 	MM_ScavengerCopyScanRatio copyScanRatio; /* Most recent estimate of ratio of aggregate slots copied to slots scanned in completeScan() */
-#endif /* OMR_GC_MODRON_SCAVENGER */
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
 #if defined(OMR_GC_VLHGC)
 	MM_GlobalVLHGCStats globalVLHGCStats; /**< Global summary of all GC activity for VLHGC */
-#endif /* OMR_GC_VLHGC */
+#endif /* defined(OMR_GC_VLHGC) */
 
 #if defined(OMR_GC_CONCURRENT_SWEEP)
 	/* Temporary move from the leaf implementation */
 	bool concurrentSweep;
-#endif /* OMR_GC_CONCURRENT_SWEEP */
+#endif /* defined(OMR_GC_CONCURRENT_SWEEP) */
 
 	bool largePageWarnOnError;
 	bool largePageFailOnError;
@@ -294,7 +292,7 @@ public:
 	uintptr_t freeOldHeapSizeOnLastGlobalGC;
 	float concurrentKickoffTenuringHeadroom; /**< percentage of free memory remaining in tenure heap. Used in conjunction with free memory to determine concurrent mark kickoff */
 	float tenureBytesDeviationBoost; /**< boost factor for tenuring deviation used for concurrent mark kickoff math */
-#endif /* OMR_GC_MODRON_SCAVENGER */
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
 #if defined(OMR_GC_REALTIME)
 	MM_RememberedSetSATB* sATBBarrierRememberedSet; /**< The snapshot at the beginning barrier remembered set used for the write barrier */
 #endif /* defined(OMR_GC_REALTIME) */
@@ -342,7 +340,7 @@ public:
 	bool _isVLHGC; /**< Is balanced GC policy */
 	bool _isMetronomeGC; /**< Is metronome GC policy */
 	bool _isStandardGC; /**< Is it one of standard GC policy */
-#endif /* OMR_GC_COMBINATION_SPEC */
+#endif /* defined(OMR_GC_COMBINATION_SPEC) */
 
 	uintptr_t tlhMinimumSize;
 	uintptr_t tlhMaximumSize;
@@ -378,7 +376,7 @@ public:
 	uintptr_t lastGlobalGCFreeBytesLOA; /**< records the LOA free memory size from after Global GC cycle */
 	ConcurrentMetering concurrentMetering;
 	uintptr_t minimumContractionRatio;
-#endif /* OMR_GC_LARGE_OBJECT_AREA */
+#endif /* defined(OMR_GC_LARGE_OBJECT_AREA) */
 
 	bool disableExplicitGC;
 	uintptr_t heapAlignment;
@@ -386,6 +384,7 @@ public:
 	uintptr_t absoluteMinimumNewSubSpaceSize;
 
 	float darkMatterCompactThreshold; /**< Value used to trigger compaction when dark matter ratio reaches this percentage of memory pools memory*/
+	float pageFragmentationCompactThreshold; /**< Enables compaction when page-fragmented memory and dark matter exceed this limit. The larger this number, the more memory can be fragmented before compact is triggered **/
 
 	uintptr_t parSweepChunkSize;
 	uintptr_t heapExpansionMinimumSize;
@@ -425,8 +424,8 @@ public:
 	bool fvtest_forcePoisonEvacuate; /**< if true poison Evacuate space with pattern at the end of scavenge */
 	bool fvtest_forceNurseryResize;
 	uintptr_t fvtest_nurseryResizeCounter;
-#endif /* OMR_GC_MODRON_SCAVENGER */
-#endif /* OMR_GC_MODRON_SCAVENGER || OMR_GC_VLHGC */
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) || defined(OMR_GC_VLHGC) */
 	bool fvtest_alwaysApplyOverflowRounding; /**< always round down the allocated heap as if overflow rounding were required */
 	uintptr_t fvtest_forceExcessiveAllocFailureAfter; /**< force excessive GC to occur after this many global GCs */
 	void* fvtest_verifyHeapAbove; /**< if non-NULL, will force start-up failure if any part of the heap is below this value */
@@ -459,7 +458,7 @@ public:
 
 #if defined(OMR_GC_BATCH_CLEAR_TLH)
 	uintptr_t batchClearTLH;
-#endif /* OMR_GC_BATCH_CLEAR_TLH */
+#endif /* defined(OMR_GC_BATCH_CLEAR_TLH) */
 	omrthread_monitor_t gcStatsMutex;
 	uintptr_t gcThreadCount; /**< Initial number of GC threads - chosen default or specified in java options*/
 	bool gcThreadCountForced; /**< true if number of GC threads is specified in java options. Currently we have a few ways to do this:
@@ -513,7 +512,7 @@ public:
 	uintptr_t concurrentScavengerSlack; /**< amount of bytes added on top of avearge allocated bytes during concurrent cycle, in calcualtion for survivor size */
 	float concurrentScavengerAllocDeviationBoost; /**< boost factor for allocate rate and its deviation, used for tilt calcuation in Concurrent Scavenger */
 	bool concurrentScavengeExhaustiveTermination; /**< control flag to enable/disable concurrent phase termination optimization using involing async mutator callbacks */
-#endif	/* OMR_GC_CONCURRENT_SCAVENGER */
+#endif	/* defined(OMR_GC_CONCURRENT_SCAVENGER) */
 	uintptr_t scavengerFailedTenureThreshold;
 	uintptr_t maxScavengeBeforeGlobal;
 	uintptr_t scvArraySplitMaximumAmount; /**< maximum number of elements to split array scanning work in the scavenger */
@@ -559,8 +558,8 @@ public:
 	};
 
 	HeapInitializationSplitHeapSection splitHeapSection; /**< Split Heap section to be requested */
-#endif /* OMR_GC_MODRON_SCAVENGER */
-#endif /* OMR_GC_MODRON_SCAVENGER || OMR_GC_VLHGC */
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) || defined(OMR_GC_VLHGC) */
 	double globalMaximumContraction; /**< maximum percentage of committed global heap which can contract in one GC cycle (set through -Xgc:globalMaximumContraction=) */
 	double globalMinimumContraction; /**< minimum percentage of committed global heap which can contract in one GC cycle (set through -Xgc:globalMinimumContraction=) */
 
@@ -586,7 +585,7 @@ public:
 	uintptr_t compactOnSystemGC;
 	uintptr_t nocompactOnSystemGC;
 	bool compactToSatisfyAllocate;
-#endif /* OMR_GC_MODRON_COMPACTION */
+#endif /* defined(OMR_GC_MODRON_COMPACTION) */
 
 	bool payAllocationTax;
 
@@ -608,7 +607,7 @@ public:
 	UDATA fvtest_forceConcurrentTLHMarkMapCommitFailureCounter; /**< Force failure at Concurrent TLH Mark Map commit operation counter */
 	UDATA fvtest_forceConcurrentTLHMarkMapDecommitFailure; /**< Force failure at Concurrent TLH Mark Map decommit operation */
 	UDATA fvtest_forceConcurrentTLHMarkMapDecommitFailureCounter; /**< Force failure at Concurrent TLH Mark Map decommit operation  counter */
-#endif /* OMR_GC_MODRON_CONCURRENT_MARK */
+#endif /* defined(OMR_GC_MODRON_CONCURRENT_MARK) */
 
 	UDATA fvtest_forceCardTableCommitFailure; /**< Force failure at Card Table commit operation */
 	UDATA fvtest_forceCardTableCommitFailureCounter; /**< Force failure at Card Table commit operation  counter */
@@ -660,7 +659,7 @@ public:
 	bool fixHeapForWalk; /**< configuration flag set by command line option or GC Check onload */
 	uintptr_t minArraySizeToSetAsScanned;
 	uintptr_t overflowCacheCount; /**< How many entries should there be in the environments local overflow cache */
-#endif /* OMR_GC_REALTIME */
+#endif /* defined(OMR_GC_REALTIME) */
 
 #if defined(OMR_GC_REALTIME)
 	bool concurrentSweepingEnabled; /**< if this is set, the sweep phase of GC will be run concurrently */
@@ -675,7 +674,7 @@ public:
 
 #if defined(OMR_GC_REALTIME) || defined(OMR_GC_SEGREGATED_HEAP)
 	uintptr_t managedAllocationContextCount; /**< The number of allocation contexts which will be instantiated and managed by the GlobalAllocationManagerRealtime (currently 2*cpu_count) */
-#endif /* OMR_GC_REALTIME || OMR_GC_SEGREGATED_HEAP */
+#endif /* defined(OMR_GC_REALTIME) || defined(OMR_GC_SEGREGATED_HEAP) */
 
 #if defined(OMR_GC_SEGREGATED_HEAP)
 	MM_SizeClasses* defaultSizeClasses;
@@ -818,7 +817,7 @@ public:
 	uintptr_t tarokTargetMaxPauseTime; /**< An optional, user specified soft max pause time for PGC's in balanced GC*/
 #if defined(OMR_GC_VLHGC_CONCURRENT_COPY_FORWARD)
 	bool _isConcurrentCopyForward;
-#endif
+#endif /* defined(OMR_GC_VLHGC_CONCURRENT_COPY_FORWARD) */
 	enum TarokRegionTailCondidateListSortOrder {
 		SORT_ORDER_NOORDER = 0,
 		SORT_ORDER_ASCENDING,
@@ -854,12 +853,12 @@ public:
 
 	bool pretouchHeapOnExpand; /**< True to pretouch memory during initial heap inflation or heap expansion */
 
+	uintptr_t decommitMinimumFree; /**< percentage of free heap to be retained as committed, default=0 for gencon, complete tenture free memory will be decommitted */
+
 #if defined(OMR_GC_IDLE_HEAP_MANAGER)
-	uintptr_t idleMinimumFree;   /**< percentage of free heap to be retained as committed, default=0 for gencon, complete tenture free memory will be decommitted */
 	bool gcOnIdle; /**< Enables releasing free heap pages if true while systemGarbageCollect invoked with IDLE GC code, default is false */
 	bool compactOnIdle; /**< Forces compaction if global GC executed while VM Runtime State set to IDLE, default is false */
-	float gcOnIdleCompactThreshold; /**< Enables compaction when fragmented memory and dark matter exceed this limit. The larger this number, the more memory can be fragmented before compact is triggered **/
-#endif
+#endif /* defined(OMR_GC_IDLE_HEAP_MANAGER) */
 
 #if defined(OMR_VALGRIND_MEMCHECK)
 	uintptr_t valgrindMempoolAddr; /**< Memory pool's address for valgrind **/
@@ -924,9 +923,9 @@ public:
 		if (isStandardGC()) {
 #if defined(OMR_GC_MODRON_SCAVENGER)
 			return static_cast<MM_SublistPool>(rememberedSet).countElements();
-#else
+#else /* defined(OMR_GC_MODRON_SCAVENGER) */
 			return 0;
-#endif /* OMR_GC_MODRON_SCAVENGER */
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
 		} else {
 			return 0;
 		}
@@ -948,7 +947,7 @@ public:
 	{
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
 		return concurrentScavenger;
-#else
+#else /* defined(OMR_GC_CONCURRENT_SCAVENGER) */
 		return false;
 #endif /* defined(OMR_GC_CONCURRENT_SCAVENGER) */
 	}
@@ -958,7 +957,7 @@ public:
 	{
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
 		return concurrentScavengerHWSupport;
-#else
+#else /* defined(OMR_GC_CONCURRENT_SCAVENGER) */
 		return false;
 #endif /* defined(OMR_GC_CONCURRENT_SCAVENGER) */
 	}
@@ -968,7 +967,7 @@ public:
    {
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
       return softwareRangeCheckReadBarrier;
-#else
+#else /* defined(OMR_GC_CONCURRENT_SCAVENGER) */
       return false;
 #endif /* defined(OMR_GC_CONCURRENT_SCAVENGER) */
    }
@@ -980,8 +979,22 @@ public:
 	{
 #if defined(OMR_GC_MODRON_SCAVENGER)
 		return scavengerEnabled;
-#else
+#else /* defined(OMR_GC_MODRON_SCAVENGER) */
 		return false;
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
+	}
+
+	virtual void registerScavenger(MM_Scavenger *scavenger)
+	{
+#if defined(OMR_GC_MODRON_SCAVENGER)
+		this->scavenger = scavenger;
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
+	}
+
+	virtual void unregisterScavenger()
+	{
+#if defined(OMR_GC_MODRON_SCAVENGER)
+		scavenger = NULL;
 #endif /* defined(OMR_GC_MODRON_SCAVENGER) */
 	}
 
@@ -990,7 +1003,7 @@ public:
 	{
 #if defined(OMR_GC_MODRON_CONCURRENT_MARK)
 		return concurrentMark;
-#else
+#else /* defined(OMR_GC_MODRON_CONCURRENT_MARK) */
 		return false;
 #endif /* defined(OMR_GC_MODRON_CONCURRENT_MARK) */
 	}
@@ -1000,7 +1013,7 @@ public:
 	{
 #if defined(OMR_GC_CONCURRENT_SWEEP)
 		return concurrentSweep;
-#else
+#else /* defined(OMR_GC_CONCURRENT_SWEEP) */
 		return false;
 #endif /* defined(OMR_GC_CONCURRENT_SWEEP) */
 	}
@@ -1010,11 +1023,11 @@ public:
 	{
 #if defined(OMR_GC_COMBINATION_SPEC)
 		return _isSegregatedHeap;
-#elif defined(OMR_GC_SEGREGATED_HEAP)
+#elif defined(OMR_GC_SEGREGATED_HEAP) /* defined(OMR_GC_COMBINATION_SPEC) */
 		return true;
-#else
+#else /* defined(OMR_GC_SEGREGATED_HEAP) */
 		return false;
-#endif
+#endif /* defined(OMR_GC_COMBINATION_SPEC) */
 	}
 
 	MMINLINE void
@@ -1022,7 +1035,7 @@ public:
 	{
 #if defined(OMR_GC_COMBINATION_SPEC)
 		_isSegregatedHeap = value;
-#endif
+#endif /* defined(OMR_GC_COMBINATION_SPEC) */
 	}
 
 	MMINLINE bool
@@ -1030,11 +1043,11 @@ public:
 	{
 #if defined(OMR_GC_COMBINATION_SPEC)
 		return _isVLHGC;
-#elif defined(OMR_GC_VLHGC)
+#elif defined(OMR_GC_VLHGC) /* defined(OMR_GC_COMBINATION_SPEC) */
 		return true;
-#else
+#else /* defined(OMR_GC_VLHGC) */
 		return false;
-#endif
+#endif /* defined(OMR_GC_COMBINATION_SPEC) */
 	}
 
 	MMINLINE void
@@ -1042,7 +1055,7 @@ public:
 	{
 #if defined(OMR_GC_COMBINATION_SPEC)
 		_isVLHGC = value;
-#endif
+#endif /* defined(OMR_GC_COMBINATION_SPEC) */
 	}
 
 	MMINLINE bool
@@ -1050,7 +1063,7 @@ public:
 	{
 #if defined(OMR_GC_VLHGC_CONCURRENT_COPY_FORWARD)
 		return _isConcurrentCopyForward;
-#else
+#else /* defined(OMR_GC_VLHGC_CONCURRENT_COPY_FORWARD) */
 		return false;
 #endif /* defined(OMR_GC_VLHGC_CONCURRENT_COPY_FORWARD) */
 	}
@@ -1060,11 +1073,11 @@ public:
 	{
 #if defined(OMR_GC_COMBINATION_SPEC)
 		return _isMetronomeGC;
-#elif defined(OMR_GC_REALTIME)
+#elif defined(OMR_GC_REALTIME) /* defined(OMR_GC_COMBINATION_SPEC) */
 		return true;
-#else
+#else /* defined(OMR_GC_REALTIME) */
 		return false;
-#endif
+#endif /* defined(OMR_GC_COMBINATION_SPEC) */
 	}
 
 	MMINLINE void
@@ -1072,7 +1085,7 @@ public:
 	{
 #if defined(OMR_GC_COMBINATION_SPEC)
 		_isMetronomeGC = value;
-#endif
+#endif /* defined(OMR_GC_COMBINATION_SPEC) */
 	}
 
 	MMINLINE bool
@@ -1080,11 +1093,11 @@ public:
 	{
 #if defined(OMR_GC_COMBINATION_SPEC)
 		return _isStandardGC;
-#elif defined(OMR_GC_MODRON_STANDARD)
+#elif defined(OMR_GC_MODRON_STANDARD) /* defined(OMR_GC_COMBINATION_SPEC) */
 		return true;
-#else
+#else /* defined(OMR_GC_MODRON_STANDARD) */
 		return false;
-#endif
+#endif /* defined(OMR_GC_COMBINATION_SPEC) */
 	}
 
 	MMINLINE void
@@ -1092,7 +1105,7 @@ public:
 	{
 #if defined(OMR_GC_COMBINATION_SPEC)
 		_isStandardGC = value;
-#endif
+#endif /* defined(OMR_GC_COMBINATION_SPEC) */
 	}
 
 	MMINLINE J9HookInterface** getPrivateHookInterface() { return J9_HOOK_INTERFACE(privateHookInterface); }
@@ -1102,49 +1115,109 @@ public:
 
 	MMINLINE MM_Heap* getHeap() { return heap; }
 
-#if defined(OMR_GC_MODRON_SCAVENGER)
 	MMINLINE void
 	setGuaranteedNurseryRange(void* start, void* end)
 	{
+#if defined(OMR_GC_MODRON_SCAVENGER)
 		_guaranteedNurseryStart = start;
 		_guaranteedNurseryEnd = end;
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
 	}
 
 	MMINLINE void
 	getGuaranteedNurseryRange(void** start, void** end)
 	{
+#if defined(OMR_GC_MODRON_SCAVENGER)
 		*start = _guaranteedNurseryStart;
 		*end = _guaranteedNurseryEnd;
+#else /* defined(OMR_GC_MODRON_SCAVENGER) */
+		*start = NULL;
+		*end = NULL;
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
 	}
 
-	MMINLINE bool isRememberedSetInOverflowState() { return _isRememberedSetInOverflow; }
-	MMINLINE void setRememberedSetOverflowState() { _isRememberedSetInOverflow = true; }
-	MMINLINE void clearRememberedSetOverflowState() { _isRememberedSetInOverflow = false; }
+	MMINLINE bool
+	isScavengerRememberedSetInOverflowState()
+	{
+#if defined(OMR_GC_MODRON_SCAVENGER)
+		return _isRememberedSetInOverflow;
+#else /* defined(OMR_GC_MODRON_SCAVENGER) */
+		return false;
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
+	}
 
-	MMINLINE void setScavengerBackOutState(BackOutState backOutState) { _backOutState = backOutState; }
-	MMINLINE BackOutState getScavengerBackOutState() { return _backOutState; }
-	MMINLINE bool isScavengerBackOutFlagRaised() { return backOutFlagCleared < _backOutState; }
+	MMINLINE void
+	setScavengerRememberedSetOverflowState()
+	{
+#if defined(OMR_GC_MODRON_SCAVENGER)
+		_isRememberedSetInOverflow = true;
+#endif /* OMR_GC_MODRON_SCAVENGER */
+	}
 
-	MMINLINE bool shouldScavengeNotifyGlobalGCOfOldToOldReference() { return _concurrentGlobalGCInProgress; }
-	MMINLINE void setConcurrentGlobalGCInProgress(bool inProgress) { _concurrentGlobalGCInProgress = inProgress; }
+	MMINLINE void
+	clearScavengerRememberedSetOverflowState()
+	{
+#if defined(OMR_GC_MODRON_SCAVENGER)
+		_isRememberedSetInOverflow = false;
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
+	}
+
+	MMINLINE bool
+	isScavengerBackOutFlagRaised()
+	{
+#if defined(OMR_GC_MODRON_SCAVENGER)
+		return backOutFlagCleared < _backOutState;
+#else /* defined(OMR_GC_MODRON_SCAVENGER) */
+		return false;
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
+	}
+
+	MMINLINE void
+	setConcurrentGlobalGCInProgress(bool inProgress)
+	{
+#if defined(OMR_GC_MODRON_SCAVENGER)
+		_concurrentGlobalGCInProgress = inProgress;
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
+	}
+
+#if defined(OMR_GC_MODRON_SCAVENGER)
+	MMINLINE void
+	setScavengerBackOutState(BackOutState backOutState)
+	{
+		_backOutState = backOutState;
+	}
+
+	MMINLINE BackOutState
+	getScavengerBackOutState()
+	{
+		return _backOutState;
+	}
+
+	MMINLINE bool
+	shouldScavengeNotifyGlobalGCOfOldToOldReference()
+	{
+		return _concurrentGlobalGCInProgress;
+	}
 
 	/**
 	 * Determine whether Adaptive Threading is enabled. AdaptiveGCThreading flag
 	 * is not sufficient; Adaptive threading must be ignored if GC thread count is forced.
 	 * @return TRUE if adaptive threading routines can proceed, FALSE otherwise
 	 */
-	MMINLINE bool adaptiveThreadingEnabled()
+	MMINLINE bool
+	adaptiveThreadingEnabled()
 	{
 		return (adaptiveGCThreading && !gcThreadCountForced);
 	}
-#endif /* OMR_GC_MODRON_SCAVENGER */
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
 
 	/**
 	 * Returns TRUE if an object is old, FALSE otherwise.
 	 * @param objectPtr Pointer to an object
 	 * @return TRUE if an object is in the old area, FALSE otherwise
 	 */
-	MMINLINE bool isOld(omrobjectptr_t objectPtr)
+	MMINLINE bool
+	isOld(omrobjectptr_t objectPtr)
 	{
 		return ((uintptr_t)objectPtr - (uintptr_t)_tenureBase) < _tenureSize;
 	}
@@ -1155,7 +1228,8 @@ public:
 	 * @param topSlotPtr Pointer to first slot >= baseSlotPtr and NOT in range
 	 * @return TRUE if entire range is in the old area, FALSE otherwise
 	 */
-	MMINLINE bool isOld(void *baseSlotPtr, void *topSlotPtr)
+	MMINLINE bool
+	isOld(void *baseSlotPtr, void *topSlotPtr)
 	{
 		return ((uintptr_t)baseSlotPtr >= (uintptr_t)_tenureBase) && ((uintptr_t)topSlotPtr - (uintptr_t)_tenureBase) < _tenureSize;
 	}
@@ -1210,7 +1284,7 @@ public:
 	{
 		return isFvtestForce(&fvtest_forceConcurrentTLHMarkMapDecommitFailure, &fvtest_forceConcurrentTLHMarkMapDecommitFailureCounter);
 	}
-#endif /* OMR_GC_MODRON_CONCURRENT_MARK */
+#endif /* defined(OMR_GC_MODRON_CONCURRENT_MARK) */
 
 	MMINLINE bool
 	isFvtestForceCardTableCommitFailure()
@@ -1392,7 +1466,7 @@ public:
 		, concurrentScavengerPageSectionSize(0)
 		, concurrentScavengerPageStartAddress((void *)UDATA_MAX)
 #endif /* defined(OMR_GC_CONCURRENT_SCAVENGER) */
-#endif /* OMR_GC_MODRON_SCAVENGER */
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
 #if defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)
 		, _compressObjectReferences(false)
 #endif /* defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS) */
@@ -1411,7 +1485,7 @@ public:
 		, scavenger(NULL)
 		, _mainThreadTenureTLHRemainderBase(NULL)
 		, _mainThreadTenureTLHRemainderTop(NULL)
-#endif /* OMR_GC_MODRON_SCAVENGER */
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
 		, environments(NULL)
 		, excessiveGCStats()
 #if defined(OMR_GC_MODRON_STANDARD) || defined(OMR_GC_REALTIME)
@@ -1421,20 +1495,20 @@ public:
 		, incrementScavengerStats()
 		, scavengerStats()
 		, copyScanRatio()
-#endif /* OMR_GC_MODRON_SCAVENGER */
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
 #if defined(OMR_GC_VLHGC)
 		, globalVLHGCStats()
-#endif /* OMR_GC_VLHGC */
+#endif /* defined(OMR_GC_VLHGC) */
 #if defined(OMR_GC_CONCURRENT_SWEEP)
 		, concurrentSweep(false)
-#endif /* OMR_GC_CONCURRENT_SWEEP */
+#endif /* defined(OMR_GC_CONCURRENT_SWEEP) */
 		, largePageWarnOnError(false)
 		, largePageFailOnError(false)
 		, largePageFailedToSatisfy(false)
 #if defined(OMR_GC_DOUBLE_MAP_ARRAYLETS)
 		, isArrayletDoubleMapRequested(false)
 		, isArrayletDoubleMapAvailable(false)
-#endif /* OMR_GC_DOUBLE_MAP_ARRAYLETS */
+#endif /* defined(OMR_GC_DOUBLE_MAP_ARRAYLETS) */
 		, isVirtualLargeObjectHeapRequested(false)
 		, isVirtualLargeObjectHeapEnabled(false)
 		, requestedPageSize(0)
@@ -1447,7 +1521,7 @@ public:
 		, freeOldHeapSizeOnLastGlobalGC(UDATA_MAX)
 		, concurrentKickoffTenuringHeadroom((float)0.02)
 		, tenureBytesDeviationBoost((float)2)
-#endif /* OMR_GC_MODRON_SCAVENGER */
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
 #if defined(OMR_GC_REALTIME)
 		, sATBBarrierRememberedSet(NULL)
 #endif /* defined(OMR_GC_REALTIME) */
@@ -1481,7 +1555,7 @@ public:
 		, _isVLHGC(false)
 		, _isMetronomeGC(false)
 		, _isStandardGC(false)
-#endif /* OMR_GC_COMBINATION_SPEC */
+#endif /* defined(OMR_GC_COMBINATION_SPEC) */
 		, tlhMinimumSize(MINIMUM_TLH_SIZE)
 		, tlhMaximumSize(131072)
 		, tlhInitialSize(2048)
@@ -1507,12 +1581,13 @@ public:
 		, lastGlobalGCFreeBytesLOA(0)
 		, concurrentMetering(METER_BY_SOA)
 		, minimumContractionRatio(DEFAULT_MINIMUM_CONTRACTION_RATIO)
-#endif /* OMR_GC_LARGE_OBJECT_AREA */
+#endif /* defined(OMR_GC_LARGE_OBJECT_AREA) */
 		, disableExplicitGC(false)
 		, heapAlignment(HEAP_ALIGNMENT)
 		, absoluteMinimumOldSubSpaceSize(MINIMUM_OLD_SPACE_SIZE)
 		, absoluteMinimumNewSubSpaceSize(MINIMUM_NEW_SPACE_SIZE)
 		, darkMatterCompactThreshold((float)0.15)
+		, pageFragmentationCompactThreshold((float)0.10)
 		, parSweepChunkSize(0)
 		, heapExpansionMinimumSize(1024 * 1024)
 		, heapExpansionMaximumSize(0)
@@ -1543,8 +1618,8 @@ public:
 		, fvtest_forcePoisonEvacuate(0)
 		, fvtest_forceNurseryResize(0)
 		, fvtest_nurseryResizeCounter(0)
-#endif /* OMR_GC_MODRON_SCAVENGER */
-#endif /* OMR_GC_MODRON_SCAVENGER || OMR_GC_VLHGC */
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) || defined(OMR_GC_VLHGC) */
 		, fvtest_alwaysApplyOverflowRounding(0)
 		, fvtest_forceExcessiveAllocFailureAfter(0)
 		, fvtest_verifyHeapAbove(0)
@@ -1572,7 +1647,7 @@ public:
 		, softMx(0) /* softMx only set if specified */
 #if defined(OMR_GC_BATCH_CLEAR_TLH)
 		, batchClearTLH(0)
-#endif /* OMR_GC_BATCH_CLEAR_TLH */
+#endif /* defined(OMR_GC_BATCH_CLEAR_TLH) */
 		, gcThreadCount(0)
 		, gcThreadCountForced(false)
 		, dispatcherHybridNotifyThreadBound(16)
@@ -1593,7 +1668,7 @@ public:
 		, maxHotFieldListLength(10)
 		, minCpuUtil (1)
 		/* End of options relating to dynamicBreadthFirstScanOrdering */
-#endif /* OMR_GC_MODRON_SCAVENGER || OMR_GC_VLHGC */
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) || defined(OMR_GC_VLHGC) */
 #if defined(OMR_GC_MODRON_SCAVENGER)
 		, scvTenureRatioHigh(OMR_SCV_TENURE_RATIO_HIGH)
 		, scvTenureRatioLow(OMR_SCV_TENURE_RATIO_LOW)
@@ -1652,7 +1727,7 @@ public:
 		, adaptiveThreadingWeightActiveThreads(0.50f)
 		, adaptiveThreadBooster(0.85f)
 		, splitHeapSection(HEAP_INITIALIZATION_SPLIT_HEAP_UNKNOWN)
-#endif /* OMR_GC_MODRON_SCAVENGER */
+#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
 		, globalMaximumContraction(0.05) /* by default, contract must be at most 5% of the committed heap */
 		, globalMinimumContraction(0.01) /* by default, contract must be at least 1% of the committed heap */
 		, excessiveGCEnabled()
@@ -1674,7 +1749,7 @@ public:
 		, compactOnSystemGC(0)
 		, nocompactOnSystemGC(0)
 		, compactToSatisfyAllocate(false)
-#endif /* OMR_GC_MODRON_COMPACTION */
+#endif /* defined(OMR_GC_MODRON_COMPACTION) */
 		, payAllocationTax(false)
 #if defined(OMR_GC_MODRON_CONCURRENT_MARK)
 		, concurrentMark(false)
@@ -1692,7 +1767,7 @@ public:
 		, fvtest_forceConcurrentTLHMarkMapCommitFailureCounter(0)
 		, fvtest_forceConcurrentTLHMarkMapDecommitFailure(0)
 		, fvtest_forceConcurrentTLHMarkMapDecommitFailureCounter(0)
-#endif /* OMR_GC_MODRON_CONCURRENT_MARK */
+#endif /* defined(OMR_GC_MODRON_CONCURRENT_MARK) */
 		, fvtest_forceCardTableCommitFailure(0)
 		, fvtest_forceCardTableCommitFailureCounter(0)
 		, fvtest_forceCardTableDecommitFailure(0)
@@ -1870,11 +1945,10 @@ public:
 		, trackMutatorThreadCategory(false)
 		, darkMatterSampleRate(32)
 		, pretouchHeapOnExpand(false)
+		, decommitMinimumFree(0)
 #if defined(OMR_GC_IDLE_HEAP_MANAGER)
-		, idleMinimumFree(0)
 		, gcOnIdle(false)
 		, compactOnIdle(false)
-		, gcOnIdleCompactThreshold((float)0.10)
 #endif /* defined(OMR_GC_IDLE_HEAP_MANAGER) */
 #if defined(OMR_VALGRIND_MEMCHECK)
 		, valgrindMempoolAddr(0)

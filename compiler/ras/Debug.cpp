@@ -596,6 +596,12 @@ TR_Debug::vtrace(const char * format, va_list args)
    if (_file != NULL)
       {
       char buffer[256];
+      if ((0 != TR::Options::_traceFileLength) &&
+          (static_cast<int64_t>(TR::IO::ftell(_file)) > (static_cast<int64_t>(TR::Options::_traceFileLength) << 20)))
+         {
+         TR::IO::fseek(_file, 0, SEEK_SET); // rewind the trace file
+         TR::IO::fprintf(_file, "Rewind trace file ...\n\n\n");
+         }
       TR::IO::vfprintf(_file, getDiagnosticFormat(format, buffer, sizeof(buffer)), args);
       trfflush(_file);
       }
@@ -941,10 +947,30 @@ TR_Debug::containingClass(TR::SymbolReference *symRef)
    return NULL;
    }
 
-
 void
 TR_Debug::nodePrintAllFlags(TR::Node *node, TR_PrettyPrinterString &output)
    {
+   // This guard info is not strictly speaking in the node flags anymore, but
+   // with the node flags is a good place to show it.
+   TR_VirtualGuard *guard = node->virtualGuardInfo();
+   if (guard != NULL)
+      {
+      const char *kind = getVirtualGuardKindName(guard->getKind());
+      const char *testType = getVirtualGuardTestTypeName(guard->getTestType());
+      output.appendf("%s/%s", kind, testType);
+
+      if (guard->mergedWithHCRGuard())
+         output.appends("+HCRGuard");
+
+      if (guard->mergedWithOSRGuard())
+         output.appends("+OSRGuard");
+
+      if (!guard->getInnerAssumptions().isEmpty())
+         output.appends("+inner");
+
+      output.appends(" ");
+      }
+
    char *format = "%s";
 
    output.appendf(format, node->printHasFoldedImplicitNULLCHK());
@@ -975,17 +1001,7 @@ TR_Debug::nodePrintAllFlags(TR::Node *node, TR_PrettyPrinterString &output)
    output.appendf(format, node->printContainsCompressionSequence());
    output.appendf(format, node->printIsInternalPointer());
    output.appendf(format, node->printIsMaxLoopIterationGuard());
-   output.appendf(format, node->printIsProfiledGuard()     );
-   output.appendf(format, node->printIsInterfaceGuard()    );
-   output.appendf(format, node->printIsAbstractGuard()     );
-   output.appendf(format, node->printIsHierarchyGuard()    );
-   output.appendf(format, node->printIsNonoverriddenGuard());
-   output.appendf(format, node->printIsSideEffectGuard()   );
-   output.appendf(format, node->printIsDummyGuard()        );
-   output.appendf(format, node->printIsHCRGuard()          );
-   output.appendf(format, node->printIsOSRGuard()          );
-   output.appendf(format, node->printIsBreakpointGuard()          );
-   output.appendf(format, node->printIsMutableCallSiteTargetGuard() );
+   output.appendf(format, node->printVFTEntryIsInBounds());
    output.appendf(format, node->printIsByteToByteTranslate());
    output.appendf(format, node->printIsByteToCharTranslate());
    output.appendf(format, node->printIsCharToByteTranslate());
@@ -1055,7 +1071,6 @@ TR_Debug::nodePrintAllFlags(TR::Node *node, TR_PrettyPrinterString &output)
    output.appendf(format, node->printCannotTrackLocalStringUses());
    output.appendf(format, node->printCharArrayTRT());
    output.appendf(format, node->printEscapesInColdBlock());
-   output.appendf(format, node->printIsDirectMethodGuard());
 #ifdef J9_PROJECT_SPECIFIC
    output.appendf(format, node->printIsDontInlineUnsafePutOrderedCall());
 #endif
@@ -1063,7 +1078,6 @@ TR_Debug::nodePrintAllFlags(TR::Node *node, TR_PrettyPrinterString &output)
    output.appendf(format, node->printIsHeapificationAlloc());
    output.appendf(format, node->printIsIdentityless());
    output.appendf(format, node->printIsLiveMonitorInitStore());
-   output.appendf(format, node->printIsMethodEnterExitGuard());
    output.appendf(format, node->printReturnIsDummy());
 #ifdef J9_PROJECT_SPECIFIC
    output.appendf(format, node->printSharedMemory());
@@ -1240,7 +1254,7 @@ TR_Debug::print(TR::SymbolReference * symRef, TR_PrettyPrinterString& output, bo
 
    numSpaces = getNumSpacesAfterIndex( symRef->getReferenceNumber(), getIntLength(_comp->getSymRefTab()->baseArray.size()) );
 
-      symRefNum.appendf("#%d", symRef->getReferenceNumber());
+   symRefNum.appendf("#%d", symRef->getReferenceNumber());
 
    if (verbose)
       {
@@ -1966,6 +1980,18 @@ TR_Debug::getStaticName(TR::SymbolReference * symRef)
 
       if (sym->isConst())
          return "<constant>";
+
+      // Value Type default value instance slot address
+      if (sym->isStaticDefaultValueInstance() && staticAddress)
+         {
+         if (_comp->getOption(TR_MaskAddresses))
+            return "*Masked*";
+
+         const uint8_t EXTRA_SPACE = 5;
+         char * name = (char *)_comp->trMemory()->allocateHeapMemory(TR::Compiler->debug.pointerPrintfMaxLenInChars()+EXTRA_SPACE);
+         sprintf(name, POINTER_PRINTF_FORMAT, staticAddress);
+         return name;
+         }
 
       return getOwningMethod(symRef)->staticName(symRef->getCPIndex(), comp()->trMemory());
       }
@@ -3013,6 +3039,7 @@ TR_Debug::getRegisterKindName(TR_RegisterKinds rk)
       {
       case TR_GPR:   return "GPR";
       case TR_FPR:   return "FPR";
+      case TR_VMR:   return "VMR";
       case TR_CCR:   return "CCR";
       case TR_X87:   return "X87";
       case TR_VRF:   return "VRF";
@@ -3496,7 +3523,7 @@ void
 TR_Debug::dump(TR::FILE *pOutFile, TR_CHTable * chTable)
    {
    if (pOutFile == NULL) return;
-   TR::list<TR_VirtualGuard*> &vguards = _comp->getVirtualGuards();
+   const TR::Compilation::GuardSet &vguards = _comp->getVirtualGuards();
 
    if (!chTable->_preXMethods && !chTable->_classes &&
        vguards.empty()) return;
@@ -4726,6 +4753,18 @@ TR_Debug::traceRegisterAssignment(TR::Instruction *instr, bool insertedByRA, boo
                   }
                trfprintf(_file, "</fprs>\n");
                }
+
+            if (_registerKindsToAssign & TR_VMR_Mask)
+               {
+               trfprintf(_file, "<vmrs>\n");
+               TR::RegisterIterator *iter = _comp->cg()->getVMRegisterIterator();
+               for (TR::Register *vmr = iter->getFirst(); vmr; vmr = iter->getNext())
+                  {
+                  printFullRegInfo(_file, vmr);
+                  }
+               trfprintf(_file, "</vmrs>\n");
+               }
+
             trfprintf(_file, "</regstates>\n");
             }
          trfprintf(_file, "\n");

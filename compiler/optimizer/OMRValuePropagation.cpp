@@ -7188,6 +7188,7 @@ void OMR::ValuePropagation::transformUnknownTypeArrayCopy(TR_TreeTopWrtBarFlag *
 static void changeBranchToGoto(OMR::ValuePropagation *vp, TR::Node *guardNode, TR::Block *guard)
    {
    // change the if to goto
+   guardNode->setVirtualGuardInfo(NULL, vp->comp());
    TR::Node::recreate(guardNode, TR::Goto);
    guardNode->getFirstChild()->recursivelyDecReferenceCount();
    guardNode->getSecondChild()->recursivelyDecReferenceCount();
@@ -7233,6 +7234,13 @@ void OMR::ValuePropagation::constrainRecognizedMethod(TR::Node *node)
 bool OMR::ValuePropagation::transformDirectLoad(TR::Node *node)
    {
    return TR::TransformUtil::transformDirectLoad(comp(), node);
+   }
+
+bool OMR::ValuePropagation::isUnreliableSignatureType(
+   TR_OpaqueClassBlock *klass, TR_OpaqueClassBlock *&erased)
+   {
+   erased = klass;
+   return false;
    }
 
 bool OMR::ValuePropagation::checkAllUnsafeReferences(TR::Node *node, vcount_t visitCount)
@@ -7717,30 +7725,6 @@ void OMR::ValuePropagation::doDelayedTransformations()
          }
       }
    _devirtualizedCalls.setFirst(0);
-
-
-   for (VirtualGuardInfo *cvg = _convertedGuards.getFirst(); cvg; cvg = cvg->getNext())
-      {
-      if(cvg->_block->nodeIsRemoved())
-         continue;
-
-      //IL part
-      TR::Node* oldNode = cvg->_currentTree->getNode();
-
-      // !oldNode means that the branch was already removed
-      if (!oldNode || !performTransformation(comp(), "%sReplacing the old guard %p with the shiny new overridden guard %p at treetop %p\n", OPT_DETAILS, oldNode, cvg->_newGuardNode, cvg->_currentTree))
-         {
-         continue;
-         }
-
-      oldNode->recursivelyDecReferenceCount();
-      cvg->_currentTree->setNode(cvg->_newGuardNode);
-      //Guards clean up
-      comp()->removeVirtualGuard(comp()->findVirtualGuardInfo(oldNode));
-      comp()->addVirtualGuard(cvg->_newVirtualGuard);
-      //
-      }
-   _convertedGuards.setFirst(0);
 
 #ifdef J9_PROJECT_SPECIFIC
    ListIterator<TR::Node> nodesIt(&_javaLangClassGetComponentTypeCalls);

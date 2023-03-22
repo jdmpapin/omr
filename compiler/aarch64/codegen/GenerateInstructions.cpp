@@ -264,6 +264,15 @@ TR::Instruction *generateCondTrg1Src2Instruction(TR::CodeGenerator *cg, TR::Inst
    return new (cg->trHeapMemory()) TR::ARM64CondTrg1Src2Instruction(op, node, treg, s1reg, s2reg, cc, cond, cg);
    }
 
+TR::Instruction *generateTrg1Src2ImmInstruction(TR::CodeGenerator *cg, TR::InstOpCode::Mnemonic op, TR::Node *node,
+   TR::Register *treg, TR::Register *s1reg, TR::Register *s2reg,
+   uint32_t imm, TR::Instruction *preced)
+   {
+   if (preced)
+      return new (cg->trHeapMemory()) TR::ARM64Trg1Src2ImmInstruction(op, node, treg, s1reg, s2reg, imm, preced, cg);
+   return new (cg->trHeapMemory()) TR::ARM64Trg1Src2ImmInstruction(op, node, treg, s1reg, s2reg, imm, cg);
+   }
+
 TR::Instruction *generateTrg1Src2ShiftedInstruction(TR::CodeGenerator *cg, TR::InstOpCode::Mnemonic op, TR::Node *node,
    TR::Register *treg, TR::Register *s1reg, TR::Register *s2reg,
    TR::ARM64ShiftCode shiftType, uint32_t shiftAmount, TR::Instruction *preced)
@@ -625,19 +634,56 @@ TR::Instruction *generateUBFIZInstruction(TR::CodeGenerator *cg, TR::Node *node,
    return generateTrg1Src1ImmInstruction(cg, is64bit ? TR::InstOpCode::ubfmx : TR::InstOpCode::ubfmw, node, treg, sreg, (immr << 6) | imms, preced);
    }
 
+TR::Instruction *generateBFIInstruction(TR::CodeGenerator *cg, TR::Node *node,
+   TR::Register *treg, TR::Register *sreg, uint32_t lsb, uint32_t width, bool is64bit, TR::Instruction *preced)
+   {
+   uint32_t imms = width - 1;
+   uint32_t immr = (is64bit ? 64 : 32) - lsb;
+   TR_ASSERT_FATAL((is64bit && (immr <= 63) && (imms <= 63)) || ((!is64bit) && (immr <= 31) && (imms <= 31)),
+                   "immediate field for bfm is out of range: is64bit=%d, immr=%d, imms=%d", is64bit, immr, imms);
+   return generateTrg1Src1ImmInstruction(cg, is64bit ? TR::InstOpCode::bfmx : TR::InstOpCode::bfmw, node, treg, sreg, (immr << 6) | imms, preced);
+   }
+
 TR::Instruction *generateVectorShiftImmediateInstruction(TR::CodeGenerator *cg, TR::InstOpCode::Mnemonic op, TR::Node *node,
    TR::Register *treg, TR::Register *sreg, uint32_t shiftAmount, TR::Instruction *preced)
    {
-   TR_ASSERT_FATAL_WITH_NODE(node, (op >= TR::InstOpCode::vshl16b) && (op <= TR::InstOpCode::vushr2d), "Illegal opcode for generateVectorShiftImmediateInstruction: %d", op);
+   TR_ASSERT_FATAL_WITH_NODE(node, (op >= TR::InstOpCode::vshl16b) && (op <= TR::InstOpCode::vsri2d), "Illegal opcode for generateVectorShiftImmediateInstruction: %d", op);
 
-   bool isShiftLeft = (op <= TR::InstOpCode::vushll2_2d);
-   uint32_t immh = (TR::InstOpCode::getOpCodeBinaryEncoding(op) >> 19) & 0xf;
+   bool isShiftLeft = (op <= TR::InstOpCode::vsli2d);
+   const auto opcodeBinaryEncoding = TR::InstOpCode::getOpCodeBinaryEncoding(op);
+   /* If bit 11 - 15 is 0b100xx, then it is a variant of shift right narrow instructions. */
+   const bool isShiftRightNarrow = ((opcodeBinaryEncoding >> 11) & 0x1c) == 0x10;
+   uint32_t immh = (opcodeBinaryEncoding >> 19) & 0xf;
    uint32_t elementSize = 8 << (31 - leadingZeroes(immh));
    TR_ASSERT_FATAL_WITH_NODE(node, (elementSize == 8) || (elementSize == 16) || (elementSize == 32) || (elementSize == 64), "Illegal element size: %d", elementSize);
-   TR_ASSERT_FATAL_WITH_NODE(node, (shiftAmount >= 0) && (shiftAmount < elementSize), "Illegal shift amount: %d", shiftAmount);
+   const uint32_t shiftAmountLowerLimit = isShiftRightNarrow ? 1 : 0;
+   const uint32_t shiftAmountUpperLimit = isShiftRightNarrow ? elementSize : elementSize - 1;
+   TR_ASSERT_FATAL_WITH_NODE(node, (shiftAmount >= shiftAmountLowerLimit) && (shiftAmount <= shiftAmountUpperLimit), "Illegal shift amount: %d", shiftAmount);
 
    uint32_t imm = isShiftLeft ? (shiftAmount + elementSize) : (elementSize * 2 - shiftAmount);
    return generateTrg1Src1ImmInstruction(cg, op, node, treg, sreg, imm, preced);
+   }
+
+TR::Instruction *generateVectorUXTLInstruction(TR::CodeGenerator *cg, TR::DataType elementType, TR::Node *node, TR::Register *treg, TR::Register *sreg,
+                  bool isUXTL2, TR::Instruction *preced)
+   {
+   TR::InstOpCode::Mnemonic op;
+   switch (elementType)
+      {
+      case TR::Int8:
+         op = isUXTL2 ? TR::InstOpCode::vushll2_8h : TR::InstOpCode::vushll_8h;
+         break;
+      case TR::Int16:
+         op = isUXTL2 ? TR::InstOpCode::vushll2_4s : TR::InstOpCode::vushll_4s;
+         break;
+      case TR::Int32:
+         op = isUXTL2 ? TR::InstOpCode::vushll2_2d : TR::InstOpCode::vushll_2d;
+         break;
+      default:
+         TR_ASSERT_FATAL_WITH_NODE(node, false, "Unexpected element type");
+         break;
+      }
+   return generateVectorShiftImmediateInstruction(cg, op, node, treg, sreg, 0, preced);
    }
 
 static

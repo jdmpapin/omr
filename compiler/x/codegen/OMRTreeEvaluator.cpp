@@ -73,7 +73,6 @@
 #include "x/codegen/HelperCallSnippet.hpp"
 #include "x/codegen/OutlinedInstructions.hpp"
 #include "x/codegen/RegisterRematerialization.hpp"
-#include "x/codegen/X86Evaluator.hpp"
 #include "x/codegen/X86Instruction.hpp"
 #include "codegen/InstOpCode.hpp"
 #include "x/codegen/BinaryCommutativeAnalyser.hpp"
@@ -3758,7 +3757,7 @@ TR::Register *OMR::X86::TreeEvaluator::PrefetchEvaluator(TR::Node *node, TR::Cod
    }
 
 bool
-TR_X86ComputeCC::setCarryBorrow(TR::Node *flagNode, bool invertValue, TR::CodeGenerator *cg)
+OMR::X86::TreeEvaluator::setCarryBorrow(TR::Node *flagNode, bool invertValue, TR::CodeGenerator *cg)
    {
    TR::Register *flagReg = NULL;
 
@@ -4069,8 +4068,8 @@ static const TR::InstOpCode::Mnemonic VectorBinaryArithmeticOpCodesForReg[TR::Nu
    { TR::InstOpCode::bad, TR::InstOpCode::PADDWRegReg, TR::InstOpCode::PSUBWRegReg, TR::InstOpCode::PMULLWRegReg, TR::InstOpCode::bad,         TR::InstOpCode::bad,        TR::InstOpCode::bad,       TR::InstOpCode::bad,        TR::InstOpCode::PMINSWRegReg, TR::InstOpCode::PMAXSWRegReg }, // Int16
    { TR::InstOpCode::bad, TR::InstOpCode::PADDDRegReg, TR::InstOpCode::PSUBDRegReg, TR::InstOpCode::PMULLDRegReg, TR::InstOpCode::bad,         TR::InstOpCode::PANDRegReg, TR::InstOpCode::PORRegReg, TR::InstOpCode::PXORRegReg, TR::InstOpCode::PMINSDRegReg, TR::InstOpCode::PMAXSDRegReg }, // Int32
    { TR::InstOpCode::bad, TR::InstOpCode::PADDQRegReg, TR::InstOpCode::PSUBQRegReg, TR::InstOpCode::bad,          TR::InstOpCode::bad,         TR::InstOpCode::PANDRegReg, TR::InstOpCode::PORRegReg, TR::InstOpCode::PXORRegReg, TR::InstOpCode::PMINSQRegReg, TR::InstOpCode::PMAXSQRegReg }, // Int64
-   { TR::InstOpCode::bad, TR::InstOpCode::ADDPSRegReg, TR::InstOpCode::SUBPSRegReg, TR::InstOpCode::MULPSRegReg,  TR::InstOpCode::DIVPSRegReg, TR::InstOpCode::bad,        TR::InstOpCode::bad,       TR::InstOpCode::bad,        TR::InstOpCode::bad,  TR::InstOpCode::bad  }, // Float
-   { TR::InstOpCode::bad, TR::InstOpCode::ADDPDRegReg, TR::InstOpCode::SUBPDRegReg, TR::InstOpCode::MULPDRegReg,  TR::InstOpCode::DIVPDRegReg, TR::InstOpCode::bad,        TR::InstOpCode::bad,       TR::InstOpCode::bad,        TR::InstOpCode::bad,  TR::InstOpCode::bad  }, // Double
+   { TR::InstOpCode::bad, TR::InstOpCode::ADDPSRegReg, TR::InstOpCode::SUBPSRegReg, TR::InstOpCode::MULPSRegReg,  TR::InstOpCode::DIVPSRegReg, TR::InstOpCode::bad,        TR::InstOpCode::bad,       TR::InstOpCode::bad,        TR::InstOpCode::MINPSRegReg,  TR::InstOpCode::MAXPSRegReg  }, // Float
+   { TR::InstOpCode::bad, TR::InstOpCode::ADDPDRegReg, TR::InstOpCode::SUBPDRegReg, TR::InstOpCode::MULPDRegReg,  TR::InstOpCode::DIVPDRegReg, TR::InstOpCode::bad,        TR::InstOpCode::bad,       TR::InstOpCode::bad,        TR::InstOpCode::MINPDRegReg,  TR::InstOpCode::MAXPDRegReg  }, // Double
    };
 
 
@@ -4141,9 +4140,11 @@ TR::InstOpCode OMR::X86::TreeEvaluator::getNativeSIMDOpcode(TR::ILOpCodes opcode
    {
    ArithmeticOps binaryOp = ArithmeticInvalid;
    ArithmeticOps unaryOp = ArithmeticInvalid;
+   TR::DataType elementType = type.getVectorElementType();
 
    if (OMR::ILOpCode::isVectorOpCode(opcode))
       {
+      bool isMaskOp = false;
       switch (OMR::ILOpCode::getVectorOperation(opcode))
          {
          case TR::vadd:
@@ -4160,12 +4161,18 @@ TR::InstOpCode OMR::X86::TreeEvaluator::getNativeSIMDOpcode(TR::ILOpCodes opcode
             break;
          case TR::vand:
             binaryOp = BinaryArithmeticAnd;
+            // Masking opcodes require lanewise support for each element type, however, int8/int16
+            // bitwise instructions with masking are not supported without AVX-512. In non-masking
+            // operations, the element type does not matter.
+            if (!isMaskOp) elementType = TR::Int32;
             break;
          case TR::vor:
             binaryOp = BinaryArithmeticOr;
+            if (!isMaskOp) elementType = TR::Int32;
             break;
          case TR::vxor:
             binaryOp = BinaryArithmeticXor;
+            if (!isMaskOp) elementType = TR::Int32;
             break;
          case TR::vmin:
             binaryOp = BinaryArithmeticMin;
@@ -4194,16 +4201,50 @@ TR::InstOpCode OMR::X86::TreeEvaluator::getNativeSIMDOpcode(TR::ILOpCodes opcode
 
    if (binaryOp != ArithmeticInvalid)
       {
-      memOpcode = VectorBinaryArithmeticOpCodesForMem[type.getVectorElementType() - 1][binaryOp];
-      regOpcode = VectorBinaryArithmeticOpCodesForReg[type.getVectorElementType() - 1][binaryOp];
+      memOpcode = VectorBinaryArithmeticOpCodesForMem[elementType - 1][binaryOp];
+      regOpcode = VectorBinaryArithmeticOpCodesForReg[elementType - 1][binaryOp];
       }
    else
       {
-      memOpcode = VectorUnaryArithmeticOpCodesForMem[type.getVectorElementType() - 1][unaryOp - NumBinaryArithmeticOps];
-      regOpcode = VectorUnaryArithmeticOpCodesForReg[type.getVectorElementType() - 1][unaryOp - NumBinaryArithmeticOps];
+      memOpcode = VectorUnaryArithmeticOpCodesForMem[elementType - 1][unaryOp - NumBinaryArithmeticOps];
+      regOpcode = VectorUnaryArithmeticOpCodesForReg[elementType - 1][unaryOp - NumBinaryArithmeticOps];
       }
 
    return memForm ? memOpcode : regOpcode;
+   }
+
+TR::Register* OMR::X86::TreeEvaluator::vectorFPNaNHelper(TR::Node *node, TR::Register *tmpReg, TR::Register *lhs, TR::Register *rhs, TR::MemoryReference *mr, TR::CodeGenerator *cg)
+   {
+   TR::DataType et = node->getType().getVectorElementType();
+   TR::VectorLength vl = node->getType().getVectorLength();
+
+   TR_ASSERT_FATAL(vl != TR::VectorLength512, "NaN helper is not supported for 512-bit vectors");
+
+   TR::InstOpCode movOpcode = TR::InstOpCode::MOVDQURegReg;
+   TR::InstOpCode orOpcode = mr ? TR::InstOpCode::ORPDRegMem : TR::InstOpCode::ORPDRegReg;
+   TR::InstOpCode cmpOpcode = et.isFloat() ? TR::InstOpCode::CMPPSRegRegImm1 : TR::InstOpCode::CMPPDRegRegImm1;
+
+   OMR::X86::Encoding movEncoding = movOpcode.getSIMDEncoding(&cg->comp()->target().cpu, vl);
+   OMR::X86::Encoding cmpEncoding = cmpOpcode.getSIMDEncoding(&cg->comp()->target().cpu, vl);
+   OMR::X86::Encoding orEncoding = orOpcode.getSIMDEncoding(&cg->comp()->target().cpu, vl);
+
+   TR_ASSERT_FATAL(movEncoding != OMR::X86::Encoding::Bad, "No suitable encoding method for move opcode");
+   TR_ASSERT_FATAL(cmpEncoding != OMR::X86::Encoding::Bad, "No suitable encoding method for compare opcode");
+   TR_ASSERT_FATAL(orEncoding != OMR::X86::Encoding::Bad, "No suitable encoding method for por opcode");
+
+   generateRegRegInstruction(movOpcode.getMnemonic(), node, tmpReg, lhs, cg, movEncoding);
+   generateRegRegImmInstruction(cmpOpcode.getMnemonic(), node, tmpReg, tmpReg, 0x4, cg, cmpEncoding);
+
+   if (mr)
+      {
+      generateRegMemInstruction(orOpcode.getMnemonic(), node, tmpReg, mr, cg, orEncoding);
+      }
+   else
+      {
+      generateRegRegInstruction(orOpcode.getMnemonic(), node, tmpReg, rhs, cg, orEncoding);
+      }
+
+   return tmpReg;
    }
 
 // For ILOpCode that can be translated to single SSE/AVX instructions
@@ -4216,8 +4257,10 @@ TR::Register* OMR::X86::TreeEvaluator::vectorBinaryArithmeticEvaluator(TR::Node*
                              "Expecting a vector opcode in vectorBinaryArithmeticEvaluator");
 
    TR::Register* resultReg = cg->allocateRegister(TR_VRF);
+   TR::DataType et = type.getVectorElementType();
    TR::Node* lhs = node->getChild(0);
    TR::Node* rhs = node->getChild(1);
+   TR::Register *tmpNaNReg = NULL;
 
    bool useRegMemForm = cg->comp()->target().cpu.supportsAVX();
 
@@ -4229,6 +4272,22 @@ TR::Register* OMR::X86::TreeEvaluator::vectorBinaryArithmeticEvaluator(TR::Node*
          useRegMemForm = false;
          }
       }
+
+   if (et.isFloatingPoint())
+      {
+      switch (node->getOpCode().getVectorOperation())
+         {
+         case TR::vmin:
+         case TR::vmax:
+            // These opcodes require special handling of NaN values
+            // If either operand is NaN, the result must be NaN
+            tmpNaNReg = cg->allocateRegister(TR_VRF);
+            TR_ASSERT_FATAL(type.getVectorLength() != TR::VectorLength512, "min/max f/d not supported for 512-bit vectors");
+         default:
+            break;
+         }
+      }
+
 
    TR::InstOpCode nativeOpcode = getNativeSIMDOpcode(opcode, type, useRegMemForm);
 
@@ -4252,16 +4311,30 @@ TR::Register* OMR::X86::TreeEvaluator::vectorBinaryArithmeticEvaluator(TR::Node*
 
    if (cg->comp()->target().cpu.supportsAVX())
       {
-      if (useRegMemForm)
-         generateRegRegMemInstruction(nativeOpcode.getMnemonic(), node, resultReg, lhsReg, generateX86MemoryReference(rhs, cg), cg, simdEncoding);
+      if (useRegMemForm && tmpNaNReg)
+         {
+         TR::Register *rSrcReg = tmpNaNReg ? vectorFPNaNHelper(node, tmpNaNReg, lhsReg, NULL, generateX86MemoryReference(rhs, cg), cg) : rhsReg;
+         generateRegRegRegInstruction(nativeOpcode.getMnemonic(), node, resultReg, lhsReg, rSrcReg, cg, simdEncoding);
+         }
+      else if (useRegMemForm)
+         {
+         generateRegRegMemInstruction(nativeOpcode.getMnemonic(), node, resultReg, lhsReg,generateX86MemoryReference(rhs, cg), cg, simdEncoding);
+         }
       else
-         generateRegRegRegInstruction(nativeOpcode.getMnemonic(), node, resultReg, lhsReg, rhsReg, cg, simdEncoding);
+         {
+         TR::Register *rSrcReg = tmpNaNReg ? vectorFPNaNHelper(node, tmpNaNReg, lhsReg, rhsReg, NULL, cg) : rhsReg;
+         generateRegRegRegInstruction(nativeOpcode.getMnemonic(), node, resultReg, lhsReg, rSrcReg, cg, simdEncoding);
+         }
       }
    else
       {
+      TR::Register *rSrcReg = tmpNaNReg ? vectorFPNaNHelper(node, tmpNaNReg, lhsReg, rhsReg, NULL, cg) : rhsReg;
       generateRegRegInstruction(TR::InstOpCode::MOVDQURegReg, node, resultReg, lhsReg, cg);
-      generateRegRegInstruction(nativeOpcode.getMnemonic(), node, resultReg, rhsReg, cg);
+      generateRegRegInstruction(nativeOpcode.getMnemonic(), node, resultReg, rSrcReg, cg, simdEncoding);
       }
+
+   if (tmpNaNReg)
+      cg->stopUsingRegister(tmpNaNReg);
 
    node->setRegister(resultReg);
    cg->decReferenceCount(lhs);
@@ -4452,16 +4525,489 @@ OMR::X86::TreeEvaluator::bitpermuteEvaluator(TR::Node *node, TR::CodeGenerator *
    }
 
 
+// mask evaluators
 TR::Register*
-OMR::X86::TreeEvaluator::vreductionAddEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+OMR::X86::TreeEvaluator::mAnyTrueEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
    }
 
 TR::Register*
-OMR::X86::TreeEvaluator::vreductionAndEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+OMR::X86::TreeEvaluator::mAllTrueEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::mmAnyTrueEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::mmAllTrueEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::mloadEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::mloadiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::mstoreEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::mstoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::mTrueCountEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::mFirstTrueEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::mLastTrueEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::mToLongBitsEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::mLongBitsToMaskEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::mRegLoadEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::mRegStoreEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::b2mEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::s2mEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::i2mEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::l2mEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::v2mEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::m2bEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::m2sEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::m2iEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::m2lEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::m2vEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vfmaEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   TR::DataType dt = node->getDataType();
+   TR::DataType et = dt.getVectorElementType();
+   TR::VectorLength vl = dt.getVectorLength();
+
+   TR::Node *leftNode = node->getChild(0);
+   TR::Node *middleNode = node->getChild(1);
+   TR::Node *rightNode = node->getChild(2);
+
+   TR::Register *resultReg = cg->allocateRegister(TR_VRF);
+   node->setRegister(resultReg);
+
+   TR::InstOpCode movOpcode = TR::InstOpCode::MOVDQURegReg;
+   TR::InstOpCode fmaOpcode = TR::InstOpCode::VFMADD213PRegRegReg(et.isDouble());
+   OMR::X86::Encoding movOpcodeEncoding = movOpcode.getSIMDEncoding(&cg->comp()->target().cpu, vl);
+   OMR::X86::Encoding fmaEncoding = fmaOpcode.getSIMDEncoding(&cg->comp()->target().cpu, vl);
+
+   TR::Register *leftReg = cg->evaluate(leftNode);
+   TR::Register *middleReg = cg->evaluate(middleNode);
+   TR::Register *rightReg = cg->evaluate(rightNode);
+
+   if (et.isFloatingPoint() && fmaEncoding != OMR::X86::Encoding::Bad)
+      {
+      generateRegRegInstruction(movOpcode.getMnemonic(), node, resultReg, leftReg, cg, movOpcodeEncoding);
+      generateRegRegRegInstruction(fmaOpcode.getMnemonic(), node, resultReg, middleReg, rightReg, cg, fmaEncoding);
+      }
+   else
+      {
+      TR::InstOpCode mulOpcode = VectorBinaryArithmeticOpCodesForReg[et - 1][BinaryArithmeticMul];
+      TR::InstOpCode addOpcode = VectorBinaryArithmeticOpCodesForReg[et - 1][BinaryArithmeticAdd];
+
+      TR_ASSERT_FATAL(mulOpcode.getMnemonic() != TR::InstOpCode::bad, "No multiplication opcode found");
+      TR_ASSERT_FATAL(addOpcode.getMnemonic() != TR::InstOpCode::bad, "No addition opcode found");
+
+      OMR::X86::Encoding mulEncoding = mulOpcode.getSIMDEncoding(&cg->comp()->target().cpu, vl);
+      OMR::X86::Encoding addEncoding = addOpcode.getSIMDEncoding(&cg->comp()->target().cpu, vl);
+
+      TR_ASSERT_FATAL(mulEncoding != OMR::X86::Encoding::Bad, "No supported encoding method for multiplication opcode");
+      TR_ASSERT_FATAL(addEncoding != OMR::X86::Encoding::Bad, "No supported encoding method for addition opcode");
+
+      if (mulEncoding == OMR::X86::Legacy)
+         {
+         generateRegRegInstruction(movOpcode.getMnemonic(), node, resultReg, leftReg, cg, movOpcodeEncoding);
+         generateRegRegInstruction(mulOpcode.getMnemonic(), node, resultReg, middleReg, cg, mulEncoding);
+         }
+      else
+         {
+         generateRegRegRegInstruction(mulOpcode.getMnemonic(), node, resultReg, leftReg, middleReg, cg, mulEncoding);
+         }
+
+      generateRegRegInstruction(addOpcode.getMnemonic(), node, resultReg, rightReg, cg, addEncoding);
+      }
+
+   cg->decReferenceCount(leftNode);
+   cg->decReferenceCount(middleNode);
+   cg->decReferenceCount(rightNode);
+
+   return resultReg;
+   }
+
+TR::Register* OMR::X86::TreeEvaluator::SIMDreductionEvaluator(TR::Node* node, TR::CodeGenerator* cg)
+   {
+   TR::Node *child = node->getFirstChild();
+   TR::Register *inputVectorReg = cg->evaluate(child);
+   TR::VectorLength vl = child->getDataType().getVectorLength();
+   TR::DataType dt = child->getDataType().getVectorElementType();
+   TR::VectorOperation op = node->getOpCode().getVectorOperation();
+   bool useGPR = !dt.isFloatingPoint();
+
+   TR::InstOpCode regOpcode = getNativeSIMDOpcode(OMR::ILOpCode::reductionToVerticalOpcode(node->getOpCodeValue(), vl), child->getDataType(), false);
+   bool needsNaNHandling = dt.isFloatingPoint() && (op == TR::vreductionMax || op == TR::vreductionMin);
+
+   TR::Register *workingReg = cg->allocateRegister(TR_VRF);
+   TR::Register *resultVRF = cg->allocateRegister(TR_VRF);
+   TR::Register *fprReg = dt.isFloatingPoint() ? cg->allocateRegister(TR_FPR) : NULL;
+   TR::Register *tmpNaNReg = needsNaNHandling ? cg->allocateRegister(TR_VRF) : NULL;
+   TR::Register *rSrcReg = NULL;
+
+   TR_ASSERT_FATAL_WITH_NODE(node, regOpcode.getMnemonic() != TR::InstOpCode::bad, "No opcode for vector reduction");
+
+   TR::InstOpCode movOpcode = TR::InstOpCode::MOVDQURegReg;
+   generateRegRegInstruction(movOpcode.getMnemonic(), node, workingReg, inputVectorReg, cg, movOpcode.getSIMDEncoding(&cg->comp()->target().cpu, vl));
+
+   OMR::X86::Encoding regOpcodeEncoding128 = regOpcode.getSIMDEncoding(&cg->comp()->target().cpu, TR::VectorLength128);
+   TR_ASSERT_FATAL(regOpcodeEncoding128 != OMR::X86::Bad, "No encoding method for reduction opcode");
+
+   switch (vl)
+      {
+      case TR::VectorLength512:
+         // extract 256-bits from zmm and store in ymm, then perform vertical operation
+         generateRegRegImmInstruction(TR::InstOpCode::VEXTRACTF64X4YmmZmmImm1, node, resultVRF, workingReg, 0xFF, cg);
+         TR_ASSERT_FATAL(!needsNaNHandling, "NaN handling not supported for 512-bit vector reductions");
+         generateRegRegInstruction(regOpcode.getMnemonic(), node, workingReg, resultVRF, cg, regOpcode.getSIMDEncoding(&cg->comp()->target().cpu, TR::VectorLength256));
+         // Fallthrough to treat remaining result as 256-bit vector
+      case TR::VectorLength256:
+         // extract 128 bits from ymm and store in xmm, then perform vertical operation
+         generateRegRegImmInstruction(TR::InstOpCode::VEXTRACTF128RegRegImm1, node, resultVRF, workingReg, 0xFF, cg);
+         rSrcReg = needsNaNHandling ? vectorFPNaNHelper(child, tmpNaNReg, workingReg, resultVRF, NULL, cg) : resultVRF;
+         generateRegRegInstruction(regOpcode.getMnemonic(), node, workingReg, rSrcReg, cg, regOpcodeEncoding128);
+         // Fallthrough to treat remaining result as 128-bit vector
+      case TR::VectorLength128:
+         {
+         generateRegRegImmInstruction(TR::InstOpCode::PSHUFDRegRegImm1, node, resultVRF, workingReg, 0x0E, cg);
+         rSrcReg = needsNaNHandling ? vectorFPNaNHelper(child, tmpNaNReg, resultVRF, workingReg, NULL, cg) : workingReg;
+         generateRegRegInstruction(regOpcode.getMnemonic(), node, resultVRF, rSrcReg, cg, regOpcodeEncoding128);
+
+         if (dt != TR::Int64 && dt != TR::Double)
+            {
+            // reduce from 64-bit to 32-bit
+            generateRegRegImmInstruction(TR::InstOpCode::PSHUFDRegRegImm1, node, workingReg, resultVRF, 0x1, cg);
+            rSrcReg = needsNaNHandling ? vectorFPNaNHelper(child, tmpNaNReg, resultVRF, workingReg, NULL, cg) : workingReg;
+            generateRegRegInstruction(regOpcode.getMnemonic(), node, resultVRF, rSrcReg, cg, regOpcodeEncoding128);
+            if (dt != TR::Int32 && dt != TR::Float)
+               {
+               // reduce from 32-bit to 16-bit
+               generateRegRegImmInstruction(TR::InstOpCode::PSHUFLWRegRegImm1, node, workingReg, resultVRF, 0x1, cg);
+               generateRegRegInstruction(regOpcode.getMnemonic(), node, resultVRF, workingReg, cg, regOpcodeEncoding128);
+               if (dt != TR::Int16)
+                  {
+                  // reduce from 16-bit to 8-bit
+                  generateRegRegInstruction(TR::InstOpCode::MOVDQURegReg, node, workingReg, resultVRF, cg);
+                  generateRegImmInstruction(TR::InstOpCode::PSRLQRegImm1, node, workingReg, 0x8, cg);
+                  generateRegRegInstruction(regOpcode.getMnemonic(), node, resultVRF, workingReg, cg, regOpcodeEncoding128);
+                  }
+               }
+            }
+
+         break;
+         }
+      default:
+         TR_ASSERT_FATAL(0, "Unsupported vector length");
+      }
+
+   if (tmpNaNReg)
+      cg->stopUsingRegister(tmpNaNReg);
+   cg->stopUsingRegister(workingReg);
+   cg->decReferenceCount(child);
+
+   if (useGPR)
+      {
+      // move integer result from xmm to gpr
+      TR::Register *intReg = cg->allocateRegister(TR_GPR);
+      node->setRegister(intReg);
+
+      TR::InstOpCode::Mnemonic xmm2GPROpcode = TR::InstOpCode::bad;
+
+      switch (dt)
+         {
+         case TR::Int8:
+         case TR::Int16:
+         case TR::Int32:
+            xmm2GPROpcode = TR::InstOpCode::MOVDReg4Reg;
+            break;
+         case TR::Int64:
+            xmm2GPROpcode = TR::InstOpCode::MOVQReg8Reg;
+            break;
+         default:
+            TR_ASSERT_FATAL(0, "Unsupported vector element type");
+            break;
+         }
+
+      generateRegRegInstruction(xmm2GPROpcode, node, intReg, resultVRF, cg);
+      cg->stopUsingRegister(resultVRF);
+
+      return intReg;
+      }
+
+   // Since result register is a VRF, we need to allocate an FPR and copy value
+   // This will waste an instruction but should prevent a bug in CG
+   node->setRegister(fprReg);
+
+   if (dt == TR::Double)
+      {
+      generateRegRegInstruction(TR::InstOpCode::MOVSDRegReg, node, fprReg, resultVRF, cg);
+      }
+   else
+      {
+      fprReg->setIsSinglePrecision();
+      generateRegRegInstruction(TR::InstOpCode::MOVSSRegReg, node, fprReg, resultVRF, cg);
+      }
+
+   cg->stopUsingRegister(resultVRF);
+
+   return fprReg;
+   }
+
+// vector evaluators
+TR::Register*
+OMR::X86::TreeEvaluator::vmulEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   TR::DataType type = node->getType();
+
+   if (type.getVectorElementType() == TR::Int8)
+      {
+      TR::VectorLength vl = type.getVectorLength();
+      TR::Node *lhsNode = node->getChild(0);
+      TR::Node *rhsNode = node->getChild(1);
+
+      TR::Register *lhsReg = cg->evaluate(lhsNode);
+      TR::Register *rhsReg = cg->evaluate(rhsNode);
+      TR::Register *resultReg = cg->allocateRegister(TR_VRF);
+      TR::Register *zeroReg = cg->allocateRegister(TR_VRF);
+      TR::Register *lhsTmpReg = cg->allocateRegister(TR_VRF);
+      TR::Register *rhsTmpReg = cg->allocateRegister(TR_VRF);
+      TR::Register *maskReg = cg->allocateRegister(TR_VRF);
+      TR::Register *gprTmpReg = cg->allocateRegister(TR_GPR);
+
+      TR::InstOpCode xorOpcode = TR::InstOpCode::PXORRegReg;
+      OMR::X86::Encoding xorEncoding = xorOpcode.getSIMDEncoding(&cg->comp()->target().cpu, vl);
+      TR_ASSERT_FATAL(xorEncoding != OMR::X86::Encoding::Bad, "No suitable encoding form for pxor instruction");
+
+      generateRegRegInstruction(xorOpcode.getMnemonic(), node, zeroReg, zeroReg, cg, xorEncoding);
+
+      TR::InstOpCode unpackHOpcode = TR::InstOpCode::PUNPCKHBWRegReg;
+      TR::InstOpCode unpackLOpcode = TR::InstOpCode::PUNPCKLBWRegReg;
+      TR::InstOpCode packOpcode = TR::InstOpCode::PACKUSWBRegReg;
+      TR::InstOpCode mulOpcode = TR::InstOpCode::PMULLWRegReg;
+      TR::InstOpCode andOpcode = TR::InstOpCode::PANDRegReg;
+
+      OMR::X86::Encoding unpackHEncoding = unpackHOpcode.getSIMDEncoding(&cg->comp()->target().cpu, vl);
+      OMR::X86::Encoding unpackLEncoding = unpackLOpcode.getSIMDEncoding(&cg->comp()->target().cpu, vl);
+      OMR::X86::Encoding packEncoding = packOpcode.getSIMDEncoding(&cg->comp()->target().cpu, vl);
+      OMR::X86::Encoding mulEncoding = mulOpcode.getSIMDEncoding(&cg->comp()->target().cpu, vl);
+      OMR::X86::Encoding andEncoding = andOpcode.getSIMDEncoding(&cg->comp()->target().cpu, vl);
+
+      TR_ASSERT_FATAL(unpackHEncoding != OMR::X86::Encoding::Bad, "No suitable encoding form for punpckhbw instruction");
+      TR_ASSERT_FATAL(unpackLEncoding != OMR::X86::Encoding::Bad, "No suitable encoding form for punpcklbw instruction");
+      TR_ASSERT_FATAL(packEncoding != OMR::X86::Encoding::Bad, "No suitable encoding form for packuswb instruction");
+      TR_ASSERT_FATAL(mulEncoding != OMR::X86::Encoding::Bad, "No suitable encoding form for pmulw instruction");
+      TR_ASSERT_FATAL(andEncoding != OMR::X86::Encoding::Bad, "No suitable encoding form for pand instruction");
+
+      generateRegImmInstruction(TR::InstOpCode::MOVRegImm4(), node, gprTmpReg, 0x00ff00ff, cg);
+      generateRegRegInstruction(TR::InstOpCode::MOVDRegReg4, node, maskReg, gprTmpReg, cg);
+
+      // We need to broadcast the mask 0x00ff and 'and' it with each result
+      // This is required because the pack instruction uses signed saturation
+      switch (vl)
+         {
+         case TR::VectorLength128:
+            generateRegRegImmInstruction(TR::InstOpCode::PSHUFDRegRegImm1, node, maskReg, maskReg, 0, cg);
+            break;
+         case TR::VectorLength256:
+            {
+            TR_ASSERT_FATAL(cg->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_AVX2), "256-bit broadcast requires AVX2");
+            TR::InstOpCode opcode = TR::InstOpCode::VBROADCASTSSRegReg;
+            generateRegRegInstruction(opcode.getMnemonic(), node, maskReg, maskReg, cg, opcode.getSIMDEncoding(&cg->comp()->target().cpu, TR::VectorLength256));
+            break;
+            }
+         case TR::VectorLength512:
+            {
+            TR_ASSERT_FATAL(cg->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_AVX512F), "512-bit broadcast requires AVX-512");
+            TR::InstOpCode opcode = TR::InstOpCode::VBROADCASTSSRegReg;
+            generateRegRegInstruction(opcode.getMnemonic(), node, maskReg, maskReg, cg, OMR::X86::EVEX_L512);
+            break;
+            }
+         default:
+            TR_ASSERT_FATAL(0, "Unsupported vector length");
+            break;
+         }
+
+      // unpack low half of each operand register, use the 16-bit multiplication opcode, then 'and' each word with 0xff
+      // repeat the process with the high bits of each operand, then pack the result
+      if (cg->comp()->target().cpu.supportsAVX())
+         {
+         generateRegRegRegInstruction(unpackLOpcode.getMnemonic(), node, lhsTmpReg, lhsReg, zeroReg, cg, unpackLEncoding);
+         generateRegRegRegInstruction(unpackLOpcode.getMnemonic(), node, resultReg, rhsReg, zeroReg, cg, unpackLEncoding);
+         }
+      else
+         {
+         generateRegRegInstruction(TR::InstOpCode::MOVDQURegReg, node, lhsTmpReg, lhsReg, cg);
+         generateRegRegInstruction(TR::InstOpCode::MOVDQURegReg, node, resultReg, rhsReg, cg);
+         generateRegRegInstruction(unpackLOpcode.getMnemonic(), node, lhsTmpReg, zeroReg, cg, unpackLEncoding);
+         generateRegRegInstruction(unpackLOpcode.getMnemonic(), node, resultReg, zeroReg, cg, unpackLEncoding);
+         }
+
+      generateRegRegInstruction(mulOpcode.getMnemonic(), node, lhsTmpReg, resultReg, cg, mulEncoding);
+      generateRegRegInstruction(andOpcode.getMnemonic(), node, lhsTmpReg, maskReg, cg, andEncoding);
+
+      if (cg->comp()->target().cpu.supportsAVX())
+         {
+         generateRegRegRegInstruction(unpackHOpcode.getMnemonic(), node, resultReg, lhsReg, zeroReg, cg, unpackHEncoding);
+         generateRegRegRegInstruction(unpackHOpcode.getMnemonic(), node, rhsTmpReg, rhsReg, zeroReg, cg, unpackHEncoding);
+         }
+      else
+         {
+         generateRegRegInstruction(TR::InstOpCode::MOVDQURegReg, node, resultReg, lhsReg, cg);
+         generateRegRegInstruction(TR::InstOpCode::MOVDQURegReg, node, rhsTmpReg, rhsReg, cg);
+         generateRegRegInstruction(unpackHOpcode.getMnemonic(), node, rhsTmpReg, zeroReg, cg, unpackHEncoding);
+         generateRegRegInstruction(unpackHOpcode.getMnemonic(), node, resultReg, zeroReg, cg, unpackHEncoding);
+         }
+
+      generateRegRegInstruction(mulOpcode.getMnemonic(), node, rhsTmpReg, resultReg, cg, mulEncoding);
+      generateRegRegInstruction(andOpcode.getMnemonic(), node, rhsTmpReg, maskReg, cg, andEncoding);
+
+      if (cg->comp()->target().cpu.supportsAVX())
+         {
+         generateRegRegRegInstruction(packOpcode.getMnemonic(), node, resultReg, lhsTmpReg, rhsTmpReg, cg, packEncoding);
+         }
+      else
+         {
+         generateRegRegInstruction(TR::InstOpCode::MOVDQURegReg, node, resultReg, lhsTmpReg, cg);
+         generateRegRegInstruction(packOpcode.getMnemonic(), node, resultReg, rhsTmpReg, cg, packEncoding);
+         }
+
+      cg->stopUsingRegister(lhsTmpReg);
+      cg->stopUsingRegister(rhsTmpReg);
+      cg->stopUsingRegister(zeroReg);
+      cg->stopUsingRegister(gprTmpReg);
+      cg->stopUsingRegister(maskReg);
+
+      node->setRegister(resultReg);
+      cg->decReferenceCount(lhsNode);
+      cg->decReferenceCount(rhsNode);
+
+      return resultReg;
+      }
+
+   return TR::TreeEvaluator::vectorBinaryArithmeticEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vreductionAddEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::SIMDreductionEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vreductionAndEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::SIMDreductionEvaluator(node, cg);
    }
 
 TR::Register*
@@ -4473,25 +5019,31 @@ OMR::X86::TreeEvaluator::vreductionFirstNonZeroEvaluator(TR::Node *node, TR::Cod
 TR::Register*
 OMR::X86::TreeEvaluator::vreductionMaxEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   return TR::TreeEvaluator::SIMDreductionEvaluator(node, cg);
    }
 
 TR::Register*
 OMR::X86::TreeEvaluator::vreductionMinEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   return TR::TreeEvaluator::SIMDreductionEvaluator(node, cg);
    }
 
 TR::Register*
 OMR::X86::TreeEvaluator::vreductionMulEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   return TR::TreeEvaluator::SIMDreductionEvaluator(node, cg);
    }
 
 TR::Register*
 OMR::X86::TreeEvaluator::vreductionOrEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   return TR::TreeEvaluator::SIMDreductionEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vreductionXorEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::SIMDreductionEvaluator(node, cg);
    }
 
 TR::Register*
@@ -4501,7 +5053,205 @@ OMR::X86::TreeEvaluator::vreductionOrUncheckedEvaluator(TR::Node *node, TR::Code
    }
 
 TR::Register*
-OMR::X86::TreeEvaluator::vreductionXorEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+OMR::X86::TreeEvaluator::vmabsEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmaddEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmandEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmcmpeqEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmcmpneEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmcmpgtEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmcmpgeEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmcmpltEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmcmpleEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmdivEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmfmaEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmindexVectorEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmloadiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmmaxEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmminEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmmulEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmnegEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmnotEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmorEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmorUncheckedEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmreductionAddEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmreductionAndEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmreductionFirstNonZeroEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmreductionMaxEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmreductionMinEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmreductionMulEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmreductionOrEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmreductionOrUncheckedEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmreductionXorEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmsqrtEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmstoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmsubEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmxorEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::X86::TreeEvaluator::vmfirstNonZeroEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
    }

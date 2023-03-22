@@ -69,6 +69,7 @@ xmlns:vgc="http://www.ibm.com/j9/verbosegc">
 	<element name="cardclean-info" type="vgc:cardclean-info" />
 	<element name="finalization" type="vgc:finalization" />
 	<element name="ownableSynchronizers" type="vgc:ownableSynchronizers" />
+	<element name="continuations" type="vgc:continuations" />
 	<element name="stringconstants" type="vgc:stringconstants" />
 	<element name="object-monitors" type="vgc:object-monitors" />
 	<element name="classunload-info" type="vgc:classunload-info" />
@@ -91,6 +92,7 @@ xmlns:vgc="http://www.ibm.com/j9/verbosegc">
 	<element name="memory-traced" type="vgc:memory-traced" />
 	<element name="regions" type="vgc:regions"/>
 	<element name="heap-resize" type="vgc:heap-resize" />
+	<element name="heap-fixup" type="vgc:heap-fixup" />
 	<element name="concurrent-start" type="vgc:concurrent-start" />
 	<element name="concurrent-end" type="vgc:concurrent-end" />
 	<element name="concurrent-mark-start" type="vgc:concurrent-mark-start" />
@@ -155,6 +157,7 @@ xmlns:vgc="http://www.ibm.com/j9/verbosegc">
 				<element ref="vgc:trigger-start" maxOccurs="1" minOccurs="1" />
 				<element ref="vgc:trigger-end" maxOccurs="1" minOccurs="1" />
 				<element ref="vgc:heap-resize" maxOccurs="1" minOccurs="1" />
+				<element ref="vgc:heap-fixup" maxOccurs="1" minOccurs="1" />
 				<element ref="vgc:allocation-satisfied" maxOccurs="1" minOccurs="1" />
 				<element ref="vgc:allocation-unsatisfied" maxOccurs="1" minOccurs="1" />
 				<element ref="vgc:warning" maxOccurs="1" minOccurs="1" />
@@ -469,6 +472,11 @@ xmlns:vgc="http://www.ibm.com/j9/verbosegc">
 		<attribute name="cleared" type="integer" use="required" />
 	</complexType>
 
+	<complexType name="continuations">
+		<attribute name="candidates" type="integer" use="optional" />
+		<attribute name="cleared" type="integer" use="required" />
+	</complexType>
+
 	<complexType name="stringconstants">
 		<attribute name="candidates" type="integer" use="required" />
 		<attribute name="cleared" type="integer" use="required" />
@@ -613,6 +621,12 @@ xmlns:vgc="http://www.ibm.com/j9/verbosegc">
 		<attribute name="space" type="string" use="required" />
 		<attribute name="amount" type="integer" use="required" />
 		<attribute name="count" type="integer" use="required" />
+		<attribute name="timems" type="float" use="required" />
+		<attribute name="reason" type="string" use="required" />
+		<attribute name="timestamp" type="dateTime" use="optional" />
+	</complexType>
+
+	<complexType name="heap-fixup">
 		<attribute name="timems" type="float" use="required" />
 		<attribute name="reason" type="string" use="required" />
 		<attribute name="timestamp" type="dateTime" use="optional" />
@@ -786,6 +800,7 @@ xmlns:vgc="http://www.ibm.com/j9/verbosegc">
 			<element ref="vgc:remembered-set-cleared" maxOccurs="1" minOccurs="0" />
 			<element ref="vgc:finalization" maxOccurs="1" minOccurs="0" />
 			<element ref="vgc:ownableSynchronizers" maxOccurs="1" minOccurs="0" />
+			<element ref="vgc:continuations" maxOccurs="1" minOccurs="0" />
 			<element ref="vgc:references" maxOccurs="unbounded" minOccurs="0" />
 			<element ref="vgc:stringconstants" maxOccurs="1" minOccurs="0" />
 			<element ref="vgc:object-monitors" maxOccurs="1" minOccurs="0" />
@@ -813,6 +828,7 @@ xmlns:vgc="http://www.ibm.com/j9/verbosegc">
 			<element ref="vgc:copy-failed" maxOccurs="unbounded" minOccurs="0" />
 			<element ref="vgc:finalization" maxOccurs="1" minOccurs="0" />
 			<element ref="vgc:ownableSynchronizers" maxOccurs="1" minOccurs="0" />
+			<element ref="vgc:continuations" maxOccurs="1" minOccurs="0" />
 			<element ref="vgc:references" maxOccurs="unbounded" minOccurs="0" />
 			<element ref="vgc:object-monitors" maxOccurs="1" minOccurs="0" />
 			<element ref="vgc:pending-finalizers" maxOccurs="1" minOccurs="0" />
@@ -847,6 +863,7 @@ xmlns:vgc="http://www.ibm.com/j9/verbosegc">
 			<element ref="vgc:remembered-set-cleared" maxOccurs="1" minOccurs="1" />
 			<element ref="vgc:finalization" maxOccurs="1" minOccurs="0" />
 			<element ref="vgc:ownableSynchronizers" maxOccurs="1" minOccurs="0" />
+			<element ref="vgc:continuations" maxOccurs="1" minOccurs="0" />
 			<element ref="vgc:references" maxOccurs="unbounded" minOccurs="0" />
 			<element ref="vgc:stringconstants" maxOccurs="1" minOccurs="0" />
 			<element ref="vgc:object-monitors" maxOccurs="1" minOccurs="0" />
@@ -863,6 +880,7 @@ xmlns:vgc="http://www.ibm.com/j9/verbosegc">
 			<element ref="vgc:references" maxOccurs="unbounded" minOccurs="0" />
 			<element ref="vgc:finalization" maxOccurs="1" minOccurs="0" />
 			<element ref="vgc:ownableSynchronizers" maxOccurs="1" minOccurs="0" />
+			<element ref="vgc:continuations" maxOccurs="1" minOccurs="0" />
 		</sequence>
 	</group>
 
@@ -874,6 +892,7 @@ xmlns:vgc="http://www.ibm.com/j9/verbosegc">
 			<element ref="vgc:references" maxOccurs="unbounded" minOccurs="0" />
 			<element ref="vgc:finalization" maxOccurs="1" minOccurs="0" />
 			<element ref="vgc:ownableSynchronizers" maxOccurs="1" minOccurs="0" />
+			<element ref="vgc:continuations" maxOccurs="1" minOccurs="0" />
 			<element ref="vgc:work-packet-overflow" maxOccurs="1" minOccurs="0" />
 			<element ref="vgc:nondeterministic-sweep" maxOccurs="1" minOccurs="0" />
 			<element ref="vgc:free-mem" maxOccurs="unbounded" minOccurs="0" />

@@ -531,6 +531,28 @@ TR::Instruction *generateCondTrg1Src2Instruction(
                    TR::Instruction *preced = NULL);
 
 /*
+ * @brief Generates src2-to-trg imm instruction
+ * @param[in] cg : CodeGenerator
+ * @param[in] op : instruction opcode
+ * @param[in] node : node
+ * @param[in] treg : target register
+ * @param[in] s1reg : source register 1
+ * @param[in] s2reg : source register 2
+ * @param[in] imm : immediate value
+ * @param[in] preced : preceding instruction
+ * @return generated instruction
+ */
+TR::Instruction *generateTrg1Src2ImmInstruction(
+                   TR::CodeGenerator *cg,
+                   TR::InstOpCode::Mnemonic op,
+                   TR::Node *node,
+                   TR::Register *treg,
+                   TR::Register *s1reg,
+                   TR::Register *s2reg,
+                   uint32_t imm,
+                   TR::Instruction *preced = NULL);
+
+/*
  * @brief Generates src2-to-trg instruction (shifted register)
  * @param[in] cg : CodeGenerator
  * @param[in] op : instruction opcode
@@ -1145,6 +1167,34 @@ TR::Instruction *generateUBFIZInstruction(
                   TR::Instruction *preced = NULL);
 
 /**
+ * @brief Generates bfi instruction
+ *
+ * @details Generates bfi instruction which copies a bitfield of <width> bits
+ *          from the least significant bits of the source register to
+ *          the bit position <lsb> of the target register.
+ *          The bits above and below the bitfield in the target register is unchanged.
+ *
+ * @param[in] cg      : CodeGenerator
+ * @param[in] node    : node
+ * @param[in] treg    : target register
+ * @param[in] sreg    : source register
+ * @param[in] lsb     : the lsb to be copied in the source register
+ * @param[in] width   : the bitfield width to copy
+ * @param[in] is64bit : true if 64bit
+ * @param[in] preced  : preceding instruction
+ * @return generated instruction
+ */
+TR::Instruction *generateBFIInstruction(
+                  TR::CodeGenerator *cg,
+                  TR::Node *node,
+                  TR::Register *treg,
+                  TR::Register *sreg,
+                  uint32_t lsb,
+                  uint32_t width,
+                  bool is64bit,
+                  TR::Instruction *preced = NULL);
+
+/**
  * @brief Generates vector shift left immediate instruction
  *
  * @param[in] cg          : CodeGenerator
@@ -1165,6 +1215,26 @@ TR::Instruction *generateVectorShiftImmediateInstruction(
                   uint32_t shiftAmount,
                   TR::Instruction *preced = NULL);
 
+/**
+ * @brief Generates vector unsigned extend long instruction
+ *
+ * @param[in] cg          : CodeGenerator
+ * @param[in] elementType : element type
+ * @param[in] node        : node
+ * @param[in] treg        : target register
+ * @param[in] sreg        : source register
+ * @param[in] isUXTL2     : if true, UXTL2 instruction is generated
+ * @param[in] preced      : preceding instruction
+ * @return generated instruction
+ */
+TR::Instruction *generateVectorUXTLInstruction(
+                  TR::CodeGenerator *cg,
+                  TR::DataType elementType,
+                  TR::Node *node,
+                  TR::Register *treg,
+                  TR::Register *sreg,
+                  bool isUXTL2,
+                  TR::Instruction *preced = NULL);
 /**
  * @brief Generates duplicate vector element instruction
  *

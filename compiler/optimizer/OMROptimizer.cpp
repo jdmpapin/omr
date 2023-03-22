@@ -513,7 +513,7 @@ const OptimizationStrategy finalGlobalOpts[] =
    { deadTreesElimination                 },
    //{ treeSimplification,       IfEnabled  },
    { localLiveRangeReduction              },
-   { compactLocals,             IfNotJitProfiling }, // analysis results are invalidated by profilingGroup
+   { compactLocals,             IfNotJitProfiling }, // analysis results are invalidated by jitProfilingGroup
 #ifdef J9_PROJECT_SPECIFIC
    { globalLiveVariablesForGC             },
 #endif
@@ -1307,6 +1307,11 @@ int32_t OMR::Optimizer::performOptimization(const OptimizationStrategy *optimiza
 
       case IfNotProfiling:
          if (!comp()->isProfilingCompilation() || debug("ignoreIfNotProfiling"))
+            doThisOptimization = true;
+         break;
+
+      case IfJitProfiling:
+         if (comp()->getProfilingMode() == JitProfiling)
             doThisOptimization = true;
          break;
 
@@ -2484,6 +2489,8 @@ bool OMR::Optimizer::areNodesEquivalent(TR::Node *node1, TR::Node *node2,  TR::C
                break;
             default:
                {
+               TR_ASSERT_FATAL(!node1->getDataType().isMask(), "OMR does not support mask constants\n");
+
                if (node1->getDataType().isVector())
                   {
                   if (node1->getLiteralPoolOffset() != node2->getLiteralPoolOffset())

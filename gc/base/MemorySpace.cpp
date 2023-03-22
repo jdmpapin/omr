@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -578,19 +578,17 @@ MM_MemorySpace::getAllTypeFlags()
 	return MEMORY_TYPE_OLD | MEMORY_TYPE_NEW;
 }
 
-#if defined(OMR_GC_IDLE_HEAP_MANAGER)
 /**
  * iterate through memorysubspace list & free up pages of free entries 
  */
 uintptr_t
-MM_MemorySpace::releaseFreeMemoryPages(MM_EnvironmentBase* env)
+MM_MemorySpace::releaseFreeMemoryPages(MM_EnvironmentBase* env, uintptr_t memoryType)
 {
         uintptr_t releasedMemory = 0;
         MM_MemorySubSpace* memorySubSpace = _memorySubSpaceList;
         while(NULL != memorySubSpace) {
-                releasedMemory += memorySubSpace->releaseFreeMemoryPages(env);
+                releasedMemory += memorySubSpace->releaseFreeMemoryPages(env, memoryType);
                 memorySubSpace = memorySubSpace->getNext();
         }
         return releasedMemory;
 }
-#endif

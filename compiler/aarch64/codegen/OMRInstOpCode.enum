@@ -721,8 +721,8 @@
 		vorrimm4s,                                              	/* 0x4F001400,	ORR       	 */
 	/*
 	 * Vector Shift Immediate
-	 * Please do not change or insert opcode between vshl16b and vushr2d.
-	 * Binary Encoder expects vshl16b - vushr2d appears contiguously in this order.
+	 * Please do not change or insert opcode between vshl16b and vsri_2d.
+	 * Binary Encoder expects vshl16b - vsri_2d appears contiguously in this order.
 	 */
 		vshl16b,                                                	/* 0x4F085400,	SHL       	 */
 		vshl8h,                                                 	/* 0x4F105400,	SHL       	 */
@@ -740,14 +740,28 @@
 		vushll2_8h,                                             	/* 0x6F08A400,	USHLL2    	 */
 		vushll2_4s,                                             	/* 0x6F10A400,	USHLL2    	 */
 		vushll2_2d,                                             	/* 0x6F20A400,	USHLL2    	 */
+		vsli16b,                                                	/* 0x6F085400,	SLI       	 */
+		vsli8h,                                                 	/* 0x6F105400,	SLI       	 */
+		vsli4s,                                                 	/* 0x6F205400,	SLI       	 */
+		vsli2d,                                                 	/* 0x6F405400,	SLI       	 */
 		vsshr16b,                                               	/* 0x4F080400,	SSHR      	 */
 		vsshr8h,                                                	/* 0x4F100400,	SSHR      	 */
 		vsshr4s,                                                	/* 0x4F200400,	SSHR      	 */
 		vsshr2d,                                                	/* 0x4F400400,	SSHR      	 */
+		vshrn_8b,                                               	/* 0x0F088400,	SHRN      	 */
+		vshrn_4h,                                               	/* 0x0F108400,	SHRN      	 */
+		vshrn_2s,                                               	/* 0x0F208400,	SHRN      	 */
+		vshrn2_16b,                                             	/* 0x4F088400,	SHRN      	 */
+		vshrn2_8h,                                              	/* 0x4F108400,	SHRN      	 */
+		vshrn2_4s,                                              	/* 0x4F208400,	SHRN      	 */
 		vushr16b,                                               	/* 0x6F080400,	USHR      	 */
 		vushr8h,                                                	/* 0x6F100400,	USHR      	 */
 		vushr4s,                                                	/* 0x6F200400,	USHR      	 */
 		vushr2d,                                                	/* 0x6F400400,	USHR      	 */
+		vsri16b,                                                	/* 0x6F084400,	SRI       	 */
+		vsri8h,                                                 	/* 0x6F104400,	SRI       	 */
+		vsri4s,                                                 	/* 0x6F204400,	SRI       	 */
+		vsri2d,                                                 	/* 0x6F404400,	SRI       	 */
 		vshll_8h,                                               	/* 0x2E213800,	SHLL      	 */
 		vshll_4s,                                               	/* 0x2E613800,	SHLL      	 */
 		vshll_2d,                                               	/* 0x2EA13800,	SHLL      	 */
@@ -869,6 +883,7 @@
 		vbif16b,                                                  	/* 0x6EE01C00	BIF       	 */
 		vbit16b,                                                  	/* 0x6EA01C00	BIT       	 */
 		vbsl16b,                                                  	/* 0x6E601C00	BSL       	 */
+	/* Vector permute */
 		vzip1_16b,                                                	/* 0x4E003800	ZIP1      	 */
 		vzip1_8h,                                                 	/* 0x4E403800	ZIP1      	 */
 		vzip1_4s,                                                 	/* 0x4E803800	ZIP1      	 */
@@ -885,6 +900,8 @@
 		vuzp2_8h,                                                 	/* 0x4E405800	UZP2      	 */
 		vuzp2_4s,                                                 	/* 0x4E805800	UZP2      	 */
 		vuzp2_2d,                                                 	/* 0x4EC05800	UZP2      	 */
+	/* Vector extract */
+		vext16b,                                                  	/* 0x6E000000	EXT      	 */
 	/* Vector Data-processing (1 source) */
 		vneg16b,                                                  	/* 0x6E20B800	NEG      	 */
 		vneg8h,                                                  	/* 0x6E60B800	NEG      	 */
@@ -907,6 +924,12 @@
 		vrev64_16b,                                              	/* 0x4E200800	REV64    	 */
 		vrev64_8h,                                               	/* 0x4E600800	REV64    	 */
 		vrev64_4s,                                               	/* 0x4EA00800	REV64    	 */
+		vxtn_8b,                                                 	/* 0x0E212800	XTN     	 */
+		vxtn_4h,                                                 	/* 0x0E612800	XTN     	 */
+		vxtn_2s,                                                 	/* 0x0EA12800	XTN     	 */
+		vxtn2_16b,                                               	/* 0x4E212800	XTN2    	 */
+		vxtn2_8h,                                                	/* 0x4E612800	XTN2    	 */
+		vxtn2_4s,                                                	/* 0x4EA12800	XTN2    	 */
 	/* Vector Copy */
 		/* DUP (general) */
 		vdup16b,                                               		/* 0x4E010C00	DUP      	 */

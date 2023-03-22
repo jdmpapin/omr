@@ -861,7 +861,158 @@ OMR::Power::TreeEvaluator::PassThroughEvaluator(TR::Node *node, TR::CodeGenerato
    return TR::TreeEvaluator::passThroughEvaluator(node, cg);
    }
 
+// mask evaluators
+TR::Register*
+OMR::Power::TreeEvaluator::mAnyTrueEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return vloadEvaluator(node, cg);
+   }
 
+TR::Register*
+OMR::Power::TreeEvaluator::mAllTrueEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return vloadEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::mmAnyTrueEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return vloadEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::mmAllTrueEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return vloadEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::mloadEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return vloadEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::mloadiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return vloadiEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::mstoreEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return vstoreEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::mstoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return vstoreiEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::mTrueCountEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::mFirstTrueEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::mLastTrueEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::mToLongBitsEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::mLongBitsToMaskEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::mRegLoadEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::mRegStoreEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::b2mEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::s2mEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::i2mEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::l2mEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::v2mEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::m2bEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::m2sEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::m2iEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::m2lEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::Power::TreeEvaluator::m2vEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+// vector evaluators
 TR::Register*
 OMR::Power::TreeEvaluator::vcmpeqEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
@@ -982,10 +1133,187 @@ OMR::Power::TreeEvaluator::vstoreiEvaluator(TR::Node *node, TR::CodeGenerator *c
    return TR::TreeEvaluator::vstoreEvaluator(node, cg);
    }
 
+static TR::Register *vreductionAddSubWordHelper(TR::Node *node, TR::CodeGenerator *cg, TR::InstOpCode::Mnemonic sumOp)
+   {
+   TR::Node *firstChild = node->getFirstChild();
+
+   TR::Register *srcReg = cg->evaluate(firstChild);
+   TR::Register *resReg = cg->allocateRegister();
+
+   TR::Register *tempRes = cg->allocateRegister(TR_VRF);
+   TR::Register *zeroReg = cg->allocateRegister(TR_VRF);
+
+   node->setRegister(resReg);
+
+   //Evaluate sum across vector operand. Since the operands will be either 8 or 16 bytes long, and thus the results cannot overflow, it is safe to use saturate sum instructions here
+   generateTrg1ImmInstruction(cg, TR::InstOpCode::vspltisw, node, zeroReg, 0);
+   generateTrg1Src2Instruction(cg, sumOp, node, tempRes, srcReg, zeroReg); //Sum across each word element
+   generateTrg1Src2Instruction(cg, TR::InstOpCode::vsumsws, node, tempRes, tempRes, zeroReg); //Sum word elements across entire vector operand
+
+   //Copy result into GPR
+   if (cg->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P9))
+      generateTrg1Src1Instruction(cg, TR::InstOpCode::mfvsrld, node, resReg, tempRes);
+   else
+   {
+      generateTrg1Src2ImmInstruction(cg, TR::InstOpCode::xxpermdi, node, tempRes, tempRes, zeroReg, 3); //move sum to upper doubleword element of tempRes
+      generateTrg1Src1Instruction(cg, TR::InstOpCode::mfvsrd, node, resReg, tempRes);
+   }
+
+   cg->stopUsingRegister(tempRes);
+   cg->stopUsingRegister(zeroReg);
+   cg->decReferenceCount(firstChild);
+
+   return resReg;
+   }
+
+static TR::Register *vreductionAddWordHelper(TR::Node *node, TR::CodeGenerator *cg, TR::DataType type)
+   {
+   TR::Node *firstChild = node->getFirstChild();
+
+   TR::Register *srcReg = cg->evaluate(firstChild);
+   TR::Register *resReg;
+
+   TR::Register *shiftReg = cg->allocateRegister(TR_VRF);
+   TR::Register *temp = cg->allocateRegister(TR_VRF);
+   TR::Register *tempGPR;
+   TR::Register *tempVSX;
+
+   //choose addOp and allocate registers based on data type
+   TR::InstOpCode::Mnemonic addOp;
+
+   if (type == TR::Int32)
+   {
+      addOp = TR::InstOpCode::vadduwm;
+      tempVSX = cg->allocateRegister(TR_VRF);
+      tempGPR = cg->allocateRegister();
+      resReg = tempGPR;
+   }
+   else if (type == TR::Float)
+   {
+      addOp = TR::InstOpCode::xvaddsp;
+      tempVSX = cg->allocateRegister(TR_FPR); //since the final answer is a floating point value, we want to make sure that
+                                              //the VSX register that is allocated is also an FPR (i.e.: one of VSX 0-31), so
+                                              //that we can avoid having to copy the final answer into an FPR at the end
+      tempGPR = NULL; //not used for TR::Float
+      resReg = tempVSX;
+   }
+   else
+   {
+      TR_ASSERT_FATAL(false, "cannot call vreductionAddWordHelper on vector type %s\n", type.toString());
+      return NULL;
+   }
+
+   node->setRegister(resReg);
+
+   //set shift amount to -32 bits. Since only the lowest 6 bits of shiftReg are used by vrld as an unsigned integer, this will result in a shift of 32 bits
+   generateTrg1ImmInstruction(cg, TR::InstOpCode::vspltisw, node, shiftReg, -16);
+   generateTrg1Src2Instruction(cg, TR::InstOpCode::vadduwm, node, shiftReg, shiftReg, shiftReg);
+
+   //Evaluate sum across vector operand by rotating and performing lanewise addition
+   generateTrg1Src2Instruction(cg, TR::InstOpCode::vrld, node, temp, srcReg, shiftReg);
+   generateTrg1Src2Instruction(cg, addOp, node, tempVSX, srcReg, temp);
+   generateTrg1Src2ImmInstruction(cg, TR::InstOpCode::xxpermdi, node, temp, tempVSX, tempVSX, 2);
+   generateTrg1Src2Instruction(cg, addOp, node, tempVSX, tempVSX, temp);
+
+   //Copy result into GPR if data type is Integer, convert to double precision format if data type is Float
+   if (type == TR::Int32)
+   {
+      generateTrg1Src1Instruction(cg, TR::InstOpCode::mfvsrd, node, tempGPR, tempVSX);
+      cg->stopUsingRegister(tempVSX);
+   }
+   else // type === TR::Float
+   {
+      generateTrg1Src1Instruction(cg, TR::InstOpCode::xscvspdpn, node, tempVSX, tempVSX);
+   }
+
+   cg->stopUsingRegister(shiftReg);
+   cg->stopUsingRegister(temp);
+   cg->decReferenceCount(firstChild);
+
+   return resReg;
+   }
+
+static TR::Register *vreductionAddDoubleWordHelper(TR::Node *node, TR::CodeGenerator *cg, TR::DataType type)
+   {
+   TR::Node *firstChild = node->getFirstChild();
+
+   TR::Register *srcReg = cg->evaluate(firstChild);
+   TR::Register *resReg;
+
+   TR::Register *tempGPR;
+   TR::Register *tempVSX;
+
+   //choose addOp and allocate registers based on data type
+   TR::InstOpCode::Mnemonic addOp;
+
+   if (type == TR::Int64)
+   {
+      addOp = TR::InstOpCode::vaddudm;
+      tempVSX = cg->allocateRegister(TR_VRF);
+      tempGPR = cg->allocateRegister();
+      resReg = tempGPR;
+   }
+   else if (type == TR::Double)
+   {
+      addOp = TR::InstOpCode::xvadddp;
+      tempVSX = cg->allocateRegister(TR_FPR); //since the final answer is a floating point value, we want to make sure that
+                                              //the VSX register that is allocated is also an FPR (i.e.: one of VSX 0-31), so
+                                              //that we can avoid having to copy the final answer into an FPR at the end
+      tempGPR = NULL; //not used for TR::Double
+      resReg = tempVSX;
+   }
+   else
+   {
+      TR_ASSERT_FATAL(false, "cannot call vreductionAddDoubleWordHelper on vector type %s\n", type.toString());
+      return NULL;
+   }
+
+   node->setRegister(resReg);
+
+   //Evaluate sum across vector operand by rotating and performing lanewise addition
+   generateTrg1Src2ImmInstruction(cg, TR::InstOpCode::xxpermdi, node, tempVSX, srcReg, srcReg, 2);
+   generateTrg1Src2Instruction(cg, addOp, node, tempVSX, srcReg, tempVSX);
+
+   //Copy result into GPR if data type is Long Integer
+   if (type == TR::Int64)
+   {
+      generateTrg1Src1Instruction(cg, TR::InstOpCode::mfvsrd, node, tempGPR, tempVSX);
+      cg->stopUsingRegister(tempVSX);
+   }
+
+   cg->decReferenceCount(firstChild);
+
+   return resReg;
+   }
+
 TR::Register*
 OMR::Power::TreeEvaluator::vreductionAddEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   TR_ASSERT_FATAL_WITH_NODE(node, node->getNumChildren() == 1, "vreductionAdd node should have exactly one child");
+
+   TR::Node *firstChild = node->getFirstChild();
+   TR::DataType type = firstChild->getDataType().getVectorElementType();
+
+   TR_ASSERT_FATAL_WITH_NODE(node, firstChild->getDataType().getVectorLength() == TR::VectorLength128,
+                   "Only 128-bit vectors are supported %s", firstChild->getDataType().toString());
+
+   switch(type)
+     {
+     case TR::Int8:
+       return vreductionAddSubWordHelper(node, cg, TR::InstOpCode::vsum4sbs); //since the results will never overflow, it is safe to use a saturate sum instruction here
+     case TR::Int16:
+       return vreductionAddSubWordHelper(node, cg, TR::InstOpCode::vsum4shs); //since the results will never overflow, it is safe to use a saturate sum instruction here
+     case TR::Int32:
+       return vreductionAddWordHelper(node, cg, type);
+     case TR::Int64:
+       return vreductionAddDoubleWordHelper(node, cg, type);
+     case TR::Float:
+       return vreductionAddWordHelper(node, cg, type);
+     case TR::Double:
+       return vreductionAddDoubleWordHelper(node, cg, type);
+     default:
+       TR_ASSERT_FATAL(false, "unrecognized vector type %s\n", firstChild->getDataType().toString()); return NULL;
+     }
    }
 
 TR::Register*
@@ -2765,10 +3093,19 @@ TR::Register *OMR::Power::TreeEvaluator::inlineVectorUnaryOp(TR::Node *node, TR:
 TR::Register *OMR::Power::TreeEvaluator::inlineVectorBinaryOp(TR::Node *node, TR::CodeGenerator *cg, TR::InstOpCode::Mnemonic op) {
    TR::Node *firstChild = node->getFirstChild();
    TR::Node *secondChild = node->getSecondChild();
-   TR::Register *lhsReg = NULL, *rhsReg = NULL;
+   TR::Node *thirdChild = NULL;
+   TR::Register *lhsReg = NULL, *rhsReg = NULL, *maskReg = NULL;
+   bool masked = false;
 
    lhsReg = cg->evaluate(firstChild);
    rhsReg = cg->evaluate(secondChild);
+
+   if (node->getOpCode().isVectorMasked())
+      {
+      masked = true;
+      thirdChild = node->getThirdChild();
+      maskReg = cg->evaluate(thirdChild);
+      }
 
    if (TR::InstOpCode(op).isVMX())
       {
@@ -2781,11 +3118,22 @@ TR::Register *OMR::Power::TreeEvaluator::inlineVectorBinaryOp(TR::Node *node, TR
       resReg = cg->allocateRegister(TR_VSX_VECTOR);
    else
       resReg = cg->allocateRegister(TR_VRF);
-   node->setRegister(resReg);
+
    generateTrg1Src2Instruction(cg, op, node, resReg, lhsReg, rhsReg);
 
+   if (masked)
+      {
+      TR_ASSERT_FATAL(resReg->getKind() == TR_VSX_VECTOR, "Only masked VSX opcodes are currenlty supported\n");
+      generateTrg1Src3Instruction(cg, TR::InstOpCode::xxsel, node, resReg, lhsReg, resReg, maskReg);
+      }
+
+   node->setRegister(resReg);
    cg->decReferenceCount(firstChild);
    cg->decReferenceCount(secondChild);
+
+   if (masked)
+      cg->decReferenceCount(thirdChild);
+
    return resReg;
 }
 
@@ -3401,29 +3749,63 @@ TR::Register *OMR::Power::TreeEvaluator::vnegEvaluator(TR::Node *node, TR::CodeG
 
    switch(node->getDataType().getVectorElementType())
      {
+     case TR::Int8:
+       return TR::TreeEvaluator::vnegIntHelper(node, cg, TR::Int8);
+     case TR::Int16:
+       return TR::TreeEvaluator::vnegIntHelper(node, cg, TR::Int16);
      case TR::Int32:
-       return TR::TreeEvaluator::vnegInt32Helper(node,cg);
+       return TR::TreeEvaluator::vnegIntHelper(node, cg, TR::Int32);
+     case TR::Int64:
+       return TR::TreeEvaluator::vnegIntHelper(node, cg, TR::Int64);
      case TR::Float:
-       return TR::TreeEvaluator::vnegFloatHelper(node,cg);
+       return TR::TreeEvaluator::vnegFloatHelper(node, cg);
      case TR::Double:
-       return TR::TreeEvaluator::vnegDoubleHelper(node,cg);
+       return TR::TreeEvaluator::vnegDoubleHelper(node, cg);
      default:
        TR_ASSERT(false, "unrecognized vector type %s\n", node->getDataType().toString()); return NULL;
      }
    }
 
-TR::Register *OMR::Power::TreeEvaluator::vnegInt32Helper(TR::Node *node, TR::CodeGenerator *cg)
+TR::Register *OMR::Power::TreeEvaluator::vnegIntHelper(TR::Node *node, TR::CodeGenerator *cg, TR::DataType type)
    {
+   if (cg->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P9))
+      {
+      if (type == TR::Int32)
+         return TR::TreeEvaluator::inlineVectorUnaryOp(node, cg, TR::InstOpCode::vnegw);
+      else if (type == TR::Int64)
+         return TR::TreeEvaluator::inlineVectorUnaryOp(node, cg, TR::InstOpCode::vnegd);
+      }
+
    TR::Node *firstChild;
    TR::Register *srcReg;
    TR::Register *resReg;
+
+   TR::InstOpCode::Mnemonic sub;
+
+   switch(type)
+      {
+      case TR::Int8:
+         sub = TR::InstOpCode::vsububm;
+         break;
+      case TR::Int16:
+         sub = TR::InstOpCode::vsubuhm;
+         break;
+      case TR::Int32:
+         sub = TR::InstOpCode::vsubuwm;
+         break;
+      case TR::Int64:
+         sub = TR::InstOpCode::vsubudm;
+         break;
+      default:
+         TR_ASSERT_FATAL(false, "vnegIntHelper() can only be called on integer-type vectors");
+      }
 
    firstChild = node->getFirstChild();
    srcReg = cg->evaluate(firstChild);
 
    resReg = cg->allocateRegister(TR_VRF);
    generateTrg1Src2Instruction(cg, TR::InstOpCode::xxlxor, node, resReg, srcReg, srcReg);
-   generateTrg1Src2Instruction(cg, TR::InstOpCode::vsubuwm, node, resReg, resReg, srcReg);
+   generateTrg1Src2Instruction(cg, sub, node, resReg, resReg, srcReg);
    node->setRegister(resReg);
 
    cg->decReferenceCount(firstChild);
@@ -3965,6 +4347,176 @@ TR::Register *OMR::Power::TreeEvaluator::vorUncheckedEvaluator(TR::Node *node, T
    }
 
 TR::Register *OMR::Power::TreeEvaluator::vfirstNonZeroEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmabsEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmaddEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return vaddEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmandEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmcmpeqEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmcmpneEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmcmpgtEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmcmpgeEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmcmpltEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmcmpleEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmdivEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmfmaEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmindexVectorEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmloadiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmmaxEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmminEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmmulEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmnegEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmnotEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmorEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmorUncheckedEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmreductionAddEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmreductionAndEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmreductionFirstNonZeroEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmreductionMaxEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmreductionMinEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmreductionMulEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmreductionOrEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmreductionOrUncheckedEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmreductionXorEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmsqrtEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmstoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmsubEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmxorEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register* OMR::Power::TreeEvaluator::vmfirstNonZeroEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
    }

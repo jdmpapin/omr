@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -120,6 +120,13 @@ typedef enum MM_MarkingSchemeScanReason {
 	SCAN_REASON_REMEMBERED_SET_SCAN = 3, /**< Indicates the object being scanned was in a remembered set */
 	SCAN_REASON_OVERFLOWED_OBJECT = 4, /**< Indicates the object being scanned was in an overflowed region */
 } MM_MarkingSchemeScanReason;
+
+typedef enum MM_ScavengeScanReason {
+	SCAN_REASON_SCAVENGE = 10,
+	SCAN_REASON_FIXUP  = 11,
+	SCAN_REASON_BACKOUT = 12,
+	SCAN_REASON_SHOULDREMEMBER = 13,
+} MM_ScavengeScanReason;
 
 #define OMR_GC_CYCLE_TYPE_DEFAULT     0
 #define OMR_GC_CYCLE_TYPE_GLOBAL      1
@@ -356,7 +363,8 @@ typedef enum {
 	ABORT_COLLECTION_REMEMBERSET_OVERFLOW,
 	ABORT_COLLECTION_SCAVENGE_REMEMBEREDSET_OVERFLOW,
 	ABORT_COLLECTION_PREPARE_HEAP_FOR_WALK,
-	ABORT_COLLECTION_IDLE_GC
+	ABORT_COLLECTION_IDLE_GC,
+	ABORT_COLLECTION_PREPARE_FOR_CHECKPOINT_GC
 } CollectionAbortReason;
 
 /**

@@ -410,23 +410,25 @@ MM_MarkingScheme::createWorkPackets(MM_EnvironmentBase *env)
 	return workPackets;
 }
 
-void
-MM_MarkingScheme::fixupForwardedSlotOutline(GC_SlotObject *slotObject) {
+bool
+MM_MarkingScheme::fixupForwardedSlot(omrobjectptr_t *slotPtr) {
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
 	bool const compressed = _extensions->compressObjectReferences();
 	if (_extensions->getGlobalCollector()->isStwCollectionInProgress()) {
-		MM_ForwardedHeader forwardHeader(slotObject->readReferenceFromSlot(), compressed);
+		MM_ForwardedHeader forwardHeader(*slotPtr, compressed);
 		omrobjectptr_t forwardPtr = forwardHeader.getNonStrictForwardedObject();
 
 		if (NULL != forwardPtr) {
 			if (forwardHeader.isSelfForwardedPointer()) {
 				forwardHeader.restoreSelfForwardedPointer();
 			} else {
-				slotObject->writeReferenceToSlot(forwardPtr);
+				*slotPtr = forwardPtr;
+				return true;
 			}
 		}
 	}
 #endif /* OMR_GC_CONCURRENT_SCAVENGER */
+	return false;
 }
 
 uintptr_t

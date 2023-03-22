@@ -49,7 +49,6 @@
 #include "ras/Debug.hpp"
 #include "x/codegen/ConstantDataSnippet.hpp"
 #include "x/codegen/OutlinedInstructions.hpp"
-#include "x/codegen/X86Evaluator.hpp"
 #include "x/codegen/X86Instruction.hpp"
 #include "codegen/InstOpCode.hpp"
 
@@ -1464,12 +1463,6 @@ OMR::X86::AMD64::TreeEvaluator::vsplatsEvaluator(TR::Node *node, TR::CodeGenerat
    }
 
 TR::Register*
-OMR::X86::AMD64::TreeEvaluator::vfmaEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-   {
-   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
-   }
-
-TR::Register*
 OMR::X86::AMD64::TreeEvaluator::vabsEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    return TR::TreeEvaluator::unaryVectorArithmeticEvaluator(node, cg);
@@ -1495,12 +1488,6 @@ OMR::X86::AMD64::TreeEvaluator::vaddEvaluator(TR::Node *node, TR::CodeGenerator 
 
 TR::Register*
 OMR::X86::AMD64::TreeEvaluator::vsubEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-   {
-   return TR::TreeEvaluator::vectorBinaryArithmeticEvaluator(node, cg);
-   }
-
-TR::Register*
-OMR::X86::AMD64::TreeEvaluator::vmulEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    return TR::TreeEvaluator::vectorBinaryArithmeticEvaluator(node, cg);
    }

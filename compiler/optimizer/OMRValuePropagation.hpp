@@ -588,6 +588,16 @@ class ValuePropagation : public TR::Optimization
    virtual void constrainRecognizedMethod(TR::Node *node);
    virtual bool transformDirectLoad(TR::Node *node);
 
+   /**
+    * \brief Determine whether a signature naming \p klass is unreliable.
+    *
+    * \param      klass  The type named in the signature.
+    * \param[out] erased The type, if any, that is reliably known.
+    * \return true if the signature is unreliable, and false otherwise.
+    */
+   virtual bool isUnreliableSignatureType(
+      TR_OpaqueClassBlock *klass, TR_OpaqueClassBlock *&erased);
+
    struct ObjCloneInfo {
       TR_ALLOC(TR_Memory::ValuePropagation)
 
@@ -766,7 +776,6 @@ class ValuePropagation : public TR::Optimization
         TR::Block            *_block;
         };
 
-    TR_LinkHead<VirtualGuardInfo> _convertedGuards;
     TR_LinkHead<CallInfo> _devirtualizedCalls;
     TR_LinkHead<CallInfo> _unsafeCallsToInline;
 

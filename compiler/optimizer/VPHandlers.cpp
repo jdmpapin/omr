@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright (c) 2000, 2023 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -284,54 +284,6 @@ static int32_t arrayElementSize(const char *signature, int32_t len, TR::Node *no
    return 0;
    }
 
-
-
-static void constrainBaseObjectOfIndirectAccess(OMR::ValuePropagation *vp, TR::Node *node)
-   {
-   return;  // 84287 - disabled for now.
-
-   //if (!debug("enableBaseConstraint"))
-   //   return;
-
-   int32_t baseObjectSigLen;
-   TR_ResolvedMethod *method = node->getSymbolReference()->getOwningMethod(vp->comp());
-   char *baseObjectSig = method->classNameOfFieldOrStatic(node->getSymbolReference()->getCPIndex(), baseObjectSigLen);
-   if (baseObjectSig)
-      baseObjectSig = TR::Compiler->cls.classNameToSignature(baseObjectSig, baseObjectSigLen, vp->comp());
-   if (baseObjectSig)
-      {
-      TR_OpaqueClassBlock *baseClass = vp->fe()->getClassFromSignature(baseObjectSig, baseObjectSigLen, method);
-      if (  baseClass
-         && TR::Compiler->cls.isInterfaceClass(vp->comp(), baseClass)
-         && !vp->comp()->getOption(TR_TrustAllInterfaceTypeInfo))
-         {
-         baseClass = NULL;
-         }
-
-      if (baseClass)
-         {
-         // check if there is an existing class constraint
-         // before trying to refine the constraint
-         bool isGlobal;
-         TR::VPConstraint *baseConstraint = vp->getConstraint(node->getFirstChild(), isGlobal);
-         TR::VPConstraint *constraint = TR::VPClassType::create(vp, baseObjectSig, baseObjectSigLen, method, false, baseClass);
-         // only if its a class constraint
-         if (baseConstraint && baseConstraint->getClassType())
-            {
-            if (vp->trace())
-               {
-               traceMsg(vp->comp(), "Found existing class constraint for node (%p) :\n", node->getFirstChild());
-               baseConstraint->print(vp->comp(), vp->comp()->getOutFile());
-               }
-            // check if it can be refined
-            if (!constraint->intersect(baseConstraint, vp))
-               return; // nope, bail
-            }
-         vp->addBlockConstraint(node->getFirstChild(), constraint);
-         }
-      }
-   }
-
 // When node is successfully folded, isGlobal is set to true iff all
 // constraints in the chain were global, and false otherwise.
 static bool tryFoldCompileTimeLoad(
@@ -463,8 +415,19 @@ static bool tryFoldCompileTimeLoad(
             if (vp->comp()->compileRelocatableCode() && !vp->comp()->getOption(TR_UseSymbolValidationManager) && (vp->comp()->target().cpu.isPower() || fej9->getClassLoader(clazz) != fej9->getSystemClassLoader()))
                return false;
 #endif
-            if (vp->trace())
-               traceMsg(vp->comp(), "VP Transforming VFTLoad to loadaddr: as n%dn is VFT load of known class", node->getGlobalIndex());
+            // performTransformation() is needed here but not in the other cases
+            // because transformIndirectLoadChain[At]() does one internally.
+            if (!performTransformation(
+                  vp->comp(),
+                  "%sTransforming VFT load n%un [%p] to loadaddr "
+                  "based on the fixed type of n%un [%p]\n",
+                  OPT_DETAILS,
+                  node->getGlobalIndex(),
+                  node,
+                  curNode->getGlobalIndex(),
+                  curNode))
+               return false;
+
             node->setNumChildren(0);
             TR::Node::recreateWithSymRef(node, TR::loadaddr, vp->comp()->getSymRefTab()->findOrCreateClassSymbol(vp->comp()->getMethodSymbol(), -1, clazz));
             node->setFlags(0);
@@ -1415,8 +1378,6 @@ TR::Node *constrainLload(OMR::ValuePropagation *vp, TR::Node *node)
 
    if (node->getOpCode().isIndirect())
       {
-      constrainBaseObjectOfIndirectAccess(vp, node);
-
       checkUnsafeArrayAccess(vp, node);
 
       // if the node contains an unsafe symbol reference
@@ -1463,8 +1424,6 @@ TR::Node *constrainFload(OMR::ValuePropagation *vp, TR::Node *node)
 
    if (node->getOpCode().isIndirect())
       {
-      constrainBaseObjectOfIndirectAccess(vp, node);
-
       // if the node contains an unsafe symbol reference
       // then don't inject a constraint
       if (containsUnsafeSymbolReference(vp, node))
@@ -1487,8 +1446,6 @@ TR::Node *constrainDload(OMR::ValuePropagation *vp, TR::Node *node)
 
    if (node->getOpCode().isIndirect())
       {
-      constrainBaseObjectOfIndirectAccess(vp, node);
-
       checkUnsafeArrayAccess(vp, node);
 
       // if the node contains an unsafe symbol reference
@@ -1862,13 +1819,9 @@ TR::Node *constrainAload(OMR::ValuePropagation *vp, TR::Node *node)
          if (sig)
             {
             TR_OpaqueClassBlock *classBlock = vp->fe()->getClassFromSignature(sig, len, symRef->getOwningMethod(vp->comp()));
-
-            if (  classBlock
-               && TR::Compiler->cls.isInterfaceClass(vp->comp(), classBlock)
-               && !vp->comp()->getOption(TR_TrustAllInterfaceTypeInfo))
-               {
-               classBlock = NULL;
-               }
+            TR_OpaqueClassBlock *erased = NULL;
+            if (vp->isUnreliableSignatureType(classBlock, erased))
+               classBlock = erased;
 
             if (classBlock)
                {
@@ -2057,8 +2010,6 @@ TR::Node *constrainIiload(OMR::ValuePropagation *vp, TR::Node *node)
       return node;
    constrainChildren(vp, node);
 
-   constrainBaseObjectOfIndirectAccess(vp, node);
-
    // if the node contains an unsafe symbol reference
    // then don't inject a constraint
    if (containsUnsafeSymbolReference(vp, node))
@@ -2130,8 +2081,6 @@ TR::Node *constrainIaload(OMR::ValuePropagation *vp, TR::Node *node)
    if (findConstant(vp, node))
       return node;
    constrainChildren(vp, node);
-
-   constrainBaseObjectOfIndirectAccess(vp, node);
 
    // if the node contains an unsafe symbol reference
    // then don't inject a constraint
@@ -2658,13 +2607,9 @@ TR::Node *constrainIaload(OMR::ValuePropagation *vp, TR::Node *node)
       {
       TR_ResolvedMethod *method = node->getSymbolReference()->getOwningMethod(vp->comp());
       TR_OpaqueClassBlock *classBlock = vp->fe()->getClassFromSignature(sig, len, method);
-
-      if (  classBlock
-         && TR::Compiler->cls.isInterfaceClass(vp->comp(), classBlock)
-         && !vp->comp()->getOption(TR_TrustAllInterfaceTypeInfo))
-         {
-         classBlock = NULL;
-         }
+      TR_OpaqueClassBlock *erased = NULL;
+      if (vp->isUnreliableSignatureType(classBlock, erased))
+         classBlock = erased;
 
       if (classBlock)
          {
@@ -2920,10 +2865,12 @@ TR::Node *constrainStore(OMR::ValuePropagation *vp, TR::Node *node)
        owningMethodDoesNotContainNullChecks(vp, node))
       vp->addBlockConstraint(node->getFirstChild(), TR::VPNonNullObject::create(vp));
 
-   if (node->getOpCode().isIndirect())
-      constrainBaseObjectOfIndirectAccess(vp, node);
-   else if (vp->_curDefinedOnAllPaths && node->getSymbol()->isAutoOrParm())
+   if (!node->getOpCode().isIndirect()
+       && vp->_curDefinedOnAllPaths
+       && node->getSymbol()->isAutoOrParm())
+      {
       vp->_curDefinedOnAllPaths->set(node->getSymbolReference()->getReferenceNumber());
+      }
 
    return node;
    }
@@ -3079,7 +3026,6 @@ TR::Node *constrainWrtBar(OMR::ValuePropagation *vp, TR::Node *node)
 
    if (node->getOpCode().isIndirect())
       {
-      constrainBaseObjectOfIndirectAccess(vp, node);
       // if the node contains an unsafe symbol reference
       // then don't inject a constraint
       if (containsUnsafeSymbolReference(vp, node))
@@ -5046,24 +4992,6 @@ TR::Node *constrainArraylength(OMR::ValuePropagation *vp, TR::Node *node)
    return node;
    }
 
-static void refineSymbolReferenceForProfiledToOverridden (OMR::ValuePropagation* vp, TR::Node* callNode, TR::SymbolReference * newSymRef)
-   {
-   for (OMR::ValuePropagation::VirtualGuardInfo *cvg = vp->_convertedGuards.getFirst(); cvg; cvg = cvg->getNext())
-      {
-      if (cvg->_callNode == callNode)
-         {
-         if (vp->trace())
-            {
-            traceMsg(vp->comp(), "Replaced with newSymRef %d in a Profiled2Overridden guard %p\n", newSymRef->getReferenceNumber(), cvg->_newVirtualGuard);
-
-            }
-
-         cvg->_newVirtualGuard->setSymbolReference(newSymRef);
-         break;
-         }
-      }
-   }
-
 static TR::MethodSymbol *
 refineMethodSymbolInCall(
    OMR::ValuePropagation *vp,
@@ -5078,7 +5006,6 @@ refineMethodSymbolInCall(
    newSymRef->copyAliasSets(symRef, vp->comp()->getSymRefTab());
    newSymRef->setOffset(offset);
    TR::MethodSymbol *methodSymbol = newSymRef->getSymbol()->castToMethodSymbol();
-   refineSymbolReferenceForProfiledToOverridden(vp, node, newSymRef);
    node->setSymbolReference(newSymRef);
    if (vp->trace())
       traceMsg(vp->comp(), "Refined method symbol to %s\n", resolvedMethod->signature(vp->trMemory()));
@@ -6751,18 +6678,23 @@ TR::Node *constrainIrem(OMR::ValuePropagation *vp, TR::Node *node)
       int32_t rhsConst = rhs->asIntConst()->getInt();
       if (!isUnsigned && rhsConst < 0)
          rhsConst *= -1;
-      rhsConst--; // If the original const was 10, the range is from 0 to 9
 
-      if (lhsLow > 0)
-         constraint = TR::VPIntRange::create(vp, 0, rhsConst);
-      else if (!isUnsigned && lhsHigh < 0)
-         constraint = TR::VPIntRange::create(vp, -rhsConst, 0);
-      else if (!isUnsigned)
-         constraint = TR::VPIntRange::create(vp, -rhsConst, rhsConst);
-
-      if (constraint)
+      // Guard against division by zero
+      if (rhsConst != 0)
          {
-         vp->addBlockOrGlobalConstraint(node, constraint ,lhsGlobal);
+         rhsConst--; // If the original const was 10, the range is from 0 to 9
+
+         if (lhsLow > 0)
+            constraint = TR::VPIntRange::create(vp, 0, rhsConst);
+         else if (!isUnsigned && lhsHigh < 0)
+            constraint = TR::VPIntRange::create(vp, -rhsConst, 0);
+         else if (!isUnsigned)
+            constraint = TR::VPIntRange::create(vp, -rhsConst, rhsConst);
+
+         if (constraint)
+            {
+            vp->addBlockOrGlobalConstraint(node, constraint ,lhsGlobal);
+            }
          }
       }
 
@@ -6809,22 +6741,27 @@ TR::Node *constrainLrem(OMR::ValuePropagation *vp, TR::Node *node)
       int64_t rhsConst = rhs->asLongConst()->getLong();
       if (rhsConst < 0)
          rhsConst *= -1;
-      rhsConst--; // If the original const was 10, the range is from 0 to 9
 
-      if (lhsLow > 0)
-         constraint = TR::VPLongRange::create(vp, 0, rhsConst);
-      else if (lhsHigh < 0)
-         constraint = TR::VPLongRange::create(vp, -rhsConst, 0);
-      else
-         constraint = TR::VPLongRange::create(vp, -rhsConst, rhsConst);
-
-      if (constraint)
+      // Guard against division by zero
+      if (rhsConst != 0)
          {
-         bool didReduction = reduceLongOpToIntegerOp(vp, node, constraint);
-         vp->addBlockOrGlobalConstraint(node, constraint ,lhsGlobal);
+         rhsConst--; // If the original const was 10, the range is from 0 to 9
 
-         if (didReduction)
-            return node;
+         if (lhsLow > 0)
+            constraint = TR::VPLongRange::create(vp, 0, rhsConst);
+         else if (lhsHigh < 0)
+            constraint = TR::VPLongRange::create(vp, -rhsConst, 0);
+         else
+            constraint = TR::VPLongRange::create(vp, -rhsConst, rhsConst);
+
+         if (constraint)
+            {
+            bool didReduction = reduceLongOpToIntegerOp(vp, node, constraint);
+            vp->addBlockOrGlobalConstraint(node, constraint ,lhsGlobal);
+
+            if (didReduction)
+               return node;
+            }
          }
       }
 
@@ -7499,11 +7436,9 @@ TR::Node *constrainIushr(OMR::ValuePropagation *vp, TR::Node *node)
 
       TR::VPConstraint *constraint = NULL;
       if (low == high)
-         constraint = TR::VPIntConst::create(vp, ((uint32_t)low) >> shiftAmount/*, isUnsigned*/);
-      else if (low >= 0)
-         constraint = TR::VPIntRange::create(vp, ((uint32_t)low) >> shiftAmount, ((uint32_t)high) >> shiftAmount/*, isUnsigned*/);
-      else if (high < 0 /*&& !isUnsigned*/)
-         constraint = TR::VPIntRange::create(vp, ((uint32_t)high) >> shiftAmount, ((uint32_t)low) >> shiftAmount);
+         constraint = TR::VPIntConst::create(vp, ((uint32_t)low) >> shiftAmount);
+      else if (low >= 0 || high < 0)
+         constraint = TR::VPIntRange::create(vp, ((uint32_t)low) >> shiftAmount, ((uint32_t)high) >> shiftAmount);
       // this path is probably never taken for unsigned
       else
          {
@@ -7571,10 +7506,8 @@ TR::Node *constrainLushr(OMR::ValuePropagation *vp, TR::Node *node)
       TR::VPConstraint *constraint = NULL;
       if (low == high)
          constraint = TR::VPLongConst::create(vp, ((uint64_t)low) >> shiftAmount);
-      else if (low >= 0)
+      else if (low >= 0 || high < 0)
          constraint = TR::VPLongRange::create(vp, ((uint64_t)low) >> shiftAmount, ((uint64_t)high) >> shiftAmount);
-      else if (high < 0)
-         constraint = TR::VPLongRange::create(vp, ((uint64_t)high) >> shiftAmount, ((uint64_t)low) >> shiftAmount);
       else
          {
          if (shiftAmount > 0)
@@ -7697,42 +7630,34 @@ TR::Node *constrainIand(OMR::ValuePropagation *vp, TR::Node *node)
                if (vp->trace())
                   traceMsg(vp->comp(), "Found isArray test on node %p\n", node);
 
-               TR::Node *vftLoad = firstChild->getFirstChild();
+               TR::Node *classNode = firstChild->getFirstChild();
 
-               if (vftLoad->getOpCodeValue() == TR::aloadi || vftLoad->getOpCodeValue() == TR::loadaddr)
+               bool classConstraintIsGlobal;
+               TR::VPConstraint *classConstraint =
+                  vp->getConstraint(classNode, classConstraintIsGlobal);
+
+               const char *hitOrMiss = "miss";
+               if (classConstraint != NULL
+                   && classConstraint->isJ9ClassObject() == TR_yes
+                   && classConstraint->getClassType() != NULL
+                   && classConstraint->getClassType()->isArray() != TR_maybe)
                   {
-                  TR::Node *baseExpression = NULL;
-                  if (vftLoad->getOpCodeValue() == TR::loadaddr)
-                     baseExpression = vftLoad;
+                  hitOrMiss = "hit";
+
+                  if (classConstraint->getClassType()->isArray() == TR_yes)
+                     constraint = TR::VPIntConst::create(vp, rhs->asIntConst()->getLowInt());
                   else
-                     baseExpression = vftLoad->getFirstChild();
-
-                  if (vp->trace())
-                     traceMsg(vp->comp(), "Base expression node for isArray test is %p\n", baseExpression);
-
-                  bool baseExpressionGlobal;
-                  TR::VPConstraint *baseExpressionConstraint = vp->getConstraint(baseExpression, baseExpressionGlobal);
-                  if (baseExpressionConstraint && baseExpressionConstraint->getClassType() && (baseExpressionConstraint->getClassType()->isArray() != TR_maybe))
-                     {
-                     if (vp->trace())
-                        traceMsg(vp->comp(), "Fold isArray test in %p\n", baseExpression);
-
-                     if (baseExpressionConstraint->getClassType()->isArray() == TR_yes)
-                        constraint = TR::VPIntConst::create(vp, rhs->asIntConst()->getLowInt());
-                     else
-                        constraint = TR::VPIntConst::create(vp, 0);
-
-                     TR::DebugCounter::incStaticDebugCounter(vp->comp(), TR::DebugCounter::debugCounterName(vp->comp(), "isArrayTest/hit/(%s)/%s", vp->comp()->signature(), vp->comp()->getHotnessName(vp->comp()->getMethodHotness())));
-                     }
-                  else
-                     {
-                     TR::DebugCounter::incStaticDebugCounter(vp->comp(), TR::DebugCounter::debugCounterName(vp->comp(), "isArrayTest/miss/(%s)/%s", vp->comp()->signature(), vp->comp()->getHotnessName(vp->comp()->getMethodHotness())));
-                     }
+                     constraint = TR::VPIntConst::create(vp, 0);
                   }
-                  else
-                     {
-                     TR::DebugCounter::incStaticDebugCounter(vp->comp(), TR::DebugCounter::debugCounterName(vp->comp(), "isArrayTest/unsuitable/(%s)/%s", vp->comp()->signature(), vp->comp()->getHotnessName(vp->comp()->getMethodHotness())));
-                     }
+
+               TR::DebugCounter::incStaticDebugCounter(
+                  vp->comp(),
+                  TR::DebugCounter::debugCounterName(
+                     vp->comp(),
+                     "isArrayTest/%s/(%s)/%s",
+                     hitOrMiss,
+                     vp->comp()->signature(),
+                     vp->comp()->getHotnessName(vp->comp()->getMethodHotness())));
                }
             }
 
@@ -8318,67 +8243,195 @@ void replaceWithSmallerType(OMR::ValuePropagation *vp, TR::Node *node)
 
    }
 
-
-static TR::Node *constrainNarrowIntValue(OMR::ValuePropagation *vp, TR::Node *node, int32_t low, int32_t high)
+static TR::Node *constrainNarrowIntValue(OMR::ValuePropagation *vp, TR::Node *node)
    {
    if (findConstant(vp, node))
       return node;
+
    constrainChildren(vp, node);
+
    bool isGlobal;
    TR::VPConstraint *constraint = vp->getConstraint(node->getFirstChild(), isGlobal);
+   if (constraint == NULL)
+      return node;
 
-   if (constraint)
+   const int32_t resultSizeBits = 8 * TR::DataType::getSize(node->getDataType());
+   const int64_t signBit = (int64_t)1 << (resultSizeBits - 1);
+   const int32_t padding64 = 64 - resultSizeBits;
+   const int64_t min = -signBit;
+   const int64_t max = signBit - 1;
+
+   // Find the range of values that the child could produce.
+   int64_t low = 0;
+   int64_t high = 0;
+   if (constraint->asLongConstraint() != NULL
+       || constraint->asMergedLongConstraints() != NULL)
       {
-      if (constraint->asIntConstraint() || constraint->asMergedIntConstraints())
-         {
-         if (constraint->getLowInt() > low && constraint->getHighInt() < high)
-            {
-            if (constraint->getLowInt() > low)
-               low  = constraint->getLowInt();
-            if (constraint->getHighInt() < high)
-               high = constraint->getHighInt();
-            }
-         }
-      else if (constraint->asLongConstraint() || constraint->asMergedLongConstraints())
-         {
-         if (constraint->getLowLong() > low && constraint->getHighLong() < high)
-            {
-            if (constraint->getLowLong() <= TR::getMaxSigned<TR::Int32>() &&
-               constraint->getLowLong() > low)
-               low  = (int32_t)constraint->getLowLong();
-            if (constraint->getHighLong() >= TR::getMinSigned<TR::Int32>() &&
-               constraint->getHighLong() < high)
-               high = (int32_t)constraint->getHighLong();
-            }
-
-         if (vp->comp()->getOptions()->getDebugEnableFlag(TR_EnableUnneededNarrowIntConversion) &&
-             constraint->getLowLong() >= 0 && node->isUnsigned())
-            {
-            node->setUnneededConversion(true);
-            }
-         }
+      low = constraint->getLowLong();
+      high = constraint->getHighLong();
+      }
+   else if (constraint->asIntConstraint() != NULL
+            || constraint->asMergedIntConstraints() != NULL)
+      {
+      low = constraint->getLowInt();
+      high = constraint->getHighInt();
+      }
+   else if (constraint->asShortConstraint() != NULL
+            || constraint->asMergedShortConstraints() != NULL)
+      {
+      low = constraint->getLowShort();
+      high = constraint->getHighShort();
+      }
+   else
+      {
+      TR_ASSERT_FATAL_WITH_NODE(node, false, "bad integer narrowing child constraint");
       }
 
-   if (low <= high)
+   TR_ASSERT_FATAL_WITH_NODE(node, low <= high, "reversed child constraint bounds");
+
+   if (min <= low && high <= max)
       {
-      // Make sure the constraint is not trivial
+      // The child's value is the sign-extension of a resultSizeBits-bit value,
+      // i.e. this conversion is lossless when the input and output are both
+      // interpreted as signed.
+      node->setCannotOverflow(true);
+      }
+
+   // Determine whether the range [low, high] contains two adjacent values that
+   // truncate to max and min, e.g. for a byte result:
+   //
+   //    { low, ..., 0x..7f, 0x..80, ..., high }
+   //
+   // This occurs precisely when [low + signBit, high + signBit] contains two
+   // adjacent values that truncate to the unsigned max and 0, e.g. for byte:
+   //
+   //    { low + signBit, ..., 0x..ff, 0x..00, ..., high + signBit }
+   //
+   // And, in turn, this is the case iff (low + signBit) and (high + signBit)
+   // are still in the right order, i.e. low + signBit <= high + signBit, and
+   // they differ in their upper bits, i.e. the bits that will be discarded.
+   //
+   // Cast to unsigned before adding to avoid undefined behaviour.
+   //
+   const int64_t biasedLow = (int64_t)((uint64_t)low + (uint64_t)signBit);
+   const int64_t biasedHigh = (int64_t)((uint64_t)high + (uint64_t)signBit);
+   if (biasedLow > biasedHigh)
+      {
+      // Signed overflow in (high + signBit) but not (low + signBit). Both min,
+      // max are possible. To see why, let b=resultSizeBits. Then because of
+      // the detected signed overflow, we know that
       //
-      int64_t min = TR::getMinSigned<TR::Int32>(), max = TR::getMaxSigned<TR::Int32>();
-      switch (node->getDataType())
+      //    low + 2**(b-1) < 2**63     and     high + 2**(b-1) >= 2**63.
+      //
+      // This means that low < k <= high, where
+      //
+      //    k = 2**63 - 2**(b-1) = 2**(63-b) * 2**b - 2**(b-1).
+      //
+      // Since the truncation of k is min, and the truncation of k-1 is max, and
+      // since k-1 and k are both in [low, high], both min and max are possible.
+      //
+      return node; // unconstrained
+      }
+
+   // There was overflow in both biasedLow and biasedHigh, or (more likely) in
+   // neither, so checking the top bits will work.
+   const int64_t lowTopBits = biasedLow >> resultSizeBits;
+   const int64_t highTopBits = biasedHigh >> resultSizeBits;
+
+   if (lowTopBits != highTopBits)
+      return node; // unconstrained (min, max are both possible)
+
+   // Since lowTopBits == highTopBits, truncation will always effectively
+   // subtract the same multiple of 2**resultSizeBits from the signed value,
+   // and so it preserves signed ordering, i.e. if x, y are possible values of
+   // the child with x <= y, then truncate(x) <= truncate(y).
+   //
+   // To see why this must be the case, let b=resultSizeBits, let Q=lowTopBits,
+   // and let x be the signed value of the child. Note that signBit = 2**(b-1).
+   // Then
+   //
+   //    Q * 2**b <= low + 2**(b-1)
+   //    Q * 2**b - 2**(b-1) <= low
+   //
+   // and
+   //
+   //    high + 2**(b-1) < (Q+1) * 2**b
+   //    high < (Q+1) * 2**b - 2**(b-1) = Q * 2**b + 2**(b-1)
+   //
+   // Since low <= x <= high, we know that
+   //
+   //    Q * 2**b - 2**(b-1) <= low <= x <= high < Q * 2**b + 2**(b-1)
+   //    -2**(b-1) <= x - Q * 2**b < 2**(b-1)
+   //
+   // Since [-2**(b-1), 2**(b-1)) is the signed range of the result type, the
+   // signed value of the result is x - Q * 2**b for every x.
+   //
+   // So if x, y are possible signed child values with x <= y, then
+   //
+   //    truncate(x) = x - Q * 2**b <= y - Q * 2**b = truncate(y),
+   //
+   // and in particular since low, high are also possible signed child values
+   // with low <= x <= high, we also know that
+   //
+   //    truncate(low) <= truncate(x) <= truncate(high).
+   //
+   // Therefore, truncating low and high will produce a signed range containing
+   // all possible truncated results.
+   //
+   // NOTE: The above proof assumes that the addition of signBit in the biased
+   // endpoints calculation does not signed-overflow, i.e. that the signed
+   // value of the 64-bit sum is ({low,high} + 2**(b-1)). But it is possible
+   // for such overflow to have occurred in both calculations. If it did, then
+   // the signed values of the sums were really
+   //
+   //    {low,high} + 2**(b-1) - 2**64.
+   //
+   // In this case, we can simply take Q = topLowBits + 2**(64-b) and
+   // everything else will still follow.
+   //
+   // With this justification, get the truncated (and re-extended) bounds. Cast
+   // to unsigned before shifting left to avoid undefined behaviour.
+   //
+   const uint64_t origDiff = (uint64_t)high - (uint64_t)low;
+   low = (int64_t)((uint64_t)low << padding64) >> padding64;
+   high = (int64_t)((uint64_t)high << padding64) >> padding64;
+
+   TR_ASSERT_FATAL_WITH_NODE(node, min <= low, "truncated lower bound is too low");
+   TR_ASSERT_FATAL_WITH_NODE(node, low <= high, "truncated bounds are out of order");
+   TR_ASSERT_FATAL_WITH_NODE(node, high <= max, "truncated upper bound is too high");
+   TR_ASSERT_FATAL_WITH_NODE(
+      node,
+      (uint64_t)high - (uint64_t)low == origDiff,
+      "truncated range is not the same size as the original range");
+
+   if (low >= 0)
+      node->setIsNonNegative(true);
+
+   // Constrain the result.
+   switch (node->getDataType())
+      {
+      case TR::Int16:
+         constraint = TR::VPShortRange::create(vp, (int16_t)low, (int16_t)high);
+         break;
+
+      case TR::Int8: // byte nodes are still using Int constraint
+      case TR::Int32:
+         constraint = TR::VPIntRange::create(vp, (int32_t)low, (int32_t)high);
+         break;
+
+      default:
+         TR_ASSERT_FATAL_WITH_NODE(node, false, "Invalid node datatype");
+      }
+
+   if (constraint != NULL) // might have had low == min && high == max
+      {
+      if (low == high)
          {
-         case TR::Int16: constraint = TR::VPShortRange::create(vp, low, high); min = TR::getMinSigned<TR::Int16>(); max = TR::getMaxSigned<TR::Int16>(); break;
-         case TR::Int8:  min = TR::getMinSigned<TR::Int8>(); max = TR::getMaxSigned<TR::Int8>();    // byte nodes are still using Int constraint
-         case TR::Int32: constraint = TR::VPIntRange::create(vp, low, high); break;
-         default: TR_ASSERT(false, "Invalid node datatype");
+         vp->replaceByConstant(node, constraint, isGlobal);
+         return node;
          }
-      if (constraint)
-         {
-         vp->addBlockOrGlobalConstraint(node, constraint ,isGlobal);
-         }
-      if (low >= 0)
-         node->setIsNonNegative(true);
-      if ((low > min) || (high < max))
-         node->setCannotOverflow(true);
+
+      vp->addBlockOrGlobalConstraint(node, constraint, isGlobal);
       }
 
    replaceWithSmallerType(vp, node);
@@ -8388,97 +8441,17 @@ static TR::Node *constrainNarrowIntValue(OMR::ValuePropagation *vp, TR::Node *no
 
 TR::Node *constrainNarrowToByte(OMR::ValuePropagation *vp, TR::Node *node)
    {
-   return constrainNarrowIntValue(vp, node, static_cast<int32_t>(TR::getMinSigned<TR::Int8>()), static_cast<int32_t>(TR::getMaxSigned<TR::Int8>()));
+   return constrainNarrowIntValue(vp, node);
    }
 
 TR::Node *constrainNarrowToShort(OMR::ValuePropagation *vp, TR::Node *node)
    {
-   return constrainNarrowIntValue(vp, node, static_cast<int32_t>(TR::getMinSigned<TR::Int16>()), static_cast<int32_t>(TR::getMaxSigned<TR::Int16>()));
-   }
-
-TR::Node *constrainNarrowToChar(OMR::ValuePropagation *vp, TR::Node *node)
-   {
-   int32_t low = static_cast<int32_t>(TR::getMinUnsigned<TR::Int16>());
-   int32_t high = static_cast<int32_t>(TR::getMaxUnsigned<TR::Int16>());
-   int32_t max = static_cast<int32_t>(TR::getMaxUnsigned<TR::Int16>() + 1);
-
-   if (findConstant(vp, node))
-      return node;
-   constrainChildren(vp, node);
-   bool isGlobal;
-   TR::VPConstraint *constraint = vp->getConstraint(node->getFirstChild(), isGlobal);
-
-   if (node->getFirstChild()->getOpCodeValue() == TR::b2i
-       || node->getFirstChild()->getOpCodeValue() == TR::bu2i
-       || node->getFirstChild()->getOpCodeValue() == TR::b2s
-       || node->getFirstChild()->getOpCodeValue() == TR::bu2s
-       || node->getFirstChild()->getOpCodeValue() == TR::b2l
-       || node->getFirstChild()->getOpCodeValue() == TR::bu2l)
-      {
-      max = static_cast<int32_t>(TR::getMaxUnsigned<TR::Int8>() + 1);
-      high = static_cast<int32_t>(TR::getMaxUnsigned<TR::Int8>());
-      }
-
-   if (constraint)
-      {
-      if (constraint->asIntConstraint() || constraint->asMergedConstraints())
-         {
-         if (constraint->getLowInt() > 0
-              && constraint->getLowInt() < TR::getMaxUnsigned<TR::Int16>()
-              && constraint->getHighInt() > 0
-              && constraint->getHighInt() < TR::getMaxUnsigned<TR::Int16>())
-            {
-            if (constraint->getLowInt() > low)
-               low = constraint->getLowInt();
-            if (constraint->getHighInt() < high)
-               high = constraint->getHighInt();
-            }
-
-         if (constraint->getLowInt() < 0 && constraint->getLowInt() == constraint->getHighInt())
-            low = high = max + constraint->getLowInt() % (TR::getMaxUnsigned<TR::Int16>() + 1);
-         }
-      else if (constraint->asLongConstraint() || constraint->asMergedLongConstraints())
-         {
-         if (constraint->getLowInt() > 0
-              && constraint->getLowInt() < TR::getMaxUnsigned<TR::Int16>()
-              && constraint->getHighInt() > 0
-              && constraint->getHighInt() < TR::getMaxUnsigned<TR::Int16>())
-            {
-            if (constraint->getLowLong() <= TR::getMaxSigned<TR::Int32>() && constraint->getLowLong() > low)
-               low  = (int32_t)constraint->getLowLong();
-            if (constraint->getHighLong() >= TR::getMinSigned<TR::Int32>() && constraint->getHighLong() < high)
-               high = (int32_t)constraint->getHighLong();
-            }
-
-         if (constraint->getLowLong() < 0 && constraint->getLowLong() == constraint->getHighLong())
-            low = high = max + (int32_t)constraint->getLowLong() % (TR::getMaxUnsigned<TR::Int16>() + 1);
-         }
-      }
-
-   if (low <= high)
-      {
-      // Make sure the constraint is not trivial
-      //
-      constraint = TR::VPIntRange::create(vp, low, high/*, true*/);
-      if (constraint)
-         {
-         vp->addBlockOrGlobalConstraint(node, constraint ,isGlobal);
-         }
-      if (low >= 0)
-         node->setIsNonNegative(true);
-
-      if ((low > TR::getMinSigned<TR::Int32>()) || (high < TR::getMaxSigned<TR::Int32>()))
-         node->setCannotOverflow(true);
-      }
-
-   replaceWithSmallerType(vp, node);
-
-   return node;
+   return constrainNarrowIntValue(vp, node);
    }
 
 TR::Node *constrainNarrowToInt(OMR::ValuePropagation *vp, TR::Node *node)
    {
-   return constrainNarrowIntValue(vp, node, static_cast<int32_t>(TR::getMinSigned<TR::Int32>()), static_cast<int32_t>(TR::getMaxSigned<TR::Int32>()));
+   return constrainNarrowIntValue(vp, node);
    }
 
 /*
@@ -8775,11 +8748,230 @@ TR::Node *constrainSu2l(OMR::ValuePropagation *vp, TR::Node *node)
    return node;
    }
 
+static void generateModifiedNopGuard(
+   OMR::ValuePropagation *vp, TR::Node *guardNode, TR_VirtualGuardKind kind)
+   {
+   TR::Compilation *comp = vp->comp();
+
+   TR_ASSERT_FATAL_WITH_NODE(
+      guardNode,
+      guardNode->isProfiledGuard() || kind == TR_HCRGuard,
+      "can only create virtual guards based on profiled guards");
+
+   TR_ASSERT_FATAL_WITH_NODE(
+      guardNode, guardNode->getOpCodeValue() == TR::ifacmpne, "expected ifacmpne");
+
+   int32_t calleeIndex = guardNode->getInlinedSiteIndex();
+   TR_InlinedCallSite &site = comp->getInlinedCallSite(calleeIndex);
+
+   TR_ByteCodeInfo callBci = site._byteCodeInfo;
+   TR_OpaqueMethodBlock *inlinedMethod = site._methodInfo;
+   TR_ResolvedMethod *inlinedResolvedMethod =
+      comp->fe()->createResolvedMethod(comp->trMemory(), inlinedMethod);
+
+   TR_ASSERT_FATAL_WITH_NODE(
+      guardNode,
+      !comp->compileRelocatableCode(),
+      "can't necessarily cook up a guard of kind %d in a relocatable compilation",
+      (int)kind);
+
+   // Set up the correct inlined call stack. This is needed because guard
+   // creation looks at at the comp object's 'current inlined site index.'
+   //
+   // For now, assume that we start (and will therefore end) with no inlined
+   // frames that are active/current according to the comp object. This would
+   // be violated if VP were run during inlining as part of ilgen opts. If
+   // needed in the future, it should be possible to allow that scenario by:
+   // - relaxing this assertion, and
+   // - when done, conditionally using restoreInlineDepth(TR_ByteCodeInfo&)
+   //   instead of resetInlineDepth().
+   //
+   TR_ASSERT_FATAL_WITH_NODE(
+      guardNode,
+      comp->getInlineDepth() == 0,
+      "trying to upgrade to a nop guard: VP is running during inlining");
+
+   comp->adjustInlineDepth(callBci);
+
+   TR::Node *newGuardNode = NULL;
+
+   // Create a fake call node with a symref that identifies the actual method
+   // that was inlined, which can be more specific (i.e. belong to a
+   // more-derived type) than the one used for the original call. The guard
+   // won't remember the call node anyway (since only guards for codegen's
+   // guarded devirtualization do that). The call node is only used to get the
+   // symref and BCI.
+   //
+   // This is important for nonoverridden guards because the symref specifies
+   // the method that must not be overridden.
+   //
+   // This is important for hierarchy guards to ensure that we get a resolved
+   // method symbol. Otherwise it could be confused for an interface guard.
+   //
+   // HCR guards need the ResolvedMethodSymbol from the symref.
+   //
+   // Using a fake call node this way also means that it's not necessary to
+   // find the original call node in the trees.
+   //
+   TR::SymbolReference *inlinedMethodSR =
+      comp->getSymRefTab()->findOrCreateMethodSymbol(
+         JITTED_METHOD_INDEX,
+         -1, // CP index
+         inlinedResolvedMethod,
+         TR::MethodSymbol::Virtual);
+
+   TR::ResolvedMethodSymbol *inlinedMethodSym =
+      inlinedMethodSR->getSymbol()->castToResolvedMethodSymbol();
+
+   TR::ILOpCodes fakeCallOp = inlinedResolvedMethod->indirectCallOpCode();
+   TR::Node *fakeCallNode = TR::Node::createWithSymRef(
+      fakeCallOp, 0, inlinedMethodSR);
+
+   fakeCallNode->setByteCodeInfo(callBci);
+
+   // Remember the guard's receiver class, and also whether the guard is merged
+   // with an HCR or an OSR guard.
+   TR_VirtualGuard *guard = comp->findVirtualGuardInfo(guardNode);
+   TR_OpaqueClassBlock *thisClass = guard->getThisClass();
+   bool mergedWithHCRGuard = guard->mergedWithHCRGuard();
+   bool mergedWithOSRGuard = guard->mergedWithOSRGuard();
+
+   // Remove the original guard, since node will be removed from the trees.
+   comp->removeVirtualGuard(guard);
+
+   // Actually create the new guard.
+   switch (kind)
+      {
+      // When the caller requests nonoverridden guard, the newly created guard
+      // will be patched if/when the inlined method is overridden.
+      case TR_NonoverriddenGuard:
+         {
+         newGuardNode = TR_VirtualGuard::createNonoverriddenGuard(
+            TR_NonoverriddenGuard,
+            comp,
+            calleeIndex,
+            fakeCallNode,
+            guardNode->getBranchDestination(),
+            inlinedMethodSym,
+            true /* forInline */);
+
+         break;
+         }
+
+      // When the caller requests hierarchy guard, the existing guardNode
+      // must use a VFT test, and the newly created guard will be patched
+      // if/when the class identified in the VFT test is extended.
+      case TR_HierarchyGuard:
+         {
+         TR::Node *expectedClassNode = guardNode->getChild(1);
+         TR_ASSERT_FATAL_WITH_NODE(
+            guardNode,
+            expectedClassNode->getOpCodeValue() == TR::aconst,
+            "VFT test expected class child should be aconst");
+
+         TR::Node *vftLoadNode = guardNode->getChild(0);
+         TR::SymbolReference *vftSR =
+            comp->getSymRefTab()->findVftSymbolRef();
+
+         TR_ASSERT_FATAL_WITH_NODE(
+            guardNode,
+            vftLoadNode->getOpCodeValue() == TR::aloadi
+               && vftLoadNode->getSymbolReference() == vftSR,
+            "VFT test expected receiver VFT child should be a VFT load");
+
+         TR::Node *receiverNode = vftLoadNode->getChild(0);
+
+         auto expectedClassAddr =
+            static_cast<uintptr_t>(expectedClassNode->getAddress());
+
+         auto *expectedClass =
+            reinterpret_cast<TR_OpaqueClassBlock*>(expectedClassAddr);
+
+         TR_ASSERT_FATAL_WITH_NODE(
+            guardNode,
+            expectedClass == thisClass,
+            "VFT test class %p differs from thisClass %p",
+            expectedClass,
+            thisClass);
+
+         newGuardNode = TR_VirtualGuard::createVftGuardWithReceiver(
+            TR_HierarchyGuard,
+            comp,
+            calleeIndex,
+            fakeCallNode,
+            guardNode->getBranchDestination(),
+            thisClass,
+            receiverNode);
+
+         break;
+         }
+
+      // When the caller requests HCR guard, the newly created guard will be
+      // patched when the receiver class of the original guard is redefined.
+      // That class must be the defining class of the inlined method, since an
+      // HCR guard will only be requested when the original guard was
+      // mergedWithHCRGuard().
+      case TR_HCRGuard:
+         {
+         TR_ASSERT_FATAL_WITH_NODE(
+            guardNode, mergedWithHCRGuard, "unexpected HCR guard request");
+
+         TR_ASSERT_FATAL_WITH_NODE(
+            guardNode,
+            thisClass == inlinedResolvedMethod->containingClass(),
+            "HCR assumption class mismatch");
+
+         mergedWithHCRGuard = false; // new guard will be a standalone HCR guard
+         mergedWithOSRGuard = false; // new guard represents only the HCR aspect
+
+         newGuardNode = TR_VirtualGuard::createHCRGuard(
+            comp,
+            calleeIndex,
+            fakeCallNode,
+            guardNode->getBranchDestination(),
+            inlinedMethodSym,
+            thisClass);
+
+         break;
+         }
+
+      default:
+         TR_ASSERT_FATAL(false, "unexpected guard kind %d", (int)kind);
+      }
+
+   // Preserve guard merging, if any.
+   guard = comp->findVirtualGuardInfo(newGuardNode);
+   guard->setThisClass(thisClass);
+
+   if (mergedWithHCRGuard)
+      guard->setMergedWithHCRGuard();
+
+   if (mergedWithOSRGuard)
+      guard->setMergedWithOSRGuard();
+
+   TR::TreeTop *newGuardTT = TR::TreeTop::create(comp, newGuardNode);
+   vp->_curTree->insertAfter(newGuardTT);
+
+   TR_Debug *dbg = comp->getDebug();
+   dumpOptDetails(
+      comp,
+      "Generated %s n%un [%p]\n",
+      dbg == NULL ? "guard" : dbg->getVirtualGuardKindName(kind),
+      newGuardNode->getGlobalIndex(),
+      newGuardNode);
+
+   comp->resetInlineDepth();
+   }
+
 static void changeConditionalToGoto(OMR::ValuePropagation *vp, TR::Node *node, TR::CFGEdge *branchEdge)
    {
 #ifdef J9_PROJECT_SPECIFIC
    createGuardSiteForRemovedGuard(vp->comp(), node);
 #endif
+
+   // NOTE: No special handling is required here to deal with the possibility
+   // that node is a virtual guard that has been merged with an HCR or an OSR
+   // guard. It's always safe to go to the taken (cold) side.
 
    // Fall through path is unreachable.
    // Set the current constraints to "unreachable path"
@@ -8788,6 +8980,7 @@ static void changeConditionalToGoto(OMR::ValuePropagation *vp, TR::Node *node, T
 
    // Remove the children and change the node to a goto,
    //
+   node->setVirtualGuardInfo(NULL, vp->comp());
    vp->removeChildren(node, false);
    TR::Node::recreate(node, TR::Goto);
    vp->setEnableSimplifier();
@@ -8809,10 +9002,66 @@ static void removeConditionalBranch(OMR::ValuePropagation *vp, TR::Node *node, T
    createGuardSiteForRemovedGuard(vp->comp(), node);
 #endif
 
+   // If node is a virtual guard merged with an HCR or an OSR guard, then it
+   // will still be possible to go to the cold side. In that case, node will
+   // still be removed, but an HCR or OSR guard will be added in its place, so
+   // the taken edge must still be considered reachable, and it must not be
+   // added to _edgesToBeRemoved.
+   bool edgeIsUnreachable = true;
+
+   if (node->isTheVirtualGuardForAGuardedInlinedCall())
+      {
+      TR_VirtualGuard *guard = vp->comp()->findVirtualGuardInfo(node);
+
+      // I don't think we have any way to generate a virtual guard that is
+      // merged with both HCR and OSR guards. The HCR guard would be redundant.
+      TR_ASSERT_FATAL_WITH_NODE(
+         node,
+         !guard->mergedWithHCRGuard() || !guard->mergedWithOSRGuard(),
+         "virtual guard is merged with both an HCR and an OSR guard");
+
+      if (guard->mergedWithHCRGuard())
+         {
+         dumpOptDetails(
+            vp->comp(),
+            "Separating HCR guard from n%un [%p]\n",
+            node->getGlobalIndex(),
+            node);
+
+         generateModifiedNopGuard(vp, node, TR_HCRGuard);
+
+         // The branch edge is still reachable via the HCR guard.
+         edgeIsUnreachable = false;
+         }
+      else if (guard->mergedWithOSRGuard())
+         {
+         TR::Node *osrGuardNode = TR_VirtualGuard::createOSRGuard(
+            vp->comp(), node->getBranchDestination());
+
+         TR::TreeTop *osrGuardTT = TR::TreeTop::create(vp->comp(), osrGuardNode);
+         vp->_curTree->insertAfter(osrGuardTT);
+
+         dumpOptDetails(
+            vp->comp(),
+            "Separated OSR guard from n%un [%p]. New OSR guard is n%un [%p].\n",
+            node->getGlobalIndex(),
+            node,
+            osrGuardNode->getGlobalIndex(),
+            osrGuardNode);
+
+         // The branch edge is still reachable via the OSR guard.
+         edgeIsUnreachable = false;
+         }
+
+      guard->setMergedWithHCRGuard(false);
+      guard->setMergedWithOSRGuard(false);
+      }
+
    // Branch path is unreachable.
    // Set the edge constraints on the branch path to "unreachable path"
    //
-   vp->setUnreachablePath(branchEdge);
+   if (edgeIsUnreachable)
+      vp->setUnreachablePath(branchEdge);
 
    // Remove this tree.
    //
@@ -8823,7 +9072,7 @@ static void removeConditionalBranch(OMR::ValuePropagation *vp, TR::Node *node, T
    // fall-through and target blocks are the same.
    TR::Block *fallThrough = vp->_curBlock->getExit()->getNextTreeTop()->getNode()->getBlock();
    TR::Block *target = node->getBranchDestination()->getNode()->getBlock();
-   if (fallThrough != target)
+   if (fallThrough != target && edgeIsUnreachable)
       vp->_edgesToBeRemoved->add(branchEdge);
    }
 
@@ -8902,92 +9151,53 @@ passingTypeTestObjectConstraint(
    return newConstraint;
    }
 
-static TR::Node* getOriginalCallNode(TR_VirtualGuard* vGuard, TR::Compilation* comp, TR::Node* guardNode)
+// Return true if the guard was successfully upgraded.
+static bool upgradeToNopGuard(
+   OMR::ValuePropagation *vp,
+   TR::Node *guardNode,
+   TR_VirtualGuardKind kind)
    {
+   if (!vp->lastTimeThrough() || vp->comp()->compileRelocatableCode())
+      return false;
 
-   TR::Block * block = guardNode->getBranchDestination()->getNode()->getBlock();
-   TR_ByteCodeInfo& bci = comp->getInlinedCallSite(vGuard->getCalleeIndex())._byteCodeInfo;
+   static const bool disable =
+      feGetEnv("TR_disableUpgradeToNopGuard") != NULL;
 
-   for (TR::TreeTop* tt = block->getEntry(); tt != block->getExit(); tt = tt->getNextTreeTop())
+   if (disable)
+      return false;
+
+   if (TR::Compiler->vm.isVMInStartupPhase(vp->comp()))
       {
-      if (tt->getNode()->getNumChildren())
-         {
-         TR::Node* possiblyCall = tt->getNode()->getFirstChild();
+      static const bool enableDuringStartup =
+         feGetEnv("TR_upgradeToNopGuardDuringStartup") != NULL;
 
-   TR::VPConstraint* constraintFromMethodPointer = NULL;
-         if    (possiblyCall->getOpCode().isCall() &&
-               possiblyCall->getOpCode().isIndirect() &&
-               possiblyCall->getByteCodeInfo().getCallerIndex() == bci.getCallerIndex() &&
-               possiblyCall->getByteCodeIndex() == bci.getByteCodeIndex())
-               {
-               return possiblyCall;
-               }
-         }
+      if (!enableDuringStartup)
+         return false;
       }
-   return NULL;
+
+   TR_Debug *dbg = vp->comp()->getDebug();
+   if (!performTransformation(
+         vp->comp(),
+         "%sUpgrading profiled guard n%un [%p] to %s\n",
+         OPT_DETAILS,
+         guardNode->getGlobalIndex(),
+         guardNode,
+         dbg == NULL ? "<nop guard>" : dbg->getVirtualGuardKindName(kind)))
+      {
+      return false; // permission denied
+      }
+
+   // This inserts a new tree with the new guard immediately after the existing
+   // one, so VP will go on to constrain it as soon as it's done with the
+   // current tree.
+   generateModifiedNopGuard(vp, guardNode, kind);
+
+   vp->removeNode(guardNode, false);
+   vp->_curTree->setNode(NULL);
+   vp->setEnableSimplifier();
+
+   return true;
    }
-
-static void addDelayedConvertedGuard (TR::Node* node,
-                                       TR::Node* callNode,
-                                       TR::ResolvedMethodSymbol* methodSymbol,
-                                       TR_VirtualGuard* oldVirtualGuard,
-                                       OMR::ValuePropagation* vp,
-                                       TR_VirtualGuardKind guardKind,
-                                       TR_VirtualGuardTestType testType,
-                                       TR_OpaqueClassBlock* objectClass)
-   {
-
-   if (!callNode->getFirstChild()->getOpCode().hasSymbolReference() ||
-       callNode->getFirstChild()->getSymbolReference() != vp->comp()->getSymRefTab()->findVftSymbolRef() ||
-       !callNode->getFirstChild()->getFirstChild()->getOpCode().isLoadVarDirect() || //I guess, having a vft symbol implies that there is something underneath it?
-       !callNode->getSecondChild()->getOpCode().isLoadVarDirect() || //it also implies, there should be a receiver argument?
-       !callNode->getSecondChild()->getOpCode().hasSymbolReference() || //I think its safer to exclude statics
-       !callNode->getSecondChild()->getSymbolReference()->getSymbol()->isAutoOrParm()
-       )
-      {
-      return;
-      }
-
-
-   TR::Node *newReceiver=TR::Node::createLoad(callNode, callNode->getSecondChild()->getSymbolReference());
-   TR::Node* newGuardNode = NULL;
-   if (testType == TR_VftTest)
-      {
-      newGuardNode = TR_VirtualGuard::createVftGuardWithReceiver
-                       (guardKind,
-                       vp->comp(),
-                       oldVirtualGuard->getCalleeIndex(),
-                       callNode,
-                       node->getBranchDestination(),
-                       objectClass /*oldVirtualGuard->getThisClass()*/,
-                       newReceiver);
-      }
-   else
-      {
-      newGuardNode = TR_VirtualGuard::createMethodGuardWithReceiver
-                       (guardKind,
-                       vp->comp(),
-                       oldVirtualGuard->getCalleeIndex(),
-                       callNode,
-                       node->getBranchDestination(),
-                       methodSymbol,
-                       objectClass /*oldVirtualGuard->getThisClass()*/,
-                       newReceiver);
-      }
-
-   if (vp->trace())
-      {
-      traceMsg(vp->comp(), "P2O: oldGuard %p newGuard %p currentTree %p\n", oldVirtualGuard, newGuardNode, vp->_curTree);
-      }
-
-   TR_VirtualGuard* newGuard = vp->comp()->findVirtualGuardInfo(newGuardNode);
-   //do not add a new guard yet ... it will be added in doDelayedTransformation and we will fix the IL accordingly
-   vp->comp()->removeVirtualGuard(newGuard);
-   //finish the rest of a transformation in doDelayedTransformation
-   vp->_convertedGuards.add(new (vp->trStackMemory()) OMR::ValuePropagation::VirtualGuardInfo(vp, oldVirtualGuard, newGuard, newGuardNode, callNode));
-
-   }
-
 
 // Handles ificmpeq, ificmpne, iflcmpeq, iflcmpne, ifacmpeq, ifacmpne
 //
@@ -9004,7 +9214,6 @@ static TR::Node *constrainIfcmpeqne(OMR::ValuePropagation *vp, TR::Node *node, b
    if (fallThrough == target)
       return node;
 
-   TR::VPConstraint* constraintFromMethodPointer = NULL;
    TR::Node *lhsChild = node->getFirstChild();
    TR::Node *rhsChild = node->getSecondChild();
 
@@ -9061,18 +9270,27 @@ static TR::Node *constrainIfcmpeqne(OMR::ValuePropagation *vp, TR::Node *node, b
    // vguards are handled specially later
    //
    bool ignoreVirtualGuard = true;
-   if (((node->getOpCodeValue() == TR::ifacmpne ||
-         node->getOpCodeValue() == TR::ifacmpeq ||
-         node->getOpCodeValue() == TR::ificmpne ||
-         node->getOpCodeValue() == TR::ificmpeq) &&
-         node->isTheVirtualGuardForAGuardedInlinedCall()))
+   TR_VirtualGuard *virtualGuard = node->virtualGuardInfo();
+   if (virtualGuard != NULL && !virtualGuard->canBeRemoved())
       {
-      TR_VirtualGuard *vGuard = vp->comp()->findVirtualGuardInfo(node);
-      if (vGuard && !vGuard->canBeRemoved())
+      // Merged guards are handled properly in removeConditionalBranch()
+      // (except in AOT compilations).
+      ignoreVirtualGuard =
+         virtualGuard->canBeRemoved(true)
+         && !vp->comp()->compileRelocatableCode();
+
+      if (vp->trace())
          {
-         if (vp->trace())
-            traceMsg(vp->comp(), "   found virtual guard node %p with inner assumptions (cannot be removed)\n", node);
-         ignoreVirtualGuard = false;
+         const char *msg = ignoreVirtualGuard
+            ? "is ok to remove (if possible) despite merged guards"
+            : "cannot be removed";
+
+         traceMsg(
+            vp->comp(),
+            "Virtual guard n%un [%p] %s.\n",
+            node->getGlobalIndex(),
+            node,
+            msg);
          }
       }
 
@@ -9349,105 +9567,263 @@ static TR::Node *constrainIfcmpeqne(OMR::ValuePropagation *vp, TR::Node *node, b
    //
    bool isVirtualGuardNopable = node->isNopableInlineGuard();
 
-   if (((node->getOpCodeValue() == TR::ifacmpne ||
-         node->getOpCodeValue() == TR::ifacmpeq) &&
-        node->isTheVirtualGuardForAGuardedInlinedCall()))
+   // Only accept VFT and method tests using ifacmpne here. Reversed (ifacmpeq)
+   // guards are very rare, and shouldn't necessarily even be allowed, but they
+   // are currently possible.
+   if (node->getOpCodeValue() == TR::ifacmpne && virtualGuard != NULL)
       {
-      TR_VirtualGuard *virtualGuard = vp->comp()->findVirtualGuardInfo(node);
-      if (virtualGuard)
+      TR::VPConstraint *guardClassConstraint = NULL;
+      switch (virtualGuard->getTestType())
          {
-         switch (virtualGuard->getTestType())
-            {
-            case TR_VftTest:
-                  {
+         case TR_VftTest:
+               {
 #ifdef J9_PROJECT_SPECIFIC
-                  instanceofObjectRef = node->getFirstChild();
-                  instanceofObjectRefIsVft = true;
-                  TR::Node *classChild = node->getSecondChild();
-                  bool foldedGuard = false;
-                  static const char* enableJavaLangClassFolding = feGetEnv ("TR_EnableFoldJavaLangClass");
-                  if (enableJavaLangClassFolding && (instanceofObjectRef->getOpCodeValue() == TR::aloadi) &&
-                      (instanceofObjectRef->getSymbolReference() == vp->comp()->getSymRefTab()->findVftSymbolRef()))
-                     {
-                     TR::Node *objectChild = instanceofObjectRef->getFirstChild();
-                     TR::VPConstraint *objectConstraint = vp->getConstraint(objectChild, isGlobal);
-                     TR::VPConstraint *classConstraint = vp->getConstraint(classChild, isGlobal);
-
-                     //if objectConstraint is equal to java/lang/Class we can fold the guard
-                     if (ignoreVirtualGuard && classConstraint && classConstraint->getClassType() &&
-                         objectConstraint && objectConstraint->isClassObject() ==  TR_yes && vp->comp()->getClassClassPointer())
-                        {
-                        bool       testForEquality  = (node->getOpCodeValue() == TR::ifacmpeq);
-                        bool       childrenAreEqual = (vp->comp()->getClassClassPointer() == classConstraint->getClass());
-
-                        if (testForEquality == childrenAreEqual)
-                           cannotFallThrough = true;
-                        else
-                           cannotBranch = true;
-                        foldedGuard = true;
-                        }
-                     }
-
-                  if (!foldedGuard && (instanceofObjectRef->getOpCodeValue() == TR::aloadi) &&
-                      (instanceofObjectRef->getSymbolReference() == vp->comp()->getSymRefTab()->findVftSymbolRef()))
-                     {
-                     instanceofObjectRef = instanceofObjectRef->getFirstChild();
-                     instanceofObjectRefIsVft = false;
-                     }
-
-                  TR::VPConstraint *classConstraint = vp->getConstraint(classChild, isGlobal);
-                  //foldedGuard indicates that we already set cannotBranch or cannotFallThrough
-                  if (!foldedGuard && classConstraint && classConstraint->getClassType())
-                     {
-                     instanceofConstraint = classConstraint;
-                     instanceofDetectedAndFixedType = true;
-                     //printf("Reached here in %s\n", signature(vp->comp()->getCurrentMethod()));
-                     if (node->getOpCodeValue() == TR::ifacmpne)
-                        instanceofOnBranch = false;
-                     else
-                        instanceofOnBranch = true;
-                     }
-#endif
-                  }
-               break;
-            case TR_MethodTest:
+               instanceofObjectRef = node->getFirstChild();
+               TR::Node *classChild = node->getSecondChild();
+               guardClassConstraint = vp->getConstraint(classChild, isGlobal);
+               static const char* enableJavaLangClassFolding = feGetEnv ("TR_EnableFoldJavaLangClass");
+               if (enableJavaLangClassFolding && (instanceofObjectRef->getOpCodeValue() == TR::aloadi) &&
+                   (instanceofObjectRef->getSymbolReference() == vp->comp()->getSymRefTab()->findVftSymbolRef()))
                   {
-                  TR::Node *vtableEntryNode = node->getFirstChild();
-                  if ((vtableEntryNode->getOpCodeValue() == TR::aloadi) &&
-                      vtableEntryNode->getOpCode().hasSymbolReference() &&
-                      vp->comp()->getSymRefTab()->isVtableEntrySymbolRef(vtableEntryNode->getSymbolReference()))
-                     /*(vtableEntryNode->getSymbolReference() == vp->comp()->getSymRefTab()->findVftSymbolRef()))*/
+                  TR::Node *objectChild = instanceofObjectRef->getFirstChild();
+                  TR::VPConstraint *objectConstraint = vp->getConstraint(objectChild, isGlobal);
+
+                  //if objectConstraint is equal to java/lang/Class we can fold the guard
+                  if (ignoreVirtualGuard && guardClassConstraint && guardClassConstraint->getClassType() &&
+                      objectConstraint && objectConstraint->isClassObject() ==  TR_yes && vp->comp()->getClassClassPointer())
                      {
-                     TR::Node *classNode = vtableEntryNode->getFirstChild();
-                     TR::Node   *methodPtrNode    = node->getSecondChild();
-                     TR::VPConstraint *classConstraint = vp->getConstraint(classNode, isGlobal);
-                     if (ignoreVirtualGuard && classConstraint && classConstraint->isFixedClass())
-                        {
-                        TR_OpaqueClassBlock *clazz  = classConstraint->getClass();
-                        int32_t    vftOffset        = static_cast<int32_t>(vtableEntryNode->getSymbolReference()->getOffset());
-                        intptr_t  vftEntry         = TR::Compiler->cls.getVFTEntry(vp->comp(), clazz, vftOffset);
-                        bool       childrenAreEqual = (vftEntry == methodPtrNode->getAddress());
-                        bool       testForEquality  = (node->getOpCodeValue() == TR::ifacmpeq);
-                        if (vp->trace())
-                           traceMsg(vp->comp(), "TR_MethodTest: node=%p, vtableEntryNode=%p, clazz=%p, vftOffset=%d, vftEntry=%p, childrenAreEqual=%d, testForEquality=%d\n",
-                                    node, vtableEntryNode, clazz, vftOffset, vftEntry, childrenAreEqual, testForEquality);
-                        if (testForEquality == childrenAreEqual)
-                           cannotFallThrough = true;
-                        else
-                           cannotBranch = true;
-                        }
-
-                     if (vtableEntryNode->getSymbolReference() == vp->comp()->getSymRefTab()->findVftSymbolRef())
-                        {
-                        TR_OpaqueClassBlock* classFromMethod = vp->comp()->fe()->getClassFromMethodBlock((TR_OpaqueMethodBlock*)methodPtrNode->getAddress());
-                        constraintFromMethodPointer = TR::VPResolvedClass::create(vp, classFromMethod);
-                        }
-
+                     bool childrenAreEqual = vp->comp()->getClassClassPointer() == guardClassConstraint->getClass();
+                     if (childrenAreEqual)
+                        cannotBranch = true;
+                     else
+                        cannotFallThrough = true;
                      }
                   }
-               break;
-            default:
-            	break;
+
+               TR::SymbolReference *vftSR =
+                  vp->comp()->getSymRefTab()->findVftSymbolRef();
+
+               if (ignoreVirtualGuard
+                   && !cannotFallThrough
+                   && !cannotBranch
+                   && classChild->getOpCodeValue() == TR::aconst
+                   && instanceofObjectRef->getOpCodeValue() == TR::aloadi
+                   && instanceofObjectRef->getSymbolReference() == vftSR
+                   && node->isProfiledGuard())
+                  {
+                  TR::VPConstraint *receiverClassConstraint =
+                     vp->getConstraint(instanceofObjectRef, isGlobal);
+
+                  if (receiverClassConstraint != NULL
+                      && receiverClassConstraint->isClassObject() == TR_yes
+                      && receiverClassConstraint->getClass() != NULL)
+                     {
+                     auto expectedClassAddr =
+                        static_cast<uintptr_t>(classChild->getAddress());
+
+                     auto expectedClass =
+                        reinterpret_cast<TR_OpaqueClassBlock*>(expectedClassAddr);
+
+                     TR_OpaqueClassBlock *clazz =
+                        receiverClassConstraint->getClass();
+
+                     // There's no point checking for subtyping here, since
+                     // a class that hasn't been extended has no subtypes.
+                     if (clazz == expectedClass
+                         && !vp->comp()->fe()->classHasBeenExtended(expectedClass)
+                         && upgradeToNopGuard(vp, node, TR_HierarchyGuard))
+                        {
+                        return node;
+                        }
+                     }
+                  }
+#endif
+               }
+            break;
+
+         case TR_MethodTest:
+               {
+               TR::Node *vtableEntryNode = node->getFirstChild();
+               if (vtableEntryNode->getOpCodeValue() != TR::aloadi)
+                  break; // unexpected tree shape
+
+               TR::SymbolReference *entrySR = vtableEntryNode->getSymbolReference();
+               if (!vp->comp()->getSymRefTab()->isVtableEntrySymbolRef(entrySR))
+                  break; // unexpected tree shape
+
+               TR::Node *methodPtrNode = node->getSecondChild();
+               if (methodPtrNode->getOpCodeValue() != TR::aconst)
+                  break; // unexpected tree shape
+
+               auto expectedMethodAddr =
+                  static_cast<intptr_t>(methodPtrNode->getAddress());
+
+               TR_ASSERT_FATAL_WITH_NODE(
+                  methodPtrNode,
+                  expectedMethodAddr != 0,
+                  "method test method pointer constant is null");
+
+               TR::Node *classNode = vtableEntryNode->getFirstChild();
+               TR::VPConstraint *classConstraint = vp->getConstraint(classNode, isGlobal);
+
+               TR_OpaqueMethodBlock *expectedMethodPtr =
+                  reinterpret_cast<TR_OpaqueMethodBlock*>(expectedMethodAddr);
+
+               TR_ResolvedMethod *expectedMethod =
+                  vp->comp()->fe()->createResolvedMethod(
+                     vp->comp()->trMemory(), expectedMethodPtr);
+
+               TR_OpaqueClassBlock *expectedClass =
+                  expectedMethod->containingClass();
+
+               TR_YesNoMaybe taken = TR_maybe;
+               const char *foldReason = NULL;
+               if (classConstraint != NULL
+                   && classConstraint->isClassObject() == TR_yes
+                   && classConstraint->getClass() != NULL)
+                  {
+                  TR_OpaqueClassBlock *clazz = classConstraint->getClass();
+                  int32_t vftOffset = static_cast<int32_t>(entrySR->getOffset());
+                  // NOTE: clazz might not have a large enough VFT, in which
+                  // case vftEntry will be 0. This can happen:
+                  // - when the guard is for an interface call,
+                  // - when the guard is on a dead path, or
+                  // - maybe when the guard has been hoisted.
+                  intptr_t vftEntry = TR::Compiler->cls.getVFTEntry(
+                     vp->comp(), clazz, vftOffset);
+
+                  // We know the receiver is an instance of clazz, and if we
+                  // successfully found a VFT entry, then clazz has a large
+                  // enough VFT, so the VFT entry load will be in-bounds.
+                  if (vftEntry != 0
+                      && performTransformation(
+                           vp->comp(),
+                           "%sSetting vftEntryIsInBounds on method test n%un [%p]\n",
+                           OPT_DETAILS,
+                           node->getGlobalIndex(),
+                           node))
+                     {
+                     node->setVFTEntryIsInBounds(true);
+                     }
+
+                  if (ignoreVirtualGuard && classConstraint->isFixedClass())
+                     {
+                     // We know the exact type of the receiver and therefore
+                     // the exact result of the comparison.
+                     //
+                     // The case where clazz doesn't have a VFT entry at the
+                     // expected offset doesn't need to be handled specially.
+                     // In that case we should behave as though vftEntry is
+                     // not the expected method, which will be the natural
+                     // result of the comparison because vftEntry == 0 but
+                     // expectedMethodAddr != 0 (checked in the assertion above).
+                     //
+                     taken = (vftEntry == expectedMethodAddr) ? TR_no : TR_yes;
+                     foldReason = "fixed-type receiver";
+                     }
+                  else if (ignoreVirtualGuard)
+                     {
+                     bool fixedObjectType = false;
+                     bool fixedCastType = true;
+                     TR_YesNoMaybe isInstance = vp->comp()->fe()->isInstanceOf(
+                        clazz, expectedClass, fixedObjectType, fixedCastType);
+
+                     if (isInstance == TR_no)
+                        {
+                        taken = TR_yes; // necessarily unequal
+                        foldReason = "incompatible receiver";
+                        }
+                     else if (vftEntry == expectedMethodAddr
+                        && expectedMethod->isFinal())
+                        {
+                        taken = TR_no; // necessarily equal
+                        foldReason = "type bound has final inlined method";
+                        }
+                     else if (vftEntry == expectedMethodAddr
+                        && node->isProfiledGuard()
+                        && !expectedMethod->virtualMethodIsOverridden()
+                        && node->getOpCodeValue() == TR::ifacmpne
+                        && upgradeToNopGuard(vp, node, TR_NonoverriddenGuard))
+                        {
+                        return node;
+                        }
+                     }
+                  }
+
+               if (taken != TR_maybe && vp->trace())
+                  {
+                  traceMsg(
+                     vp->comp(),
+                     "n%un [%p]: method test: %s: branch %s taken\n",
+                     node->getGlobalIndex(),
+                     node,
+                     foldReason,
+                     taken == TR_yes ? "is" : "is not");
+                  }
+
+               if (taken == TR_yes)
+                  {
+                  cannotFallThrough = true;
+                  }
+               else if (taken == TR_no)
+                  {
+                  cannotBranch = true;
+                  }
+               else
+                  {
+                  // We can't fold, so at least learn a type bound (i.e.
+                  // expectedClass) for objects that pass the guard. Note
+                  // that instanceofObjectRef here is actually the VFT,
+                  // which will be accounted for and possibly changed just
+                  // after the switch.
+                  instanceofObjectRef = classNode;
+                  guardClassConstraint = TR::VPClass::create(
+                     vp,
+                     TR::VPResolvedClass::create(vp, expectedClass),
+                     TR::VPNonNullObject::create(vp),
+                     NULL,
+                     NULL,
+                     TR::VPObjectLocation::create(
+                        vp, TR::VPObjectLocation::J9ClassObject));
+                  }
+               }
+            break;
+
+         default:
+             break;
+         }
+
+      if (guardClassConstraint != NULL
+          && guardClassConstraint->getClassType() != NULL
+          && instanceofObjectRef != NULL
+          && !cannotBranch
+          && !cannotFallThrough)
+         {
+         instanceofOnBranch = false; // type bound is on the fallthrough edge
+         instanceofConstraint = guardClassConstraint;
+         instanceofDetectedAndFixedType =
+            virtualGuard->getTestType() == TR_VftTest;
+
+         if (vp->trace())
+            {
+            int32_t sigLen = 0;
+            const char *sig = guardClassConstraint->getClassSignature(sigLen);
+            traceMsg(
+               vp->comp(),
+               "n%un [%p]: guard only accepts instances of %s%.*s\n",
+               node->getGlobalIndex(),
+               node,
+               instanceofDetectedAndFixedType ? "(exactly) " : "",
+               sigLen,
+               sig);
+            }
+
+         instanceofObjectRefIsVft = true;
+         if (instanceofObjectRef->getOpCodeValue() == TR::aloadi
+             && instanceofObjectRef->getSymbolReference() == vp->comp()->getSymRefTab()->findVftSymbolRef())
+            {
+            instanceofObjectRef = instanceofObjectRef->getFirstChild();
+            instanceofObjectRefIsVft = false;
             }
          }
       }
@@ -9467,7 +9843,27 @@ static TR::Node *constrainIfcmpeqne(OMR::ValuePropagation *vp, TR::Node *node, b
       if (callNode &&
           callNode->getOpCode().isCall())
          {
-         virtualGuardWillBeEliminated = canFoldNonOverriddenGuard(vp, callNode, node);
+         // Calling canFoldNonOverriddenGuard has the potential side effect of creating global
+         // constraints for definitions used by the call that reach the conditional branch that is
+         // under consideration, without taking into account definitions that might reach the call
+         // on other paths.  In order to decide correctly whether the guard can be eliminated and
+         // ensure any global constraints will be created correctly, this needs to check that the
+         // only path to the call must pass through the current branch.  The easiest way to do
+         // that is to check that the target of the branch is the call block itself and that the
+         // call block has no other predecessors, though that will fail to optimize any case where
+         // the call is reached by a sequence of branches from the target of the branch, each of
+         // which has a single predecessor.
+         //
+         if (target->getPredecessors().size() == 1)
+            {
+            TR::Block *callBlock = node->getVirtualCallTreeForGuard()->getEnclosingBlock();
+
+            if (callBlock == target)
+               {
+               virtualGuardWillBeEliminated = canFoldNonOverriddenGuard(vp, callNode, node);
+               }
+            }
+
          if (!virtualGuardWillBeEliminated &&
              vp->lastTimeThrough() &&
              vp->_isGlobalPropagation)
@@ -9733,178 +10129,6 @@ static TR::Node *constrainIfcmpeqne(OMR::ValuePropagation *vp, TR::Node *node, b
       TR_ASSERT(!cannotBranch, "Cannot branch or fall through");
       changeConditionalToGoto(vp, node, edge);
       }
-   else if (constraintFromMethodPointer && lhsChild->getFirstChild()->getFirstChild()->getOpCode().isLoadVarDirect())
-      {
-      //if constraintFromMethodPointer is set we should be able to assume that lhsChild->getFirstChild()->getFirstChild() is not NULL, since non-NULL constraintFromMethodPointer implies the following trees:
-      // n235n     ifacmpne --> block_25 BBStart at n230n (inlineProfiledGuard )                       [0x7fffd5110a40] bci=[0,0,314] rc=0 vc=56 vn=49 sti=- udi=- nc=2 flg=0x1020
-      // n233n       iaload <vtable-entry-symbol> [#552 Shadow +768] [flags 0x10607 0x0 ]              [0x7fffd51109b0] bci=[-1,0,2302] rc=1 vc=56 vn=7 sti=- udi=- nc=1
-      // n232n         iaload <vft-symbol> [#449 Shadow] [flags 0x18607 0x0 ] (X>=0 )                  [0x7fffd5110968] bci=[-1,0,2302] rc=1 vc=56 vn=6 sti=- udi=- nc=1 flg=0x100
-      // n3n             ==>aload
-      // n234n       aconst 0x7fd070 (methodPointerConstant )                                          [0x7fffd51109f8] bci=[0,0,314] rc=1 vc=56 vn=5 sti=- udi=- nc=0 flg=0x2000
-
-
-      bool isGlobal;
-      TR::VPConstraint* intersected = vp->getConstraint(lhsChild->getFirstChild()->getFirstChild(), isGlobal);
-
-         intersected =
-            (intersected) ?
-               intersected->intersect(constraintFromMethodPointer, vp):
-               intersected = constraintFromMethodPointer;
-
-      if (intersected)
-         {
-            if (!branchOnEqual)
-               {
-               vp->addBlockConstraint(lhsChild->getFirstChild()->getFirstChild(), intersected);
-               }
-               else
-               {
-               //not sure about this case (is this the right way to add an edge constraint??
-               vp->addEdgeConstraint(lhsChild->getFirstChild()->getFirstChild(), intersected, edgeConstraints);
-               }
-         }
-      }
-   else if (node->isProfiledGuard() && node->getOpCodeValue() == TR::ifacmpne)
-       {
-#ifdef J9_PROJECT_SPECIFIC
-       TR_OpaqueClassBlock* objectClass =  lhs ? lhs->getClass() : NULL;
-       TR_OpaqueClassBlock* rhsClass =  rhs ? rhs->getClass() : NULL;
-
-       TR_VirtualGuard *vGuard = vp->comp()->findVirtualGuardInfo(node);
-       TR::Node* callNode = getOriginalCallNode(vGuard, vp->comp(), node);
-
-
-       if (vp->trace())
-          {
-          if (lhs)
-             {
-             traceMsg(vp->comp(), "P2O: Considering a candidate at %p. Object Constraint : ", node);
-             lhs->print(vp);
-             }
-          if (rhs)
-             {
-             traceMsg(vp->comp(), " , Guard constraint : ");
-             rhs->print(vp);
-             }
-          traceMsg(vp->comp(), "\n");
-          }
-
-       static const char* disableProfiled2Overridden = feGetEnv ("TR_DisableProfiled2Overridden");
-       if (!disableProfiled2Overridden && callNode && vp->lastTimeThrough())
-          {
-
-
-          TR_OpaqueClassBlock* callClass = NULL;
-          TR::MethodSymbol* interfaceMethodSymbol = NULL;
-
-          //interfaces are weird we would create an UnresolvedClass Constraint and then wrap it in a Class constraint
-          if (rhs && !objectClass &&
-                lhs && lhs->getClassType() &&
-                (interfaceMethodSymbol = callNode->getSymbolReference()->getSymbol()->castToMethodSymbol()) &&
-                interfaceMethodSymbol->isInterface())
-             {
-             int32_t len;
-             TR_ResolvedMethod* owningMethod = callNode->getSymbolReference()->getOwningMethod(vp->comp());
-             const char * sig  = lhs->getClassType()->getClassSignature(len);
-             objectClass = vp->comp()->fe()->getClassFromSignature(sig, len, owningMethod, true);
-
-             //The object's class can sometimes be less specific than the class of the call
-             //if we ask for a rammethod in such a class we would trigger an assert ("no ram method in the vft slot")
-             //to avoid this we would to insert another isInstanceOf (objectClass, callClass)
-             TR::Method *interfaceMethod = interfaceMethodSymbol->getMethod();
-             //re-using len and sig for getting a class of a call
-             len = interfaceMethod->classNameLength();
-             sig = TR::Compiler->cls.classNameToSignature(interfaceMethod->classNameChars(), len, vp->comp());
-             callClass = vp->comp()->fe()->getClassFromSignature(sig, len, owningMethod, true);
-             }
-
-          if (!callClass && !callNode->getSymbolReference()->isUnresolved())
-             {
-             TR::ResolvedMethodSymbol* resolvedCallMethodSymbol = callNode->getSymbolReference()->getSymbol()->getResolvedMethodSymbol();
-             if (resolvedCallMethodSymbol)
-                {
-                TR_ResolvedMethod *resolvedCallMethod = resolvedCallMethodSymbol->getResolvedMethod();
-                callClass = resolvedCallMethod->containingClass();
-                }
-             }
-
-          //if all the conditions below are satisfied, especially the last one, we can cut some corners and
-          //use findSingleImplementer to get a concrete implementation
-          //regardless of the type(e.g. virtual vs interface)
-          //of a call and the type of a receiver (e.g. abstract, interface, normal classes)
-          //if findSingleImplementer returns a method than it must be the implementation Inliner used since
-          //it would be the only one available
-          if (objectClass && rhsClass && callClass && !lhs->isFixedClass() &&
-              vp->comp()->fe()->isInstanceOf (rhsClass, objectClass, true, true, true) == TR_yes &&
-              vp->comp()->fe()->isInstanceOf (objectClass, callClass, true, true, true) == TR_yes) /*the object class may be less specific than callClass*/
-             {
-
-             TR::SymbolReference* symRef = callNode->getSymbolReference();
-             TR::MethodSymbol* methodSymbol = symRef->getSymbol()->castToMethodSymbol();
-
-             if (methodSymbol && !(!methodSymbol->isInterface() && TR::Compiler->cls.isInterfaceClass(vp->comp(), objectClass)))
-                {
-
-                int32_t cpIndexOrVftSlot = TR::Compiler->cls.isInterfaceClass(vp->comp(), objectClass) ? symRef->getCPIndex() : symRef->getOffset();
-
-                TR_YesNoMaybe useGetResolvedInterfaceMethod = methodSymbol->isInterface() ? TR_yes : TR_no;
-                TR::MethodSymbol::Kinds methodKind = methodSymbol->isInterface() ? TR::MethodSymbol::Interface : TR::MethodSymbol::Virtual;
-
-                TR_ResolvedMethod* rvm = vp->comp()->getOption(TR_DisableCHOpts) ?
-                                         NULL :
-                                         vp->comp()->getPersistentInfo()->getPersistentCHTable()->findSingleImplementer(
-                                                   objectClass, cpIndexOrVftSlot, symRef->getOwningMethod(vp->comp()),
-                                                   vp->comp(), false, useGetResolvedInterfaceMethod);
-
-                if (rvm)
-                   {
-                   //in AOT or when CHOpts are disabled findClassInfoAfterLocking returns NULL unconditionally
-                   //we should treat this case conservatively meaning we assume that there are more than two concrete classes in the given hierarchy
-                   //most likely rvm will also be NULL in this case, but it is better to not rely on this implicit connection between different
-                   //CH queries.
-                   TR_PersistentClassInfo *objectClassInfo = vp->comp()->getPersistentInfo()->getPersistentCHTable()->findClassInfoAfterLocking(objectClass, vp->comp());
-
-                   if (objectClassInfo)
-                      {
-                      TR_ScratchList<TR_PersistentClassInfo> subClasses(vp->comp()->trMemory());
-                      TR_ClassQueries::collectAllSubClasses(objectClassInfo, &subClasses, vp->comp());
-                      subClasses.add(objectClassInfo);
-
-                      /*
-                      the limited version of a transformation is enabled
-                      Namely, we only do a transformation if there is no more than one instantiable class in the hierarchy
-                      starting from objectClass. If there is more than one concrete class in hierarchy
-                      overriding methods in objectClass and if any call was devirtualized by invariantargumentpreexisence downstream
-                      we will produce the functionally incorrect code by swapping a profiled test with a method test as
-                      the method test is insufficient for the devirtualizations done by invariantargumentpreexisence
-                      */
-
-                      if (TR::Compiler->cls.containsZeroOrOneConcreteClass(vp->comp(), &subClasses))
-                         {
-                         TR::ResolvedMethodSymbol* cMethodSymbol = vp->comp()->getSymRefTab()->findOrCreateMethodSymbol(
-                         symRef->getOwningMethodIndex(), -1, rvm, methodKind)->getSymbol()->castToResolvedMethodSymbol();
-
-                         TR_VirtualGuardKind guardKind =
-                            methodSymbol->isInterface()  ? TR_InterfaceGuard :
-                            TR::Compiler->cls.isAbstractClass(vp->comp(), objectClass) ? TR_AbstractGuard : TR_HierarchyGuard;
-
-                         TR_VirtualGuardTestType testType = guardKind == TR_HierarchyGuard ? TR_VftTest : TR_MethodTest;
-
-                         bool doThisTransformation = (guardKind == TR_HierarchyGuard && !vp->comp()->getOption(TR_DisableHierarchyInlining)) ||
-                                                    (guardKind == TR_AbstractGuard && !vp->comp()->getOption(TR_DisableAbstractInlining)) ||
-                                                    (guardKind == TR_InterfaceGuard && !vp->comp()->getOption(TR_DisableInterfaceInlining));
-                         if (doThisTransformation)
-                            addDelayedConvertedGuard(node, callNode, cMethodSymbol, vGuard, vp, guardKind, testType, objectClass);
-                         }
-                      }
-
-                   }
-                }
-             }
-          }
-#endif
-       }
-
 
    return node;
    }

@@ -758,14 +758,28 @@ static const char *opCodeToNameMap[] =
    "vushll2_8h",
    "vushll2_4s",
    "vushll2_2d",
+   "vsli16b",
+   "vsli8h",
+   "vsli4s",
+   "vsli2d",
    "vsshr16b",
    "vsshr8h",
    "vsshr4s",
    "vsshr2d",
+   "vshrn_8b",
+   "vshrn_4h",
+   "vshrn_2s",
+   "vshrn2_16b",
+   "vshrn2_8h",
+   "vshrn2_4s",
    "vushr16b",
    "vushr8h",
    "vushr4s",
    "vushr2d",
+   "vsri16b",
+   "vsri8h",
+   "vsri4s",
+   "vsri2d",
    "vshll_8h",
    "vshll_4s",
    "vshll_2d",
@@ -901,6 +915,7 @@ static const char *opCodeToNameMap[] =
    "vuzp2_8h",
    "vuzp2_4s",
    "vuzp2_2d",
+   "vext16b",
    "vneg16b",
    "vneg8h",
    "vneg4s",
@@ -922,6 +937,12 @@ static const char *opCodeToNameMap[] =
    "vrev64_16b",
    "vrev64_8h",
    "vrev64_4s",
+   "vxtn_8b",
+   "vxtn_4h",
+   "vxtn_2s",
+   "vxtn2_16b",
+   "vxtn2_8h",
+   "vxtn2_4s",
    "vdup16b",
    "vdup8h",
    "vdup4s",
@@ -1120,6 +1141,9 @@ TR_Debug::print(TR::FILE *pOutFile, TR::Instruction *instr)
          break;
       case OMR::Instruction::IsCondTrg1Src2:
          print(pOutFile, (TR::ARM64CondTrg1Src2Instruction *)instr);
+         break;
+      case OMR::Instruction::IsTrg1Src2Imm:
+         print(pOutFile, (TR::ARM64Trg1Src2ImmInstruction *)instr);
          break;
       case OMR::Instruction::IsTrg1Src2Shifted:
          print(pOutFile, (TR::ARM64Trg1Src2ShiftedInstruction *)instr);
@@ -1818,6 +1842,41 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Trg1Src1ImmInstruction *instr)
          trfprintf(pOutFile, ", %d, %d", immr, imms);
          }
       }
+   else if (op == TR::InstOpCode::bfmx || op == TR::InstOpCode::bfmw)
+      {
+      uint32_t imm12 = instr->getSourceImmediate();
+      auto immr = imm12 >> 6;
+      auto imms = imm12 & 0x3f;
+      if ((op == TR::InstOpCode::bfmx) || (((immr & (1 << 6)) == 0) && ((imms & (1 << 6)) == 0)))
+         {
+         if (imms < immr)
+            {
+            // bfi alias
+            done = true;
+            trfprintf(pOutFile, "%s \t", (op == TR::InstOpCode::bfmx) ? "bfix" : "bfiw");
+            print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
+            print(pOutFile, instr->getSource1Register(), TR_WordReg);
+            trfprintf(pOutFile, ", %d, %d", 64 - immr, imms + 1);
+            }
+         else
+            {
+            // bfxil alias
+            done = true;
+            trfprintf(pOutFile, "%s \t", (op == TR::InstOpCode::bfmx) ? "bfxilx" : "bfxilw");
+            print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
+            print(pOutFile, instr->getSource1Register(), TR_WordReg);
+            trfprintf(pOutFile, ", %d, %d", immr, imms + 1 - immr);
+            }
+         }
+      if (!done)
+         {
+         done = true;
+         trfprintf(pOutFile, "%s \t", getOpCodeName(&instr->getOpCode()));
+         print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
+         print(pOutFile, instr->getSource1Register(), TR_WordReg);
+         trfprintf(pOutFile, ", %d, %d", immr, imms);
+         }
+      }
    else if (op == TR::InstOpCode::andimmx || op == TR::InstOpCode::andimmw ||
             op == TR::InstOpCode::andsimmx || op == TR::InstOpCode::andsimmw ||
             op == TR::InstOpCode::orrimmx || op == TR::InstOpCode::orrimmw ||
@@ -1853,10 +1912,10 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Trg1Src1ImmInstruction *instr)
             }
          }
       }
-   else if ((op >= TR::InstOpCode::vshl16b) && (op <= TR::InstOpCode::vushr2d))
+   else if ((op >= TR::InstOpCode::vshl16b) && (op <= TR::InstOpCode::vsri2d))
       {
       done = true;
-      bool isShiftLeft = (op <= TR::InstOpCode::vushll2_2d);
+      bool isShiftLeft = (op <= TR::InstOpCode::vsli2d);
       uint32_t immh = (TR::InstOpCode::getOpCodeBinaryEncoding(op) >> 19) & 0xf;
       uint32_t elementSize = 8 << (31 - leadingZeroes(immh));
       uint32_t imm = instr->getSourceImmediate();
@@ -2102,6 +2161,20 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64CondTrg1Src2Instruction *instr)
 
    if (instr->getDependencyConditions())
       print(pOutFile, instr->getDependencyConditions());
+
+   trfflush(_comp->getOutFile());
+   }
+
+void
+TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Trg1Src2ImmInstruction *instr)
+   {
+   printPrefix(pOutFile, instr);
+   trfprintf(pOutFile, "%s \t", getOpCodeName(&instr->getOpCode()));
+
+   print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
+   print(pOutFile, instr->getSource1Register(), TR_WordReg); trfprintf(pOutFile, ", ");
+   print(pOutFile, instr->getSource2Register(), TR_WordReg);
+   trfprintf(pOutFile, ", %d", instr->getSourceImmediate());
 
    trfflush(_comp->getOutFile());
    }

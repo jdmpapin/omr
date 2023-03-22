@@ -523,9 +523,18 @@ OMR::ARM64::TreeEvaluator::lsubEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    return genericBinaryEvaluator(node, TR::InstOpCode::subx, TR::InstOpCode::subimmx, true, cg);
    }
 
-// vector add
+typedef TR::Register *(*binaryEvaluatorHelper)(TR::Node *node, TR::Register *resReg, TR::Register *lhsRes, TR::Register *rhsReg, TR::CodeGenerator *cg);
+/**
+ * @brief Helper functions for generating instruction sequence for masked binary operations
+ *
+ * @param[in] node: node
+ * @param[in] cg: CodeGenerator
+ * @param[in] op: binary opcode
+ * @param[in] evaluatorHelper: optional pointer to helper function which generates instruction stream for operation
+ * @return vector register containing the result
+ */
 static TR::Register *
-inlineVectorBinaryOp(TR::Node *node, TR::CodeGenerator *cg, TR::InstOpCode::Mnemonic op)
+inlineVectorBinaryOp(TR::Node *node, TR::CodeGenerator *cg, TR::InstOpCode::Mnemonic op, binaryEvaluatorHelper evaluatorHelper = NULL)
    {
    TR::Node *firstChild = node->getFirstChild();
    TR::Node *secondChild = node->getSecondChild();
@@ -540,7 +549,15 @@ inlineVectorBinaryOp(TR::Node *node, TR::CodeGenerator *cg, TR::InstOpCode::Mnem
    TR::Register *resReg = cg->allocateRegister(TR_VRF);
 
    node->setRegister(resReg);
-   generateTrg1Src2Instruction(cg, op, node, resReg, lhsReg, rhsReg);
+   TR_ASSERT_FATAL_WITH_NODE(node, (op != TR::InstOpCode::bad) || (evaluatorHelper != NULL), "If op is TR::InstOpCode::bad, evaluatorHelper must not be NULL");
+   if (evaluatorHelper != NULL)
+      {
+      (*evaluatorHelper)(node, resReg, lhsReg, rhsReg, cg);
+      }
+   else
+      {
+      generateTrg1Src2Instruction(cg, op, node, resReg, lhsReg, rhsReg);
+      }
 
    cg->decReferenceCount(firstChild);
    cg->decReferenceCount(secondChild);
@@ -616,7 +633,7 @@ OMR::ARM64::TreeEvaluator::vsubEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    }
 
 TR::Register *
-OMR::ARM64::TreeEvaluator::vmulInt64Helper(TR::Node *node, TR::CodeGenerator *cg)
+OMR::ARM64::TreeEvaluator::vmulInt64Helper(TR::Node *node, TR::Register *productReg, TR::Register *lhsReg, TR::Register *rhsReg, TR::CodeGenerator *cg)
    {
    /*
     * Vector mul instruction on aarch64 does not support 64-bit interger element.
@@ -633,14 +650,8 @@ OMR::ARM64::TreeEvaluator::vmulInt64Helper(TR::Node *node, TR::CodeGenerator *cg
     * To perform (A*D + B*C), we reverse elements in AB and do 32-bit element wise multiplication for BA and CD.
     *
     */
-   TR::Node *firstChild = node->getFirstChild();
-   TR::Node *secondChild = node->getSecondChild();
-   TR::Register *lhsReg = cg->evaluate(firstChild);
-   TR::Register *rhsReg = cg->evaluate(secondChild);
-
    TR::Register *tmp1Reg = cg->allocateRegister(TR_VRF);
    TR::Register *tmp2Reg = cg->allocateRegister(TR_VRF);
-   TR::Register *productReg = cg->allocateRegister(TR_VRF);
 
    /* Reverse 32bit words in 64bit elements */
    generateTrg1Src1Instruction(cg, TR::InstOpCode::vrev64_4s, node, tmp1Reg, lhsReg);
@@ -661,11 +672,8 @@ OMR::ARM64::TreeEvaluator::vmulInt64Helper(TR::Node *node, TR::CodeGenerator *cg
    /* Finally, get the result by UMLAL. */
    generateTrg1Src2Instruction(cg, TR::InstOpCode::vumlal_2d, node, productReg, tmp1Reg, tmp2Reg);
 
-   node->setRegister(productReg);
    cg->stopUsingRegister(tmp1Reg);
    cg->stopUsingRegister(tmp2Reg);
-   cg->decReferenceCount(firstChild);
-   cg->decReferenceCount(secondChild);
 
    return productReg;
    }
@@ -676,7 +684,8 @@ OMR::ARM64::TreeEvaluator::vmulEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    TR_ASSERT_FATAL_WITH_NODE(node, node->getDataType().getVectorLength() == TR::VectorLength128,
                    "Only 128-bit vectors are supported %s", node->getDataType().toString());
 
-   TR::InstOpCode::Mnemonic mulOp;
+   TR::InstOpCode::Mnemonic mulOp = TR::InstOpCode::bad;
+   binaryEvaluatorHelper evaluatorHelper = NULL;
    switch(node->getDataType().getVectorElementType())
       {
       case TR::Int8:
@@ -689,7 +698,8 @@ OMR::ARM64::TreeEvaluator::vmulEvaluator(TR::Node *node, TR::CodeGenerator *cg)
          mulOp = TR::InstOpCode::vmul4s;
          break;
       case TR::Int64:
-         return vmulInt64Helper(node, cg);
+         evaluatorHelper = vmulInt64Helper;
+         break;
       case TR::Float:
          mulOp = TR::InstOpCode::vfmul4s;
          break;
@@ -700,11 +710,11 @@ OMR::ARM64::TreeEvaluator::vmulEvaluator(TR::Node *node, TR::CodeGenerator *cg)
          TR_ASSERT(false, "unrecognized vector type %s", node->getDataType().toString());
          return NULL;
       }
-   return inlineVectorBinaryOp(node, cg, mulOp);
+   return inlineVectorBinaryOp(node, cg, mulOp, evaluatorHelper);
    }
 
 TR::Register *
-OMR::ARM64::TreeEvaluator::vdivIntHelper(TR::Node *node, TR::CodeGenerator *cg)
+OMR::ARM64::TreeEvaluator::vdivIntHelper(TR::Node *node, TR::Register *resultReg, TR::Register *lhsReg, TR::Register *rhsReg, TR::CodeGenerator *cg)
    {
    struct DivOps
       {
@@ -725,12 +735,6 @@ OMR::ARM64::TreeEvaluator::vdivIntHelper(TR::Node *node, TR::CodeGenerator *cg)
                          ((eType == TR::Int32) ? 2 : 3));
    struct DivOps op = ops[index];
 
-   TR::Node *firstChild = node->getFirstChild();
-   TR::Node *secondChild = node->getSecondChild();
-   TR::Register *lhsReg = cg->evaluate(firstChild);
-   TR::Register *rhsReg = cg->evaluate(secondChild);
-
-   TR::Register *resultReg = cg->allocateRegister(TR_VRF);
    TR_ARM64ScratchRegisterManager *srm = cg->generateScratchRegisterManager();
    TR::Register *tmp1Reg = srm->findOrCreateScratchRegister(TR_GPR);
    TR::Register *tmp2Reg = srm->findOrCreateScratchRegister(TR_GPR);
@@ -834,10 +838,7 @@ OMR::ARM64::TreeEvaluator::vdivIntHelper(TR::Node *node, TR::CodeGenerator *cg)
          }
       }
 
-   node->setRegister(resultReg);
    srm->stopUsingRegisters();
-   cg->decReferenceCount(firstChild);
-   cg->decReferenceCount(secondChild);
 
    return resultReg;
    }
@@ -848,14 +849,16 @@ OMR::ARM64::TreeEvaluator::vdivEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    TR_ASSERT_FATAL_WITH_NODE(node, node->getDataType().getVectorLength() == TR::VectorLength128,
                    "Only 128-bit vectors are supported %s", node->getDataType().toString());
 
-   TR::InstOpCode::Mnemonic divOp;
+   TR::InstOpCode::Mnemonic divOp = TR::InstOpCode::bad;
+   binaryEvaluatorHelper evaluatorHelper = NULL;
    switch(node->getDataType().getVectorElementType())
       {
       case TR::Int8:
       case TR::Int16:
       case TR::Int32:
       case TR::Int64:
-         return vdivIntHelper(node, cg);
+         evaluatorHelper = vdivIntHelper;
+         break;
       case TR::Float:
          divOp = TR::InstOpCode::vfdiv4s;
          break;
@@ -866,7 +869,7 @@ OMR::ARM64::TreeEvaluator::vdivEvaluator(TR::Node *node, TR::CodeGenerator *cg)
          TR_ASSERT(false, "unrecognized vector type %s", node->getDataType().toString());
          return NULL;
       }
-   return inlineVectorBinaryOp(node, cg, divOp);
+   return inlineVectorBinaryOp(node, cg, divOp, evaluatorHelper);
    }
 
 TR::Register *
@@ -940,11 +943,14 @@ OMR::ARM64::TreeEvaluator::vxorEvaluator(TR::Node *node, TR::CodeGenerator *cg)
  *
  * @param[in] node: node
  * @param[in] isMax: true if operation is max
+ * @param[in] resReg: the result register
+ * @param[in] lhsReg: the first argument register
+ * @param[in] rhsReg: the second argument register
  * @param[in] cg: CodeGenerator
  * @return register containing the result
  */
 static TR::Register *
-vminmaxInt64Helper(TR::Node *node, bool isMax, TR::CodeGenerator *cg)
+vminmaxInt64Helper(TR::Node *node, bool isMax, TR::Register *resReg, TR::Register *lhsReg, TR::Register *rhsReg, TR::CodeGenerator *cg)
    {
    /*
     * Vector min/max instruction on aarch64 does not support 64-bit interger element.
@@ -960,26 +966,26 @@ vminmaxInt64Helper(TR::Node *node, bool isMax, TR::CodeGenerator *cg)
     * The result is in v2 for both cases.
     *
     */
-   TR::Node *firstChild = node->getFirstChild();
-   TR::Node *secondChild = node->getSecondChild();
-   TR::Register *lhsReg = NULL;
-   TR::Register *rhsReg = NULL;
-
-   lhsReg = cg->evaluate(firstChild);
-   rhsReg = cg->evaluate(secondChild);
 
    TR_ASSERT_FATAL_WITH_NODE(node, lhsReg->getKind() == TR_VRF, "unexpected Register kind");
    TR_ASSERT_FATAL_WITH_NODE(node, rhsReg->getKind() == TR_VRF, "unexpected Register kind");
 
-   TR::Register *resReg = cg->allocateRegister(TR_VRF);
-
    generateTrg1Src2Instruction(cg, TR::InstOpCode::vcmge2d, node, resReg, lhsReg, rhsReg);
    generateTrg1Src2Instruction(cg, TR::InstOpCode::vbsl16b, node, resReg, (isMax ? lhsReg : rhsReg), (isMax ? rhsReg : lhsReg));
 
-   node->setRegister(resReg);
-   cg->decReferenceCount(firstChild);
-   cg->decReferenceCount(secondChild);
    return resReg;
+   }
+
+TR::Register *
+OMR::ARM64::TreeEvaluator::vminInt64Helper(TR::Node *node, TR::Register *resReg, TR::Register *lhsReg, TR::Register *rhsReg, TR::CodeGenerator *cg)
+   {
+   return vminmaxInt64Helper(node, false, resReg, lhsReg, rhsReg, cg);
+   }
+
+TR::Register *
+OMR::ARM64::TreeEvaluator::vmaxInt64Helper(TR::Node *node, TR::Register *resReg, TR::Register *lhsReg, TR::Register *rhsReg, TR::CodeGenerator *cg)
+   {
+   return vminmaxInt64Helper(node, true, resReg, lhsReg, rhsReg, cg);
    }
 
 TR::Register*
@@ -988,7 +994,8 @@ OMR::ARM64::TreeEvaluator::vminEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    TR_ASSERT_FATAL_WITH_NODE(node, node->getDataType().getVectorLength() == TR::VectorLength128,
                    "Only 128-bit vectors are supported %s", node->getDataType().toString());
 
-   TR::InstOpCode::Mnemonic minOp;
+   TR::InstOpCode::Mnemonic minOp = TR::InstOpCode::bad;
+   binaryEvaluatorHelper evaluatorHelper = NULL;
    switch(node->getDataType().getVectorElementType())
       {
       case TR::Int8:
@@ -1001,7 +1008,8 @@ OMR::ARM64::TreeEvaluator::vminEvaluator(TR::Node *node, TR::CodeGenerator *cg)
          minOp = TR::InstOpCode::vsmin4s;
          break;
       case TR::Int64:
-         return vminmaxInt64Helper(node, false, cg);
+         evaluatorHelper = vminInt64Helper;
+         break;
       /*
        * The behavior of vfmin and vfmax basically follows minimu/maximum of IEEE754-2019.
        * If either one of the arguments is NaN, the result is NaN.
@@ -1017,7 +1025,7 @@ OMR::ARM64::TreeEvaluator::vminEvaluator(TR::Node *node, TR::CodeGenerator *cg)
          TR_ASSERT(false, "unrecognized vector type %s", node->getDataType().toString());
          return NULL;
       }
-   return inlineVectorBinaryOp(node, cg, minOp);
+   return inlineVectorBinaryOp(node, cg, minOp, evaluatorHelper);
    }
 
 TR::Register*
@@ -1026,7 +1034,8 @@ OMR::ARM64::TreeEvaluator::vmaxEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    TR_ASSERT_FATAL_WITH_NODE(node, node->getDataType().getVectorLength() == TR::VectorLength128,
                    "Only 128-bit vectors are supported %s", node->getDataType().toString());
 
-   TR::InstOpCode::Mnemonic maxOp;
+   TR::InstOpCode::Mnemonic maxOp = TR::InstOpCode::bad;
+   binaryEvaluatorHelper evaluatorHelper = NULL;
    switch(node->getDataType().getVectorElementType())
       {
       case TR::Int8:
@@ -1039,7 +1048,8 @@ OMR::ARM64::TreeEvaluator::vmaxEvaluator(TR::Node *node, TR::CodeGenerator *cg)
          maxOp = TR::InstOpCode::vsmax4s;
          break;
       case TR::Int64:
-         return vminmaxInt64Helper(node, true, cg);
+         evaluatorHelper = vmaxInt64Helper;
+         break;
       /*
        * The behavior of vfmin and vfmax basically follows minimu/maximum of IEEE754-2019.
        * If either one of the arguments is NaN, the result is NaN.
@@ -1055,7 +1065,7 @@ OMR::ARM64::TreeEvaluator::vmaxEvaluator(TR::Node *node, TR::CodeGenerator *cg)
          TR_ASSERT(false, "unrecognized vector type %s", node->getDataType().toString());
          return NULL;
       }
-   return inlineVectorBinaryOp(node, cg, maxOp);
+   return inlineVectorBinaryOp(node, cg, maxOp, evaluatorHelper);
    }
 
 // Multiply a register by a 32-bit constant
@@ -1266,7 +1276,7 @@ static TR::Register *idivHelper(TR::Node *node, bool is64bit, TR::CodeGenerator 
    return trgReg;
    }
 
-static TR::Register *iremHelper(TR::Node *node, bool is64bit, TR::CodeGenerator *cg)
+static TR::Register *iremHelper(TR::Node *node, bool is64bit, bool isUnsigned, TR::CodeGenerator *cg)
    {
    // TODO: Add checks for special cases
 
@@ -1277,7 +1287,9 @@ static TR::Register *iremHelper(TR::Node *node, bool is64bit, TR::CodeGenerator 
    TR::Register *tmpReg = cg->allocateRegister();
    TR::Register *trgReg = cg->allocateRegister();
 
-   generateTrg1Src2Instruction(cg, is64bit ? TR::InstOpCode::sdivx : TR::InstOpCode::sdivw, node, tmpReg, src1Reg, src2Reg);
+   TR::InstOpCode::Mnemonic op = is64bit ? (isUnsigned ? TR::InstOpCode::udivx : TR::InstOpCode::sdivx) :
+                                           (isUnsigned ? TR::InstOpCode::udivw : TR::InstOpCode::sdivw);
+   generateTrg1Src2Instruction(cg, op, node, tmpReg, src1Reg, src2Reg);
    generateTrg1Src3Instruction(cg, is64bit ? TR::InstOpCode::msubx : TR::InstOpCode::msubw, node, trgReg, tmpReg, src2Reg, src1Reg);
 
    cg->stopUsingRegister(tmpReg);
@@ -1323,6 +1335,40 @@ OMR::ARM64::TreeEvaluator::lmulhEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    return trgReg;
    }
 
+static TR::Register* subInt32DivEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   TR::Node *firstChild = node->getFirstChild();
+   TR::Register *src1Reg = cg->evaluate(firstChild);
+   TR::Node *secondChild = node->getSecondChild();
+   TR::Register *src2Reg = cg->evaluate(secondChild);
+   TR::Register *tmpReg = cg->allocateRegister();
+   TR::Register *trgReg = cg->allocateRegister();
+   const uint32_t operandBits = TR::DataType::getSize(node->getDataType()) * 8;
+
+   generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::sbfmw, node, trgReg, src1Reg, operandBits - 1); // sxtb or sxth
+   generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::sbfmw, node, tmpReg, src2Reg, operandBits - 1); // sxtb or sxth
+
+   generateTrg1Src2Instruction(cg, TR::InstOpCode::sdivw, node, trgReg, trgReg, tmpReg);
+
+   cg->stopUsingRegister(tmpReg);
+   node->setRegister(trgReg);
+   cg->decReferenceCount(firstChild);
+   cg->decReferenceCount(secondChild);
+   return trgReg;
+   }
+
+TR::Register*
+OMR::ARM64::TreeEvaluator::bdivEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return subInt32DivEvaluator(node, cg);
+   }
+
+TR::Register*
+OMR::ARM64::TreeEvaluator::sdivEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return subInt32DivEvaluator(node, cg);
+   }
+
 TR::Register *
 OMR::ARM64::TreeEvaluator::idivEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
@@ -1332,7 +1378,19 @@ OMR::ARM64::TreeEvaluator::idivEvaluator(TR::Node *node, TR::CodeGenerator *cg)
 TR::Register *
 OMR::ARM64::TreeEvaluator::iremEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return iremHelper(node, false, cg);
+   return iremHelper(node, false, false, cg);
+   }
+
+TR::Register*
+OMR::ARM64::TreeEvaluator::iudivEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return genericBinaryEvaluator(node, TR::InstOpCode::udivw, TR::InstOpCode::udivw, false, cg);
+   }
+
+TR::Register*
+OMR::ARM64::TreeEvaluator::iuremEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return iremHelper(node, false, true, cg);
    }
 
 TR::Register *
@@ -1344,7 +1402,13 @@ OMR::ARM64::TreeEvaluator::ldivEvaluator(TR::Node *node, TR::CodeGenerator *cg)
 TR::Register *
 OMR::ARM64::TreeEvaluator::lremEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return iremHelper(node, true, cg);
+   return iremHelper(node, true, false, cg);
+   }
+
+TR::Register*
+OMR::ARM64::TreeEvaluator::ludivEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return genericBinaryEvaluator(node, TR::InstOpCode::udivx, TR::InstOpCode::udivx, true, cg);
    }
 
 /**
@@ -1390,14 +1454,15 @@ generateUBFMForMaskAndShift(TR::Node *shiftNode, TR::CodeGenerator *cg)
       {
       return NULL;
       }
+   const uint32_t operandBits = TR::DataType::getSize(shiftNode->getDataType()) * 8;
    const bool is64bit = shiftNode->getDataType().isInt64();
    const int64_t shiftValue = shiftValueNode->getConstValue();
 
-   if ((shiftValue <= 0) || (shiftValue > (is64bit ? 63 : 31)))
+   if ((shiftValue <= 0) || (shiftValue > (operandBits - 1)))
       {
       return NULL;
       }
-   const uint64_t maskValue = is64bit ? maskNode->getLongInt() : static_cast<uint32_t>(maskNode->getInt());
+   const uint64_t maskValue = maskNode->get64bitIntegralValueAsUnsigned();
 
    if (shiftNode->getOpCode().isLeftShift())
       {
@@ -1414,7 +1479,7 @@ generateUBFMForMaskAndShift(TR::Node *shiftNode, TR::CodeGenerator *cg)
          return reg;
          }
 
-      if (((maskValue & 1) == 1) && (((maskValue >> (is64bit ? 63 : 31)) & 1) == 0) && contiguousBits(maskValue))
+      if (((maskValue & 1) == 1) && (((maskValue >> (operandBits - 1)) & 1) == 0) && contiguousBits(maskValue))
          {
          /*
           * maskValue has consecutive 1s from the least significant bits. The most significant bit must be 0. Otherwise, mask is all 1s.
@@ -1422,6 +1487,11 @@ generateUBFMForMaskAndShift(TR::Node *shiftNode, TR::CodeGenerator *cg)
           * to bit position shiftValue of the destination register.
           */
          uint32_t width = populationCount(maskValue);
+         uint32_t maxWidth = operandBits - static_cast<uint32_t>(shiftValue);
+         if (width > maxWidth)
+            {
+            width = maxWidth;
+            }
 
          TR::Register *reg;
          TR::Register *sreg = cg->evaluate(sourceNode);
@@ -1451,7 +1521,7 @@ generateUBFMForMaskAndShift(TR::Node *shiftNode, TR::CodeGenerator *cg)
       if (((shiftedMask & 1) == 1) && contiguousBits(shiftedMask))
          {
          uint32_t width = populationCount(shiftedMask);
-         uint32_t shiftRemainderWidth = (is64bit ? 64 : 32) - shiftValue;
+         uint32_t shiftRemainderWidth = operandBits - shiftValue;
 
          bool isRightShift = (width == shiftRemainderWidth);  /* In this case, it works as a shift. */
 
@@ -1468,13 +1538,24 @@ generateUBFMForMaskAndShift(TR::Node *shiftNode, TR::CodeGenerator *cg)
 
          if (isRightShift)
             {
+            TR::Register *shiftSrcReg = sreg;
             if (shiftNode->getOpCode().isShiftLogical())
                {
-               generateLogicalShiftRightImmInstruction(cg, shiftNode, reg, sreg, shiftValue, is64bit);
+               if (operandBits < 32)
+                  {
+                  generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::ubfmw, andNode, reg, sreg, operandBits - 1); // uxth or uxtb
+                  shiftSrcReg = reg;
+                  }
+               generateLogicalShiftRightImmInstruction(cg, shiftNode, reg, shiftSrcReg, shiftValue, is64bit);
                }
             else
                {
-               generateArithmeticShiftRightImmInstruction(cg, shiftNode, reg, sreg, shiftValue, is64bit);
+               if (operandBits < 32)
+                  {
+                  generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::sbfmw, andNode, reg, sreg, operandBits - 1); // sxth or sxtb
+                  shiftSrcReg = reg;
+                  }
+               generateArithmeticShiftRightImmInstruction(cg, shiftNode, reg, shiftSrcReg, shiftValue, is64bit);
                }
             }
          else
@@ -1499,22 +1580,35 @@ static TR::Register *shiftHelper(TR::Node *node, TR::ARM64ShiftCode shiftType, T
    TR::Register *srcReg = cg->evaluate(firstChild);
    TR::Register *trgReg = cg->allocateRegister();
    bool is64bit = node->getDataType().isInt64();
+   const uint32_t operandBits = TR::DataType::getSize(node->getDataType()) * 8;
+
    TR::InstOpCode::Mnemonic op;
 
    if (secondOp == TR::iconst)
       {
       int32_t value = secondChild->getInt();
       uint32_t shift = is64bit ? (value & 0x3F) : (value & 0x1F);
+      TR::Register *shiftSrcReg = srcReg;
       switch (shiftType)
          {
          case TR::SH_LSL:
-            generateLogicalShiftLeftImmInstruction(cg, node, trgReg, srcReg, shift, is64bit);
+            generateLogicalShiftLeftImmInstruction(cg, node, trgReg, shiftSrcReg, shift, is64bit);
             break;
          case TR::SH_LSR:
-            generateLogicalShiftRightImmInstruction(cg, node, trgReg, srcReg, shift, is64bit);
+            if (operandBits < 32)
+               {
+               generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::ubfmw, node, trgReg, srcReg, operandBits - 1); // uxth or uxtb
+               shiftSrcReg = trgReg;
+               }
+            generateLogicalShiftRightImmInstruction(cg, node, trgReg, shiftSrcReg, shift, is64bit);
             break;
          case TR::SH_ASR:
-            generateArithmeticShiftRightImmInstruction(cg, node, trgReg, srcReg, shift, is64bit);
+            if (operandBits < 32)
+               {
+               generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::sbfmw, node, trgReg, srcReg, operandBits - 1); // sxth or sxtb
+               shiftSrcReg = trgReg;
+               }
+            generateArithmeticShiftRightImmInstruction(cg, node, trgReg, shiftSrcReg, shift, is64bit);
             break;
          default:
             TR_ASSERT(false, "Unsupported shift type.");
@@ -1523,6 +1617,7 @@ static TR::Register *shiftHelper(TR::Node *node, TR::ARM64ShiftCode shiftType, T
    else
       {
       TR::Register *shiftAmountReg = cg->evaluate(secondChild);
+      TR::Register *shiftSrcReg = srcReg;
       switch (shiftType)
          {
          case TR::SH_LSL:
@@ -1530,14 +1625,24 @@ static TR::Register *shiftHelper(TR::Node *node, TR::ARM64ShiftCode shiftType, T
             break;
          case TR::SH_LSR:
             op = is64bit ? TR::InstOpCode::lsrvx : TR::InstOpCode::lsrvw;
+            if (operandBits < 32)
+               {
+               generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::ubfmw, node, trgReg, srcReg, operandBits - 1); // uxth or uxtb
+               shiftSrcReg = trgReg;
+               }
             break;
          case TR::SH_ASR:
             op = is64bit ? TR::InstOpCode::asrvx : TR::InstOpCode::asrvw;
+            if (operandBits < 32)
+               {
+               generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::sbfmw, node, trgReg, srcReg, operandBits - 1); // sxth or sxtb
+               shiftSrcReg = trgReg;
+               }
             break;
          default:
             TR_ASSERT(false, "Unsupported shift type.");
          }
-      generateTrg1Src2Instruction(cg, op, node, trgReg, srcReg, shiftAmountReg);
+      generateTrg1Src2Instruction(cg, op, node, trgReg, shiftSrcReg, shiftAmountReg);
       }
 
    node->setRegister(trgReg);
@@ -1980,13 +2085,14 @@ generateUBFMForShiftAndMask(TR::Node *andNode, TR::CodeGenerator *cg)
        shiftNode->getSecondChild()->getOpCode().isLoadConst() &&
        maskNode->getOpCode().isLoadConst())
       {
+      const uint32_t operandBits = TR::DataType::getSize(shiftNode->getDataType()) * 8;
       const bool is64bit = shiftNode->getDataType().isInt64();
       int64_t shiftValue = shiftNode->getSecondChild()->getConstValue();
-      if ((shiftValue <= 0) || (shiftValue > (is64bit ? 63 : 31)))
+      if ((shiftValue <= 0) || (shiftValue > (operandBits - 1)))
          {
          return NULL;
          }
-      uint64_t maskValue = is64bit ? maskNode->getLongInt() : static_cast<uint32_t>(maskNode->getInt());
+      uint64_t maskValue = maskNode->get64bitIntegralValueAsUnsigned();
       TR::Node *sourceNode = shiftNode->getFirstChild();
 
       if (shiftNode->getOpCode().isLeftShift())
@@ -2038,10 +2144,10 @@ generateUBFMForShiftAndMask(TR::Node *andNode, TR::CodeGenerator *cg)
           * consecutive 1s starting from the bit position shiftValue of the source register to the least significant bits of the destination register.
           * We consider arithmetic shift only.
           */
-         if ((!shiftNode->getOpCode().isShiftLogical()) && ((maskValue & 1) == 1) && (((maskValue >> (is64bit ? 63 : 31)) & 1) == 0) && contiguousBits(maskValue))
+         if ((!shiftNode->getOpCode().isShiftLogical()) && ((maskValue & 1) == 1) && (((maskValue >> (operandBits - 1)) & 1) == 0) && contiguousBits(maskValue))
             {
             uint32_t width = populationCount(maskValue);
-            uint32_t shiftRemainderWidth = (is64bit ? 64 : 32) - shiftValue;
+            uint32_t shiftRemainderWidth = operandBits - shiftValue;
 
             if (width > shiftRemainderWidth)
                {
@@ -2059,6 +2165,7 @@ generateUBFMForShiftAndMask(TR::Node *andNode, TR::CodeGenerator *cg)
 
             TR::Register *reg;
             TR::Register *sreg = cg->evaluate(sourceNode);
+            TR::Register *shiftSrcReg = sreg;
             if (sourceNode->getReferenceCount() == 1)
                {
                reg = sreg;
@@ -2069,7 +2176,12 @@ generateUBFMForShiftAndMask(TR::Node *andNode, TR::CodeGenerator *cg)
                }
             if (isLogicalShiftRight)
                {
-               generateLogicalShiftRightImmInstruction(cg, andNode, reg, sreg, shiftValue, is64bit);
+               if (operandBits < 32)
+                  {
+                  generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::ubfmw, andNode, reg, sreg, operandBits - 1); // uxth or uxtb
+                  shiftSrcReg = reg;
+                  }
+               generateLogicalShiftRightImmInstruction(cg, andNode, reg, shiftSrcReg, shiftValue, is64bit);
                }
             else
                {

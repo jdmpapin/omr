@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2015 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -19,14 +19,14 @@
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
-
-#include "HeapWalker.hpp"
-
 #include "omrcfg.h"
 #include "omrgcconsts.h"
 
+#include "HeapWalker.hpp"
+
 #include "CollectorLanguageInterface.hpp"
 #include "GCExtensionsBase.hpp"
+#include "EnvironmentBase.hpp"
 #include "Heap.hpp"
 #include "HeapRegionIterator.hpp"
 #include "HeapRegionManager.hpp"
@@ -48,6 +48,7 @@ struct SlotObjectDoUserData {
 	MM_HeapWalkerSlotFunc function;
 	void *userData;
 	uintptr_t oSlotWalkFlag;
+	MM_HeapWalker *heapWalker;
 };
 
 /**
@@ -70,26 +71,36 @@ heapWalkerObjectFieldSlotDo(OMR_VM *omrVM, omrobjectptr_t object, GC_SlotObject 
  * walk through slots of mixed object and apply the user function.
  */
 static void
-heapWalkerObjectSlotDo(OMR_VM *omrVM, omrobjectptr_t object, MM_HeapWalkerSlotFunc oSlotIterator, void *localUserData)
+heapWalkerObjectSlotsDo(OMR_VMThread *omrVMThread, omrobjectptr_t object, MM_HeapWalkerSlotFunc oSlotIterator, void *localUserData, MM_HeapWalkerDelegate *delegate)
 {
+	OMR_VM *omrVM = omrVMThread->_vm;
 	GC_ObjectIterator objectIterator(omrVM, object);
 	GC_SlotObject *slotObject;
 
 	while ((slotObject = objectIterator.nextSlot()) != NULL) {
 		heapWalkerObjectFieldSlotDo(omrVM, object, slotObject, oSlotIterator, localUserData);
 	}
+	delegate->objectSlotsDo(omrVMThread, object, oSlotIterator, localUserData);
+}
+
+void
+MM_HeapWalker::heapWalkerSlotCallback(MM_EnvironmentBase *env, omrobjectptr_t *objectSlotPtr, MM_HeapWalkerSlotFunc function, void * userData)
+{
+	OMR_VM *omrVM = env->getOmrVMThread()->_vm;
+	(*function)(omrVM, objectSlotPtr, userData, 0);
 }
 
 /**
  * walk through slots of an object and apply the user function.
  */
 static void
-heapWalkerObjectSlotDo(OMR_VMThread *omrVMThread, MM_HeapRegionDescriptor *region, omrobjectptr_t object, void *userData)
+heapWalkerObjectSlotsDo(OMR_VMThread *omrVMThread, MM_HeapRegionDescriptor *region, omrobjectptr_t object, void *userData)
 {
 	OMR_VM *omrVM = omrVMThread->_vm;
 	MM_GCExtensionsBase *extensions = MM_GCExtensionsBase::getExtensions(omrVM);
-	MM_HeapWalkerSlotFunc oSlotIterator = (MM_HeapWalkerSlotFunc)((SlotObjectDoUserData *)userData)->function;
-	void *localUserData = ((SlotObjectDoUserData *)userData)->userData;
+	SlotObjectDoUserData *slotObjectDoUserData = (SlotObjectDoUserData *)userData;
+	MM_HeapWalkerSlotFunc oSlotIterator = (MM_HeapWalkerSlotFunc)slotObjectDoUserData->function;
+	void *localUserData = slotObjectDoUserData->userData;
 
 
 	omrobjectptr_t indirectObject = extensions->objectModel.getIndirectObject(object);
@@ -97,7 +108,7 @@ heapWalkerObjectSlotDo(OMR_VMThread *omrVMThread, MM_HeapRegionDescriptor *regio
 		(*oSlotIterator)(omrVM, &indirectObject, localUserData, 0);
 	}
 
-	heapWalkerObjectSlotDo(omrVM, object, oSlotIterator, localUserData);
+	heapWalkerObjectSlotsDo(omrVMThread, object, oSlotIterator, localUserData, slotObjectDoUserData->heapWalker->getHeapWalkerDelegate());
 }
 
 MM_HeapWalker *
@@ -108,6 +119,10 @@ MM_HeapWalker::newInstance(MM_EnvironmentBase *env)
 	heapWalker = (MM_HeapWalker *)env->getForge()->allocate(sizeof(MM_HeapWalker), OMR::GC::AllocationCategory::FIXED, OMR_GET_CALLSITE());
 	if (heapWalker) {
 		new(heapWalker) MM_HeapWalker();
+		if (!heapWalker->initialize(env)) {
+			heapWalker->kill(env);
+			heapWalker = NULL;
+		}
 	}
 
 	return heapWalker;
@@ -116,6 +131,9 @@ MM_HeapWalker::newInstance(MM_EnvironmentBase *env)
 bool
 MM_HeapWalker::initialize(MM_EnvironmentBase *env)
 {
+	if (!_delegate.initialize(env, this)) {
+		return false;
+	}
 	return true;
 }
 
@@ -135,7 +153,7 @@ MM_HeapWalker::kill(MM_EnvironmentBase *env)
 void
 MM_HeapWalker::rememberedObjectSlotsDo(MM_EnvironmentBase *env, MM_HeapWalkerSlotFunc function, void *userData, uintptr_t walkFlags, bool parallel)
 {
-	SlotObjectDoUserData slotObjectDoUserData = { function, userData, walkFlags };
+	SlotObjectDoUserData slotObjectDoUserData = { function, userData, walkFlags, this };
 	omrobjectptr_t* slotPtr = NULL;
 	MM_SublistPuddle *puddle = NULL;
 	OMR_VMThread *omrVMThread = env->getOmrVMThread();
@@ -146,7 +164,7 @@ MM_HeapWalker::rememberedObjectSlotsDo(MM_EnvironmentBase *env, MM_HeapWalkerSlo
 			GC_SublistSlotIterator remSetSlotIterator(puddle);
 			while ((slotPtr = (omrobjectptr_t*)remSetSlotIterator.nextSlot()) != NULL) {
 				if (*slotPtr != NULL) {
-					heapWalkerObjectSlotDo(omrVMThread, NULL, *slotPtr, &slotObjectDoUserData);
+					heapWalkerObjectSlotsDo(omrVMThread, NULL, *slotPtr, &slotObjectDoUserData);
 				}
 			}
 		}
@@ -161,19 +179,17 @@ MM_HeapWalker::rememberedObjectSlotsDo(MM_EnvironmentBase *env, MM_HeapWalkerSlo
 void
 MM_HeapWalker::allObjectSlotsDo(MM_EnvironmentBase *env, MM_HeapWalkerSlotFunc function, void *userData, uintptr_t walkFlags, bool parallel, bool prepareHeapForWalk)
 {
-	SlotObjectDoUserData slotObjectDoUserData = { function, userData, walkFlags };
+	SlotObjectDoUserData slotObjectDoUserData = { function, userData, walkFlags, this };
 	uintptr_t modifiedWalkFlags = walkFlags;
 
-#if defined(OMR_GC_MODRON_SCAVENGER)
 	/* If J9_MU_WALK_NEW_AND_REMEMBERED_ONLY is specified, and rsOverflow has
 	 * occurred, any object in old space might be remembered, so we must walk them all
 	 */
-	if (env->getExtensions()->isRememberedSetInOverflowState()) {
+	if (env->getExtensions()->isScavengerRememberedSetInOverflowState()) {
 		modifiedWalkFlags &= ~J9_MU_WALK_NEW_AND_REMEMBERED_ONLY;
 	}
-#endif /* OMR_GC_MODRON_SCAVENGER */
 
-	allObjectsDo(env, heapWalkerObjectSlotDo, (void *)&slotObjectDoUserData, modifiedWalkFlags, parallel, prepareHeapForWalk);
+	allObjectsDo(env, heapWalkerObjectSlotsDo, (void *)&slotObjectDoUserData, modifiedWalkFlags, parallel, prepareHeapForWalk);
 
 #if defined(OMR_GC_MODRON_SCAVENGER)
 	/* If J9_MU_WALK_NEW_AND_REMEMBERED_ONLY is specified, allObjectsDo will only walk

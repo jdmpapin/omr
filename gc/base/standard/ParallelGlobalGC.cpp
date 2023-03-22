@@ -192,7 +192,7 @@ hookGlobalGcSweepEndRsoSafetyFixHeap(J9HookInterface** hook, uintptr_t eventNum,
 	MM_EnvironmentBase *env = MM_EnvironmentBase::getEnvironment(event->currentThread);
 	MM_GCExtensionsBase *extensions = env->getExtensions();
 
-	extensions->scavengerRsoScanUnsafe = !extensions->isRememberedSetInOverflowState();
+	extensions->scavengerRsoScanUnsafe = !extensions->isScavengerRememberedSetInOverflowState();
 	if (!extensions->scavengerRsoScanUnsafe) {
 		MM_ParallelGlobalGC *pggc = (MM_ParallelGlobalGC *)userData;
 		pggc->fixHeapForWalk(env, MEMORY_TYPE_OLD_RAM, FIXUP_DEBUG_TOOLING, fixObject);
@@ -506,11 +506,7 @@ MM_ParallelGlobalGC::mainThreadGarbageCollect(MM_EnvironmentBase *env, MM_Alloca
 		if (!_fixHeapForWalkCompleted) {
 #if defined(OMR_GC_MODRON_COMPACTION)
 			if (compactedThisCycle) {
-				OMRPORT_ACCESS_FROM_ENVIRONMENT(env);
-				U_64 startTime = omrtime_hires_clock();
-				getCompactScheme(env)->fixHeapForWalk(env);
-				_extensions->globalGCStats.fixHeapForWalkTime = omrtime_hires_delta(startTime, omrtime_hires_clock(), OMRPORT_TIME_DELTA_IN_MICROSECONDS);
-				_extensions->globalGCStats.fixHeapForWalkReason = FIXUP_DEBUG_TOOLING;
+				getCompactScheme(env)->fixHeapForWalk(env, MEMORY_TYPE_RAM, FIXUP_DEBUG_TOOLING);
 			} else
 #endif /* OMR_GC_MODRON_COMPACTION */
 			{
@@ -575,12 +571,14 @@ MM_ParallelGlobalGC::shouldCompactThisCycle(MM_EnvironmentBase *env, MM_Allocate
 		goto nocompact;
 	}	
 
+	if ((J9MMCONSTANT_EXPLICIT_GC_PREPARE_FOR_CHECKPOINT == gcCode.getCode())
 #if defined(OMR_GC_IDLE_HEAP_MANAGER)
-	if((_extensions->compactOnIdle) && (J9MMCONSTANT_EXPLICIT_GC_IDLE_GC == gcCode.getCode())) {
+	|| ((_extensions->compactOnIdle) && (J9MMCONSTANT_EXPLICIT_GC_IDLE_GC == gcCode.getCode()))
+#endif
+	) {
 		compactReason = COMPACT_FORCED_GC;
 		goto compactionReqd;
 	}
-#endif
 	
 	/* RAS dump compact requests override all other options. If a dump agent requested 
 	 * a compact we always honour it in order to produce optimal heap dumps
@@ -736,9 +734,11 @@ MM_ParallelGlobalGC::shouldCompactThisCycle(MM_EnvironmentBase *env, MM_Allocate
 			}
 		}
 
-#if defined(OMR_GC_IDLE_HEAP_MANAGER) 
-		if ((J9MMCONSTANT_EXPLICIT_GC_IDLE_GC == gcCode.getCode()) && (_extensions->gcOnIdle)){
-
+		if ((J9MMCONSTANT_EXPLICIT_GC_PREPARE_FOR_CHECKPOINT == gcCode.getCode())
+#if defined(OMR_GC_IDLE_HEAP_MANAGER)
+		|| ((J9MMCONSTANT_EXPLICIT_GC_IDLE_GC == gcCode.getCode()) && (_extensions->gcOnIdle))
+#endif /* OMR_GC_IDLE_HEAP_MANAGER */
+		) {
 			MM_LargeObjectAllocateStats *stats = memoryPool->getLargeObjectAllocateStats();
 
 			uintptr_t pageSize = heap->getPageSize();
@@ -748,14 +748,13 @@ MM_ParallelGlobalGC::shouldCompactThisCycle(MM_EnvironmentBase *env, MM_Allocate
 			uintptr_t totalFragmentation = memoryFragmentationDiff + darkMatterBytes;
 			float totalFragmentationRatio = ((float)totalFragmentation)/((float)freeMemorySize + (float)totalSize / 2);
 
-			Trc_ParallelGlobalGC_shouldCompactThisCycle(env->getLanguageVMThread(), totalFragmentationRatio, _extensions->gcOnIdleCompactThreshold);
+			Trc_ParallelGlobalGC_shouldCompactThisCycle(env->getLanguageVMThread(), totalFragmentationRatio, _extensions->pageFragmentationCompactThreshold);
 
-			if (totalFragmentationRatio > _extensions->gcOnIdleCompactThreshold) {
+			if (totalFragmentationRatio > _extensions->pageFragmentationCompactThreshold) {
 				compactReason = COMPACT_PAGE;
 				goto compactionReqd;
 			}
 		}
-#endif /* OMR_GC_IDLE_HEAP_MANAGER */
 	}
 
 	
@@ -1551,15 +1550,6 @@ MM_ParallelGlobalGC::completeExternalConcurrentCycle(MM_EnvironmentBase *env)
 	if (_extensions->isConcurrentScavengerEnabled()) {
 		/* ParallelGlobalGC or ConcurrentGC (STW phase) cannot start before Concurrent Scavenger cycle is in progress */
 		_extensions->scavenger->completeConcurrentCycle(env);
-
-		/* Push thread local buffers to the global list.
-		 * This is important to do because some threads can miss to flush their Ownable buffers. The scheduler may dispatch different threads for different phases of CS,
-		 * Ownable buffers are only flushed during final phase. Hence, threads that don't participate in the final phase (but built lists in prior phases) may still have buffers which need to
-		 * be flushed. Typically, this isn't an issue because all thread local buffers will be flushed when we acquire exclusive for global. However, we're already past that point now.
-		 *
-		 * TODO: This is a temporary workaround, it is Scavengers responsibility to ensure all buffers are flushed by the time we complete a cycle.
-		 */
-		GC_OMRVMInterface::flushNonAllocationCaches(env);
 	}
 #endif /* OMR_GC_CONCURRENT_SCAVENGER */
 }

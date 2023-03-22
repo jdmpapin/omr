@@ -113,6 +113,7 @@ typedef struct OMRPortPlatformGlobals {
 #if defined(AIXPPC)
 	int pageProtectionPossible;
 #endif
+	uintptr_t criuSupportFlags;
 } OMRPortPlatformGlobals;
 
 
@@ -172,6 +173,8 @@ typedef struct OMRPortPlatformGlobals {
 #define PAGE_PROTECTION_NOTAVAILABLE 1
 #define PAGE_PROTECTION_NOTCHECKED 2
 #endif
+
+#define PPG_criuSupportFlags (portLibrary->portGlobals->platformGlobals.criuSupportFlags)
 
 #endif /* omrportpg_h */
 

@@ -74,9 +74,9 @@ OMR::X86::CPU::detect(OMRPortLibrary * const omrPortLib)
    }
 
 void
-OMR::X86::CPU::initializeTargetProcessorInfo()
+OMR::X86::CPU::initializeTargetProcessorInfo(bool force)
    {
-   OMR::X86::CodeGenerator::initializeX86TargetProcessorInfo();
+   OMR::X86::CodeGenerator::initializeX86TargetProcessorInfo(force);
    }
 
 TR_X86CPUIDBuffer *
@@ -588,6 +588,9 @@ OMR::X86::CPU::supports_feature_old_api(uint32_t feature)
          break;
       case OMR_FEATURE_X86_AVX512DQ:
          supported = TR::CodeGenerator::getX86ProcessorInfo().supportsAVX512DQ();
+         break;
+      case OMR_FEATURE_X86_FMA:
+         supported = TR::CodeGenerator::getX86ProcessorInfo().supportsFMA();
          break;
       default:
          TR_ASSERT_FATAL(false, "Unknown feature %d", feature);

@@ -128,9 +128,13 @@ namespace TR { class X86RegRegInstruction;                 }
 namespace TR { class X86RegImmInstruction;                 }
 namespace TR { class X86RegRegImmInstruction;              }
 namespace TR { class X86RegRegRegInstruction;              }
+namespace TR { class X86RegMaskRegRegInstruction;          }
+namespace TR { class X86RegMaskRegInstruction;             }
+namespace TR { class X86RegMaskMemInstruction;             }
 namespace TR { class X86MemInstruction;                    }
 namespace TR { class X86MemImmInstruction;                 }
 namespace TR { class X86MemRegInstruction;                 }
+namespace TR { class X86MemMaskRegInstruction;             }
 namespace TR { class X86MemRegImmInstruction;              }
 namespace TR { class X86RegMemInstruction;                 }
 namespace TR { class X86RegMemImmInstruction;              }
@@ -350,6 +354,7 @@ namespace TR { class ARM64Trg1ZeroImmInstruction; }
 namespace TR { class ARM64Trg1Src1ImmInstruction; }
 namespace TR { class ARM64Trg1Src2Instruction; }
 namespace TR { class ARM64CondTrg1Src2Instruction; }
+namespace TR { class ARM64Trg1Src2ImmInstruction; }
 namespace TR { class ARM64Trg1Src2ShiftedInstruction; }
 namespace TR { class ARM64Trg1Src2ExtendedInstruction; }
 namespace TR { class ARM64Trg1Src2IndexedElementInstruction; }
@@ -668,7 +673,7 @@ public:
 
    TR_OpaqueClassBlock * containingClass(TR::SymbolReference *);
    const char * signature(TR::ResolvedMethodSymbol *s);
-   void nodePrintAllFlags(TR::Node *, TR_PrettyPrinterString &);
+   virtual void nodePrintAllFlags(TR::Node *, TR_PrettyPrinterString &);
 
    // used by DebugExt and may be overridden
    virtual void printDestination(TR::FILE *, TR::TreeTop *);
@@ -812,11 +817,15 @@ public:
    void print(TR::FILE *, TR::X86RegImmInstruction *);
    void print(TR::FILE *, TR::X86RegRegImmInstruction *);
    void print(TR::FILE *, TR::X86RegRegRegInstruction *);
+   void print(TR::FILE *, TR::X86RegMaskRegInstruction *);
+   void print(TR::FILE *, TR::X86RegMaskRegRegInstruction *);
    void print(TR::FILE *, TR::X86MemInstruction *);
    void print(TR::FILE *, TR::X86MemImmInstruction *);
    void print(TR::FILE *, TR::X86MemRegInstruction *);
+   void print(TR::FILE *, TR::X86MemMaskRegInstruction *);
    void print(TR::FILE *, TR::X86MemRegImmInstruction *);
    void print(TR::FILE *, TR::X86RegMemInstruction *);
+   void print(TR::FILE *, TR::X86RegMaskMemInstruction *);
    void print(TR::FILE *, TR::X86RegMemImmInstruction *);
    void print(TR::FILE *, TR::X86RegRegMemInstruction *);
    void print(TR::FILE *, TR::X86FPRegInstruction *);
@@ -1134,6 +1143,7 @@ public:
    void print(TR::FILE *, TR::ARM64Trg1Src1ImmInstruction *);
    void print(TR::FILE *, TR::ARM64Trg1Src2Instruction *);
    void print(TR::FILE *, TR::ARM64CondTrg1Src2Instruction *);
+   void print(TR::FILE *, TR::ARM64Trg1Src2ImmInstruction *);
    void print(TR::FILE *, TR::ARM64Trg1Src2ShiftedInstruction *);
    void print(TR::FILE *, TR::ARM64Trg1Src2ExtendedInstruction *);
    void print(TR::FILE *, TR::ARM64Trg1Src2IndexedElementInstruction *);

@@ -261,8 +261,11 @@ OMR::ARM64::CodeGenerator::doBinaryEncoding()
       TR::Instruction *expandedOrSelf = data.cursorInstruction->expandInstruction();
       TR::Instruction *firstInstructionNotExpanded = expandedOrSelf->getNext();
 
-      /* The first instruction whose byte length has not been added to data.estimate */
-      data.cursorInstruction = prev->getNext();
+      if (prev != NULL)
+         {
+         /* The first instruction whose byte length has not been added to data.estimate */
+         data.cursorInstruction = prev->getNext();
+         }
       while (data.cursorInstruction && (data.cursorInstruction != firstInstructionNotExpanded))
          {
          data.estimate = data.cursorInstruction->estimateBinaryLength(data.estimate);
@@ -648,29 +651,92 @@ bool OMR::ARM64::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::I
       case TR::vmin:
       case TR::vmax:
       case TR::vreductionAdd:
+      case TR::vmreductionAdd:
       case TR::vreductionMul:
+      case TR::vmreductionMul:
       case TR::vreductionMax:
+      case TR::vmreductionMax:
       case TR::vreductionMin:
+      case TR::vmreductionMin:
+      case TR::vmadd:
+      case TR::vmsub:
+      case TR::vmmul:
+      case TR::vmdiv:
+      case TR::vmmin:
+      case TR::vmmax:
+      case TR::vmabs:
+      case TR::vmneg:
+      case TR::vcmpeq:
+      case TR::vcmpge:
+      case TR::vcmpgt:
+      case TR::vcmple:
+      case TR::vcmplt:
+      case TR::vcmpne:
+      case TR::vmcmpeq:
+      case TR::vmcmpge:
+      case TR::vmcmpgt:
+      case TR::vmcmple:
+      case TR::vmcmplt:
+      case TR::vmcmpne:
          return true;
       case TR::vand:
       case TR::vor:
       case TR::vxor:
       case TR::vnot:
       case TR::vreductionAnd:
+      case TR::vmreductionAnd:
       case TR::vreductionOr:
+      case TR::vmreductionOr:
       case TR::vreductionXor:
+      case TR::vmreductionXor:
       case TR::vbitselect:
+      case TR::vmand:
+      case TR::vmor:
+      case TR::vmxor:
+      case TR::vmnot:
          // Float/ Double are not supported
          return (et == TR::Int8 || et == TR::Int16 || et == TR::Int32 || et == TR::Int64);
       case TR::vload:
       case TR::vloadi:
       case TR::vstore:
       case TR::vstorei:
+      case TR::mload:
+      case TR::mloadi:
+      case TR::mstore:
+      case TR::mstorei:
+      case TR::mRegLoad:
+      case TR::mRegStore:
+      case TR::mTrueCount:
+      case TR::mFirstTrue:
+      case TR::mLastTrue:
+      case TR::mToLongBits:
+      case TR::mLongBitsToMask:
       case TR::vsplats:
          return true;
       case TR::vfma:
+      case TR::vmfma:
       case TR::vsqrt:
+      case TR::vmsqrt:
          return (et == TR::Float || et == TR::Double);
+      case TR::s2m:
+      case TR::m2s:
+         /*
+          * For s2m/m2s, the mask has 2 lanes because each byte in the short value represents the mask value for a lane.
+          * Since we are dealing with 128-bit vector, the type of elements of the mask with 2 lanes are either 64-bit integer or double.
+          */
+         return (et == TR::Int64 || et == TR::Double);
+      case TR::i2m:
+      case TR::m2i:
+         /* For the same reason, the number of lanes is 4, which means that the type of elements is 32-bit integer or float. */
+         return (et == TR::Int32 || et == TR::Float);
+      case TR::l2m:
+      case TR::m2l:
+         /* For the same reason, the number of lanes is 8, which means that the type of elements is 16-bit integer. */
+         return et == TR::Int16;
+      case TR::v2m:
+      case TR::m2v:
+         /* For the same reason, the number of lanes is 16, which means that the type of elements is 8-bit integer. */
+         return et == TR::Int8;
       default:
          return false;
       }
@@ -681,6 +747,28 @@ bool OMR::ARM64::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::I
 bool OMR::ARM64::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::ILOpCode opcode)
    {
    return TR::CodeGenerator::getSupportsOpCodeForAutoSIMD(&self()->comp()->target().cpu, opcode);
+   }
+
+bool OMR::ARM64::CodeGenerator::considerTypeForGRA(TR::Node *node)
+   {
+   return !node->getOpCode().isVectorOpCode();
+   }
+
+bool OMR::ARM64::CodeGenerator::considerTypeForGRA(TR::DataType dt)
+   {
+   return !(dt.isVector() || dt.isMask());
+   }
+
+bool OMR::ARM64::CodeGenerator::considerTypeForGRA(TR::SymbolReference *symRef)
+   {
+   if (symRef && symRef->getSymbol())
+      {
+      return considerTypeForGRA(symRef->getSymbol()->getDataType());
+      }
+   else
+      {
+      return true;
+      }
    }
 
 bool
@@ -866,4 +954,9 @@ OMR::ARM64::CodeGenerator::supportsNonHelper(TR::SymbolReferenceTable::CommonNon
       }
 
    return result;
+   }
+
+bool OMR::ARM64::CodeGenerator::canTransformUnsafeCopyToArrayCopy()
+   {
+   return !self()->comp()->getOption(TR_DisableArrayCopyOpts);
    }

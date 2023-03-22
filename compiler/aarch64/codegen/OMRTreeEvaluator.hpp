@@ -58,6 +58,15 @@ TR::Register *genericReturnEvaluator(TR::Node *node, TR::RealRegister::RegNum rn
 TR::Register *commonLoadEvaluator(TR::Node *node, TR::InstOpCode::Mnemonic op, TR::CodeGenerator *cg);
 
 /**
+ * @brief Helper function for xloadEvaluators
+ * @param[in] node : node
+ * @param[in] op : instruction for load
+ * @param[in] targetReg : target register
+ * @param[in] cg : CodeGenerator
+ */
+TR::Register *commonLoadEvaluator(TR::Node *node, TR::InstOpCode::Mnemonic op, TR::Register *targetReg, TR::CodeGenerator *cg);
+
+/**
  * @brief Helper function for xstoreEvaluators
  * @param[in] node : node
  * @param[in] op : instruction for store
@@ -205,6 +214,35 @@ public:
    static TR::Register *MethodExitHookEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *PassThroughEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
+   // mask evaluators
+   static TR::Register *mAnyTrueEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *mAllTrueEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *mmAnyTrueEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *mmAllTrueEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *mloadEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *mloadiEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *mstoreEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *mstoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *mTrueCountEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *mFirstTrueEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *mLastTrueEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *mToLongBitsEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *mLongBitsToMaskEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *mRegLoadEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *mRegStoreEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+
+   static TR::Register *b2mEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *s2mEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *i2mEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *l2mEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *v2mEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *m2bEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *m2sEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *m2iEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *m2lEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *m2vEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+
+   // vector evaluators
    static TR::Register *vabsEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *vaddEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *vandEvaluator(TR::Node *node, TR::CodeGenerator *cg);
@@ -253,8 +291,65 @@ public:
    static TR::Register *vcastEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *vconvEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
-   static TR::Register *vmulInt64Helper(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *vdivIntHelper(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmabsEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmaddEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmandEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmcmpeqEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmcmpneEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmcmpgtEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmcmpgeEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmcmpltEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmcmpleEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmdivEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmfmaEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmindexVectorEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmloadiEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmmaxEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmminEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmmulEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmnegEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmnotEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmorEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmorUncheckedEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmreductionAddEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmreductionAndEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmreductionFirstNonZeroEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmreductionMaxEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmreductionMinEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmreductionMulEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmreductionOrEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmreductionOrUncheckedEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmreductionXorEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmsqrtEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmstoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmsubEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmxorEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *vmfirstNonZeroEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+
+   /**
+    * @brief Helper for generating instructions for the multiplication operation of vectors with 64-bit integer elements
+    *
+    * @param[in] node: node
+    * @param[in] productReg: the result register
+    * @param[in] lhsReg: the first argument register
+    * @param[in] rhsReg: the second argument register
+    * @param[in] cg: CodeGenerator
+    * @return the result register
+    */
+   static TR::Register *vmulInt64Helper(TR::Node *node, TR::Register *productReg, TR::Register *lhsReg, TR::Register *rhsReg, TR::CodeGenerator *cg);
+
+   /**
+    * @brief Helper for generating instructions for the division operation of vectors with 64-bit integer elements
+    *
+    * @param[in] node: node
+    * @param[in] resReg: the result register
+    * @param[in] lhsReg: the first argument register
+    * @param[in] rhsReg: the second argument register
+    * @param[in] cg: CodeGenerator
+    * @return the result register
+    */
+   static TR::Register *vdivIntHelper(TR::Node *node, TR::Register *resReg, TR::Register *lhsReg, TR::Register *rhsReg, TR::CodeGenerator *cg);
+
    /**
     * @brief Helper for generating SIMD move immediate instruction for vsplats node.
     *
@@ -267,6 +362,30 @@ public:
     * @return instruction cursor if move instuction is successfully generated and otherwise returns NULL
     */
    static TR::Instruction *vsplatsImmediateHelper(TR::Node *node, TR::CodeGenerator *cg, TR::Node *firstChild, TR::DataType elementType, TR::Register *treg);
+
+   /**
+    * @brief Helper for generating instructions for the mininum operation of vectors with 64-bit integer elements
+    *
+    * @param[in] node: node
+    * @param[in] resReg: the result register
+    * @param[in] lhsReg: the first argument register
+    * @param[in] rhsReg: the second argument register
+    * @param[in] cg: CodeGenerator
+    * @return the result register
+    */
+   static TR::Register *vminInt64Helper(TR::Node *node, TR::Register *resReg, TR::Register *lhsReg, TR::Register *rhsReg, TR::CodeGenerator *cg);
+
+   /**
+    * @brief Helper for generating instructions for the maximum operation of vectors with 64-bit integer elements
+    *
+    * @param[in] node: node
+    * @param[in] resReg: the result register
+    * @param[in] lhsReg: the first argument register
+    * @param[in] rhsReg: the second argument register
+    * @param[in] cg: CodeGenerator
+    * @return the result register
+    */
+   static TR::Register *vmaxInt64Helper(TR::Node *node, TR::Register *resReg, TR::Register *lhsReg, TR::Register *rhsReg, TR::CodeGenerator *cg);
 
    static TR::Register *f2iuEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *f2luEvaluator(TR::Node *node, TR::CodeGenerator *cg);

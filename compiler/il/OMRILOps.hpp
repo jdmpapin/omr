@@ -82,49 +82,61 @@ public:
       }
 
   /** \brief
-   *     Creates vector opcode given vector operation and resulting vector type
+   *     Creates vector opcode given vector operation and the source/result vector or mask type
    *
    *  \param operation
    *     Vector operation
    *
    *  \param vectorType
-   *     Type of the vector which is either source or result (or both)
+   *     Type of the vector or mask which is either source or result (or both)
    *
    *  \return
    *     Vector opcode
    */
-   static TR::ILOpCodes createVectorOpCode(TR::VectorOperation operation, DataType vectorType)
+   static TR::ILOpCodes createVectorOpCode(TR::VectorOperation operation, TR::DataType vectorType)
       {
-      TR_ASSERT_FATAL(vectorType.isVector(), "createVectorOpCode should take vector type\n");
+      TR_ASSERT_FATAL(vectorType.isVector() || vectorType.isMask(), "createVectorOpCode should take vector or mask type\n");
 
       TR_ASSERT_FATAL(operation < TR::firstTwoTypeVectorOperation, "Vector operation should be one vector type operation\n");
 
-      return (TR::ILOpCodes)(TR::NumScalarIlOps + operation*TR::NumVectorTypes + (vectorType - TR::NumScalarTypes));
+      if (vectorType.isMask())
+         vectorType = TR::DataType::vectorFromMaskType(vectorType);
+
+      return (TR::ILOpCodes)(TR::NumScalarIlOps + operation*TR::NumVectorTypes + (vectorType - TR::FirstVectorType));
       }
 
   /** \brief
-   *     Creates vector opcode given vector operation and resulting vector type
+   *     Creates vector opcode given vector operation and both source and result vector or mask type
    *
    *  \param operation
    *     Vector operation
    *
-   *  \param vectorType
-   *     Type of the vector which is either source or result (or both)
+   *  \param srcVectorType
+   *     Type of the vector or mask which is the source
+   *
+   *  \param resVectorType
+   *     Type of the vector or mask which is the result
    *
    *  \return
    *     Vector opcode
    */
-   static TR::ILOpCodes createVectorOpCode(TR::VectorOperation operation, DataType srcVectorType, DataType resVectorType)
+   static TR::ILOpCodes createVectorOpCode(TR::VectorOperation operation, TR::DataType srcVectorType, TR::DataType resVectorType)
       {
-      TR_ASSERT_FATAL(srcVectorType.isVector(), "createVectorOpCode should take vector source type\n");
-      TR_ASSERT_FATAL(resVectorType.isVector(), "createVectorOpCode should take vector result type\n");
+      TR_ASSERT_FATAL(srcVectorType.isVector() || srcVectorType.isMask(), "createVectorOpCode should take vector or mask source type\n");
+      TR_ASSERT_FATAL(resVectorType.isVector() || resVectorType.isMask(), "createVectorOpCode should take vector or mask result type\n");
 
       TR_ASSERT_FATAL(operation >= TR::firstTwoTypeVectorOperation, "Vector operation should be two vector type operation\n");
 
+      if (srcVectorType.isMask())
+         srcVectorType = TR::DataType::vectorFromMaskType(srcVectorType);
+
+      if (resVectorType.isMask())
+         resVectorType = TR::DataType::vectorFromMaskType(resVectorType);
+
       return (TR::ILOpCodes)(TR::NumScalarIlOps + TR::NumOneVectorTypeOps +
-                             operation * TR::NumVectorTypes * TR::NumVectorTypes +
-                             (srcVectorType - TR::NumScalarTypes) * TR::NumVectorTypes +
-                             (resVectorType - TR::NumScalarTypes));
+                             (operation - TR::firstTwoTypeVectorOperation) * TR::NumVectorTypes * TR::NumVectorTypes +
+                             (srcVectorType - TR::FirstVectorType) * TR::NumVectorTypes +
+                             (resVectorType - TR::FirstVectorType));
       }
 
    bool isTwoTypeVectorOpCode()
@@ -191,8 +203,8 @@ public:
       TR::ILOpCodes opcode = op._opCode;
 
       return (TR::VectorOperation) ((opcode < (TR::NumScalarIlOps + TR::NumOneVectorTypeOps)) ?
-                                   (opcode - TR::NumScalarIlOps) / TR::NumVectorTypes :
-                                    (opcode - TR::NumScalarIlOps - TR::NumOneVectorTypeOps) / (TR::NumVectorTypes * TR::NumVectorTypes));
+                                    (opcode - TR::NumScalarIlOps) / TR::NumVectorTypes :
+                                    (opcode - TR::NumScalarIlOps - TR::NumOneVectorTypeOps) / (TR::NumVectorTypes * TR::NumVectorTypes) + TR::firstTwoTypeVectorOperation);
       }
 
   /** \brief
@@ -222,8 +234,8 @@ public:
       TR::ILOpCodes opcode = op._opCode;
 
       return (opcode < (TR::NumScalarIlOps + TR::NumOneVectorTypeOps)) ?
-             (TR::DataTypes)((opcode - TR::NumScalarIlOps) % TR::NumVectorTypes + TR::NumScalarTypes) :
-             (TR::DataTypes)(((opcode - TR::NumScalarIlOps - TR::NumOneVectorTypeOps) % (TR::NumVectorTypes * TR::NumVectorTypes)) % TR::NumVectorTypes + TR::NumScalarTypes);
+             (TR::DataTypes)((opcode - TR::NumScalarIlOps) % TR::NumVectorTypes + TR::FirstVectorType) :
+             (TR::DataTypes)(((opcode - TR::NumScalarIlOps - TR::NumOneVectorTypeOps) % (TR::NumVectorTypes * TR::NumVectorTypes)) % TR::NumVectorTypes + TR::FirstVectorType);
       }
 
   /** \brief
@@ -255,7 +267,7 @@ public:
       TR_ASSERT_FATAL(opcode >= (TR::NumScalarIlOps + TR::NumOneVectorTypeOps), "getVectorSourceDataType() can only be called for two vector type opcodes (e.g. vconv)\n");
 
       return (TR::DataTypes)(((opcode - TR::NumScalarIlOps - TR::NumOneVectorTypeOps) %
-                             (TR::NumVectorTypes * TR::NumVectorTypes)) / TR::NumVectorTypes + TR::NumScalarTypes);
+                             (TR::NumVectorTypes * TR::NumVectorTypes)) / TR::NumVectorTypes + TR::FirstVectorType);
       }
 
 
@@ -321,8 +333,24 @@ public:
 
          ILOpCode opcode(op);
 
-         return  (!opcode.isVectorResult()) ? getVectorResultDataType(op).getVectorElementType()
-                                            : getVectorResultDataType(op);
+         if (opcode.isVectorResult())
+            {
+            return getVectorResultDataType(op);
+            }
+         else if (opcode.isMaskResult())
+            {
+            TR::DataType dt = getVectorResultDataType(op);
+            return TR::DataType::createMaskType(dt.getVectorElementType(), dt.getVectorLength());
+            }
+         else if (opcode.isMaskReduction())
+            {
+            return _opCodeProperties[opcode.getTableIndex()].dataType;
+            }
+         else
+            {
+            // scalar result type (e.g. reduction)
+            return getVectorResultDataType(op).getVectorElementType();
+            }
          }
 
    TR::DataType getType() const                  { return getDataType(); }
@@ -355,6 +383,7 @@ public:
    bool isUnsignedConversion()       const { return isUnsigned() && isConversion(); }
    bool isFloatingPoint()            const { return typeProperties().testAny(ILTypeProp::Floating_Point); }
    bool isVectorResult()             const { return typeProperties().testAny(ILTypeProp::VectorResult); }
+   bool isMaskResult()               const { return typeProperties().testAny(ILTypeProp::MaskResult); }
    bool isIntegerOrAddress()         const { return typeProperties().testAny(ILTypeProp::Integer | ILTypeProp::Address); }
    bool is1Byte()                    const { return typeProperties().testAny(ILTypeProp::Size_1); }
    bool is2Byte()                    const { return typeProperties().testAny(ILTypeProp::Size_2); }
@@ -422,6 +451,7 @@ public:
    bool isCall()                     const { return properties1().testAny(ILProp1::Call); }
    bool isCallDirect()               const { return properties1().testValue(ILProp1::Indirect | ILProp1::Call, ILProp1::Call); }
    bool isCallIndirect()             const { return properties1().testAll(ILProp1::Call | ILProp1::Indirect); }
+   bool isVectorMasked()             const { return properties1().testAny(ILProp1::VectorMasked); }
 
    /**
     * @brief This query must return true for any opcode that may appear at the
@@ -491,6 +521,7 @@ public:
    bool skipDynamicLitPoolOnInts()   const { return properties3().testAny(ILProp3::SkipDynamicLitPoolOnInts); }
    bool isAbs()                      const { return properties3().testAny(ILProp3::Abs); }
    bool isVectorReduction()          const { return properties3().testAny(ILProp3::VectorReduction); }
+   bool isMaskReduction()            const { return properties3().testAny(ILProp3::MaskReduction); }
    bool isSignum()                   const { return properties3().testAny(ILProp3::Signum); }
 
 
@@ -1458,6 +1489,42 @@ public:
          default: TR_ASSERT(0,"no direct call for this type");
          }
       return TR::BadILOp;
+      }
+
+   static TR::ILOpCodes reductionToVerticalOpcode(TR::ILOpCodes op, TR::VectorLength vectorLength)
+      {
+      ILOpCode opcode;
+      opcode.setOpCodeValue(op);
+      TR::VectorOperation operation;
+
+      switch (opcode.getVectorOperation())
+         {
+         case TR::vreductionAdd:
+            operation = TR::vadd;
+            break;
+         case TR::vreductionMul:
+            operation = TR::vmul;
+            break;
+         case TR::vreductionAnd:
+            operation = TR::vand;
+            break;
+         case TR::vreductionOr:
+            operation = TR::vor;
+            break;
+         case TR::vreductionXor:
+            operation = TR::vxor;
+            break;
+         case TR::vreductionMin:
+            operation = TR::vmin;
+            break;
+         case TR::vreductionMax:
+            operation = TR::vmax;
+            break;
+         default:
+            return TR::BadILOp;
+         }
+
+      return ILOpCode::createVectorOpCode(operation, TR::DataType::createVectorType(opcode.getDataType().getDataType(), vectorLength));
       }
 
    static TR::ILOpCodes convertScalarToVector(TR::ILOpCodes op, TR::VectorLength vectorLength)

@@ -94,10 +94,6 @@ class OMR_EXTENSIBLE Instruction : public OMR::Instruction
    virtual char *description() { return "X86"; }
    virtual Kind getKind() { return IsNotExtended; }
 
-   TR::InstOpCode& getOpCode() { return _opcode; }
-   TR::InstOpCode::Mnemonic getOpCodeValue() { return _opcode.getOpCodeValue(); }
-   TR::InstOpCode::Mnemonic setOpCodeValue(TR::InstOpCode::Mnemonic op) { return _opcode.setOpCodeValue(op); }
-
    OMR::X86::Encoding getEncodingMethod() { return _encodingMethod; }
    void setEncodingMethod(OMR::X86::Encoding method) { _encodingMethod = method; }
 
@@ -162,7 +158,9 @@ class OMR_EXTENSIBLE Instruction : public OMR::Instruction
    virtual TR::Register *getTargetRegister() { return NULL; }
    virtual TR::Register *getSourceRegister() { return NULL; }
    virtual TR::Register *getSource2ndRegister() { return NULL; }
+   virtual TR::Register *getMaskRegister() { return NULL; }
    virtual TR::MemoryReference *getMemoryReference() { return NULL; }
+   virtual bool hasZeroMask() { return false; }
 
    int32_t getMaxPatchableInstructionLength() { return 10; }
 

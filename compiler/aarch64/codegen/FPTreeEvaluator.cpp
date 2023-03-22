@@ -51,17 +51,6 @@ OMR::ARM64::TreeEvaluator::ibits2fEvaluator(TR::Node *node, TR::CodeGenerator *c
    }
 
 TR::Register *
-OMR::ARM64::TreeEvaluator::fbits2iEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-   {
-   TR::Register *trgReg = cg->allocateRegister();
-
-   fpBitsMovHelper(node, TR::InstOpCode::fmov_stow, trgReg, cg);
-
-   node->setRegister(trgReg);
-   return trgReg;
-   }
-
-TR::Register *
 OMR::ARM64::TreeEvaluator::lbits2dEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::Register *trgReg = cg->allocateRegister(TR_FPR);
@@ -72,15 +61,57 @@ OMR::ARM64::TreeEvaluator::lbits2dEvaluator(TR::Node *node, TR::CodeGenerator *c
    return trgReg;
    }
 
+static TR::Register *fpBits2integerHelper(TR::Node *node, bool is64bit, TR::CodeGenerator *cg)
+   {
+   TR::Node *child = node->getFirstChild();
+   TR::Register *srcReg = cg->evaluate(child);
+   TR::Register *trgReg = cg->allocateRegister();
+   TR::InstOpCode::Mnemonic movOp = TR::InstOpCode::fmov_stow;
+   TR::InstOpCode::Mnemonic cmpOp = TR::InstOpCode::fcmps;
+   TR::InstOpCode::Mnemonic selOp = TR::InstOpCode::cselw;
+
+   if (is64bit)
+      {
+      movOp = TR::InstOpCode::fmov_dtox;
+      cmpOp = TR::InstOpCode::fcmpd;
+      selOp = TR::InstOpCode::cselx;
+      }
+
+   generateTrg1Src1Instruction(cg, movOp, node, trgReg, srcReg);
+
+   if (node->normalizeNanValues())
+      {
+      TR::Register *tmpReg = cg->allocateRegister();
+
+      generateSrc2Instruction(cg, cmpOp, node, srcReg, srcReg);
+      if (is64bit)
+         {
+         loadConstant64(cg, node, DOUBLE_NAN, tmpReg);
+         }
+      else
+         {
+         loadConstant32(cg, node, FLOAT_NAN, tmpReg);
+         }
+      generateCondTrg1Src2Instruction(cg, selOp, node, trgReg, tmpReg, trgReg, TR::CC_VS);
+
+      cg->stopUsingRegister(tmpReg);
+      }
+
+   cg->decReferenceCount(child);
+   node->setRegister(trgReg);
+   return trgReg;
+   }
+
+TR::Register *
+OMR::ARM64::TreeEvaluator::fbits2iEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return fpBits2integerHelper(node, false, cg);
+   }
+
 TR::Register *
 OMR::ARM64::TreeEvaluator::dbits2lEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   TR::Register *trgReg = cg->allocateRegister();
-
-   fpBitsMovHelper(node, TR::InstOpCode::fmov_dtox, trgReg, cg);
-
-   node->setRegister(trgReg);
-   return trgReg;
+   return fpBits2integerHelper(node, true, cg);
    }
 
 static uint16_t
@@ -605,16 +636,42 @@ static TR::Instruction *iffcmpHelper(TR::Node *node, TR::ARM64ConditionCode cc, 
          }
       else
          {
-         generateConditionalBranchInstruction(cg, TR::InstOpCode::b_cond, node, dstLabel, cc);
-         result = generateConditionalBranchInstruction(cg, TR::InstOpCode::b_cond, node, dstLabel, TR::CC_VS, deps);
+         if (cc == TR::CC_NE)
+            {
+            /* iffcmpne/ifdcmpne: false if CC_VS is set */
+            TR::LabelSymbol *doneLabel = generateLabelSymbol(cg);
+            generateConditionalBranchInstruction(cg, TR::InstOpCode::b_cond, node, doneLabel, TR::CC_VS);
+            generateConditionalBranchInstruction(cg, TR::InstOpCode::b_cond, node, dstLabel, cc, deps);
+            result = generateLabelInstruction(cg, TR::InstOpCode::label, node, doneLabel);
+            }
+         else
+            {
+            generateConditionalBranchInstruction(cg, TR::InstOpCode::b_cond, node, dstLabel, cc);
+            result = generateConditionalBranchInstruction(cg, TR::InstOpCode::b_cond, node, dstLabel, TR::CC_VS, deps);
+            }
          }
       }
    else
       {
-      result = generateConditionalBranchInstruction(cg, TR::InstOpCode::b_cond, node, dstLabel, cc);
-      if (needsExplicitUnorderedCheck)
+      if (!needsExplicitUnorderedCheck)
          {
-         result = generateConditionalBranchInstruction(cg, TR::InstOpCode::b_cond, node, dstLabel, TR::CC_VS);
+         result = generateConditionalBranchInstruction(cg, TR::InstOpCode::b_cond, node, dstLabel, cc);
+         }
+      else
+         {
+         if (cc == TR::CC_NE)
+            {
+            /* iffcmpne/ifdcmpne: false if CC_VS is set */
+            TR::LabelSymbol *doneLabel = generateLabelSymbol(cg);
+            generateConditionalBranchInstruction(cg, TR::InstOpCode::b_cond, node, doneLabel, TR::CC_VS);
+            generateConditionalBranchInstruction(cg, TR::InstOpCode::b_cond, node, dstLabel, cc);
+            result = generateLabelInstruction(cg, TR::InstOpCode::label, node, doneLabel);
+            }
+         else
+            {
+            generateConditionalBranchInstruction(cg, TR::InstOpCode::b_cond, node, dstLabel, cc);
+            result = generateConditionalBranchInstruction(cg, TR::InstOpCode::b_cond, node, dstLabel, TR::CC_VS);
+            }
          }
       }
 
@@ -637,7 +694,7 @@ OMR::ARM64::TreeEvaluator::iffcmpeqEvaluator(TR::Node *node, TR::CodeGenerator *
 TR::Register *
 OMR::ARM64::TreeEvaluator::iffcmpneEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   iffcmpHelper(node, TR::CC_NE, false, false, cg);
+   iffcmpHelper(node, TR::CC_NE, false, true, cg); // need to check NaN
    return NULL;
    }
 
@@ -679,7 +736,7 @@ OMR::ARM64::TreeEvaluator::ifdcmpeqEvaluator(TR::Node *node, TR::CodeGenerator *
 TR::Register *
 OMR::ARM64::TreeEvaluator::ifdcmpneEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   iffcmpHelper(node, TR::CC_NE, true, false, cg);
+   iffcmpHelper(node, TR::CC_NE, true, true, cg); // need to check NaN
    return NULL;
    }
 
@@ -711,7 +768,7 @@ OMR::ARM64::TreeEvaluator::ifdcmpleEvaluator(TR::Node *node, TR::CodeGenerator *
    return NULL;
    }
 
-static TR::Register *fcmpHelper(TR::Node *node, TR::ARM64ConditionCode cc, bool isDouble, TR::CodeGenerator *cg)
+static TR::Register *fcmpHelper(TR::Node *node, TR::ARM64ConditionCode cc, bool isDouble, bool needsExplicitUnorderedCheck, TR::CodeGenerator *cg)
    {
    TR::Register *trgReg = cg->allocateRegister();
    TR::Node *firstChild = node->getFirstChild();
@@ -739,6 +796,15 @@ static TR::Register *fcmpHelper(TR::Node *node, TR::ARM64ConditionCode cc, bool 
       }
 
    generateCSetInstruction(cg, node, trgReg, cc);
+   if (needsExplicitUnorderedCheck)
+      {
+      TR::Register *tmpReg = cg->allocateRegister();
+      TR::ARM64ConditionCode ccNan = (cc == TR::CC_NE) ? TR::CC_VC : TR::CC_VS;
+      op = (cc == TR::CC_NE) ? TR::InstOpCode::andx : TR::InstOpCode::orrx;
+      generateCSetInstruction(cg, node, tmpReg, ccNan);
+      generateTrg1Src2Instruction(cg, op, node, trgReg, trgReg, tmpReg);
+      cg->stopUsingRegister(tmpReg);
+      }
 
    node->setRegister(trgReg);
    cg->decReferenceCount(firstChild);
@@ -749,73 +815,73 @@ static TR::Register *fcmpHelper(TR::Node *node, TR::ARM64ConditionCode cc, bool 
 TR::Register *
 OMR::ARM64::TreeEvaluator::fcmpeqEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return fcmpHelper(node, TR::CC_EQ, false, cg);
+   return fcmpHelper(node, TR::CC_EQ, false, false, cg);
    }
 
 TR::Register *
 OMR::ARM64::TreeEvaluator::fcmpneEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return fcmpHelper(node, TR::CC_NE, false, cg);
+   return fcmpHelper(node, TR::CC_NE, false, true, cg); // need to check NaN
    }
 
 TR::Register *
 OMR::ARM64::TreeEvaluator::fcmpltEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return fcmpHelper(node, TR::CC_MI, false, cg);
+   return fcmpHelper(node, TR::CC_MI, false, false, cg);
    }
 
 TR::Register *
 OMR::ARM64::TreeEvaluator::fcmpgeEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return fcmpHelper(node, TR::CC_GE, false, cg);
+   return fcmpHelper(node, TR::CC_GE, false, false, cg);
    }
 
 TR::Register *
 OMR::ARM64::TreeEvaluator::fcmpgtEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return fcmpHelper(node, TR::CC_GT, false, cg);
+   return fcmpHelper(node, TR::CC_GT, false, false, cg);
    }
 
 TR::Register *
 OMR::ARM64::TreeEvaluator::fcmpleEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return fcmpHelper(node, TR::CC_LS, false, cg);
+   return fcmpHelper(node, TR::CC_LS, false, false, cg);
    }
 
 TR::Register *
 OMR::ARM64::TreeEvaluator::dcmpeqEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return fcmpHelper(node, TR::CC_EQ, true, cg);
+   return fcmpHelper(node, TR::CC_EQ, true, false, cg);
    }
 
 TR::Register *
 OMR::ARM64::TreeEvaluator::dcmpneEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return fcmpHelper(node, TR::CC_NE, true, cg);
+   return fcmpHelper(node, TR::CC_NE, true, true, cg); // need to check NaN
    }
 
 TR::Register *
 OMR::ARM64::TreeEvaluator::dcmpltEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return fcmpHelper(node, TR::CC_MI, true, cg);
+   return fcmpHelper(node, TR::CC_MI, true, false, cg);
    }
 
 TR::Register *
 OMR::ARM64::TreeEvaluator::dcmpgeEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return fcmpHelper(node, TR::CC_GE, true, cg);
+   return fcmpHelper(node, TR::CC_GE, true, false, cg);
    }
 
 TR::Register *
 OMR::ARM64::TreeEvaluator::dcmpgtEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return fcmpHelper(node, TR::CC_GT, true, cg);
+   return fcmpHelper(node, TR::CC_GT, true, false, cg);
    }
 
 TR::Register *
 OMR::ARM64::TreeEvaluator::dcmpleEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   return fcmpHelper(node, TR::CC_LS, true, cg);
+   return fcmpHelper(node, TR::CC_LS, true, false, cg);
    }
 
 static TR::Register *
@@ -1004,7 +1070,7 @@ OMR::ARM64::TreeEvaluator::iffcmpequEvaluator(TR::Node *node, TR::CodeGenerator 
 TR::Register *
 OMR::ARM64::TreeEvaluator::iffcmpneuEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   iffcmpHelper(node, TR::CC_NE, false, false, cg);
+   iffcmpHelper(node, TR::CC_NE, false, false, cg); // no need to check NaN
    return NULL;
    }
 
@@ -1046,7 +1112,7 @@ OMR::ARM64::TreeEvaluator::ifdcmpequEvaluator(TR::Node *node, TR::CodeGenerator 
 TR::Register *
 OMR::ARM64::TreeEvaluator::ifdcmpneuEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   iffcmpHelper(node, TR::CC_NE, true, false, cg);
+   iffcmpHelper(node, TR::CC_NE, true, false, cg); // no need to check NaN
    return NULL;
    }
 
@@ -1078,40 +1144,77 @@ OMR::ARM64::TreeEvaluator::ifdcmpleuEvaluator(TR::Node *node, TR::CodeGenerator 
    return NULL;
    }
 
+TR::Register*
+OMR::ARM64::TreeEvaluator::fcmpequEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return fcmpHelper(node, TR::CC_EQ, false, true, cg);
+   }
+
+TR::Register*
+OMR::ARM64::TreeEvaluator::fcmpneuEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return fcmpHelper(node, TR::CC_NE, false, false, cg); // no need to check NaN
+   }
+
+TR::Register*
+OMR::ARM64::TreeEvaluator::fcmpltuEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return fcmpHelper(node, TR::CC_MI, false, true, cg);
+   }
+
+TR::Register*
+OMR::ARM64::TreeEvaluator::fcmpgeuEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return fcmpHelper(node, TR::CC_GE, false, true, cg);
+   }
+
+TR::Register*
+OMR::ARM64::TreeEvaluator::fcmpgtuEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return fcmpHelper(node, TR::CC_GT, false, true, cg);
+   }
+
+TR::Register*
+OMR::ARM64::TreeEvaluator::fcmpleuEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return fcmpHelper(node, TR::CC_LS, false, true, cg);
+   }
+
 TR::Register *
 OMR::ARM64::TreeEvaluator::dcmpequEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-	{
-	// TODO:ARM64: Enable TR::TreeEvaluator::dcmpequEvaluator in compiler/aarch64/codegen/TreeEvaluatorTable.hpp when Implemented.
-	return OMR::ARM64::TreeEvaluator::unImpOpEvaluator(node, cg);
-	}
+   {
+   return fcmpHelper(node, TR::CC_EQ, true, true, cg);
+   }
+
+TR::Register*
+OMR::ARM64::TreeEvaluator::dcmpneuEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return fcmpHelper(node, TR::CC_NE, true, false, cg); // no need to check NaN
+   }
 
 TR::Register *
 OMR::ARM64::TreeEvaluator::dcmpltuEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-	{
-	// TODO:ARM64: Enable TR::TreeEvaluator::dcmpltuEvaluator in compiler/aarch64/codegen/TreeEvaluatorTable.hpp when Implemented.
-	return OMR::ARM64::TreeEvaluator::unImpOpEvaluator(node, cg);
-	}
+   {
+   return fcmpHelper(node, TR::CC_MI, true, true, cg);
+   }
 
 TR::Register *
 OMR::ARM64::TreeEvaluator::dcmpgeuEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-	{
-	// TODO:ARM64: Enable TR::TreeEvaluator::dcmpgeuEvaluator in compiler/aarch64/codegen/TreeEvaluatorTable.hpp when Implemented.
-	return OMR::ARM64::TreeEvaluator::unImpOpEvaluator(node, cg);
-	}
+   {
+   return fcmpHelper(node, TR::CC_GE, true, true, cg);
+   }
 
 TR::Register *
 OMR::ARM64::TreeEvaluator::dcmpgtuEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-	{
-	// TODO:ARM64: Enable TR::TreeEvaluator::dcmpgtuEvaluator in compiler/aarch64/codegen/TreeEvaluatorTable.hpp when Implemented.
-	return OMR::ARM64::TreeEvaluator::unImpOpEvaluator(node, cg);
-	}
+   {
+   return fcmpHelper(node, TR::CC_GT, true, true, cg);
+   }
 
 TR::Register *
 OMR::ARM64::TreeEvaluator::dcmpleuEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-	{
-	// TODO:ARM64: Enable TR::TreeEvaluator::dcmpleuEvaluator in compiler/aarch64/codegen/TreeEvaluatorTable.hpp when Implemented.
-	return OMR::ARM64::TreeEvaluator::unImpOpEvaluator(node, cg);
-	}
+   {
+   return fcmpHelper(node, TR::CC_LS, true, true, cg);
+   }
 
 // also handles dselect
 TR::Register *

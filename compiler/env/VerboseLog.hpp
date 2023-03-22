@@ -74,6 +74,7 @@ enum TR_VlogTag
    TR_Vlog_BI,       //(benefit inliner)
    TR_Vlog_FSD,
    TR_Vlog_VECTOR_API,
+   TR_Vlog_CHECKPOINT_RESTORE,
    TR_Vlog_numTags
    };
 

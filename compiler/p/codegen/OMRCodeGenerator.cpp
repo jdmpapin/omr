@@ -828,6 +828,11 @@ TR::Register *OMR::Power::CodeGenerator::gprClobberEvaluate(TR::Node *node)
       }
    }
 
+bool OMR::Power::CodeGenerator::canTransformUnsafeCopyToArrayCopy()
+   {
+   return !self()->comp()->getOption(TR_DisableArrayCopyOpts);
+   }
+
 bool OMR::Power::CodeGenerator::canTransformUnsafeSetMemory()
    {
    return (self()->comp()->target().is64Bit());
@@ -1800,11 +1805,12 @@ bool OMR::Power::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::I
          else
             return false;
       case TR::vdiv:
-      case TR::vneg:
          if (et == TR::Int32 || et == TR::Float || et == TR::Double)
             return true;
          else
             return false;
+      case TR::vneg:
+         return true;
       case TR::vabs:
          if (et == TR::Int8 || et == TR::Int16 || et == TR::Int32 || et == TR::Float || et == TR::Double)
             return true;
@@ -1815,11 +1821,18 @@ bool OMR::Power::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::I
             return true;
          else
             return false;
+      case TR::vreductionAdd:
+         return true;
       case TR::vload:
       case TR::vloadi:
       case TR::vstore:
       case TR::vstorei:
-         if (et == TR::Int32 || et == TR::Int64 || et == TR::Float || et == TR::Double)
+      case TR::mload:
+      case TR::mloadi:
+      case TR::mstore:
+      case TR::mstorei:
+         // since lxvb16x, stxvb16x, lxvh8x, and stxvh8x are not available on P8 and lower, vector/loads and stores should only be enabled under these conditions:
+         if (et == TR::Int32 || et == TR::Int64 || et == TR::Float || et == TR::Double || cpu->isAtLeast(OMR_PROCESSOR_PPC_P9) || cpu->isBigEndian())
             return true;
          else
             return false;
@@ -1851,6 +1864,14 @@ bool OMR::Power::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::I
       case TR::vconv:
          if (et == TR::Double &&
              opcode.getVectorSourceDataType().getVectorElementType() == TR::Int64)
+            return true;
+      case TR::vmadd:
+      case TR::vcmpeq:
+      case TR::vcmplt:
+      case TR::vcmpgt:
+      case TR::vcmple:
+      case TR::vcmpge:
+         if (et == TR::Double)
             return true;
       default:
          return false;

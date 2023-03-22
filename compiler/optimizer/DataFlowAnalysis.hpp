@@ -115,6 +115,9 @@ class TR_DataFlowAnalysis
    static void  operator delete(void *ptr, size_t size)
       { ((TR_DataFlowAnalysis*)ptr)->allocator().deallocate(ptr, size); } /* t->allocator() better return the same allocator as used for new */
 
+   static void *operator new(size_t size, TR::Region &region) { return region.allocate(size); }
+   static void operator delete(void *ptr, TR::Region &region) { region.deallocate(ptr); }
+
    /* Virtual destructor is necessary for the above delete operator to work
     * See "Modern C++ Design" section 4.7
     */
@@ -925,7 +928,7 @@ class TR_FlowSensitiveEscapeAnalysis : public TR_IntersectionBitVectorAnalysis
    virtual bool supportsGenAndKillSets();
    //virtual void initializeGenAndKillSetInfo();
 
-   virtual void analyzeNode(TR::Node *, bool, int32_t, TR::Node *);
+   virtual void analyzeNode(TR::Node *, TR::TreeTop *, bool, int32_t, TR::Node *);
    virtual void analyzeTreeTopsInBlockStructure(TR_BlockStructure *);
    virtual bool postInitializationProcessing();
 
@@ -942,6 +945,7 @@ class TR_FlowSensitiveEscapeAnalysis : public TR_IntersectionBitVectorAnalysis
    TR_EscapeAnalysis *_escapeAnalysis;
    bool _newlyAllocatedObjectWasLocked;
    TR_BitVector *_blocksWithFlushes, *_blocksWithSyncs; //, *_blocksThatNeedFlush;
+   TR::TreeTop **_syncNodeTTForBlock;   // For each BB, the treetop of a node that emits a sync (i.e. monexit or preferably a volatile access)
    List<TR::CFGEdge> _cfgBackEdges;
    TR_BitVector *_loopEntryBlocks;
    TR_BitVector *_catchBlocks;

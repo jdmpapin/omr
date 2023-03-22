@@ -539,7 +539,7 @@ public:
     * @brief Answers whether Unsafe.copyMemory transformation is supported or not
     * @return true if supported, false otherwise
     */
-   bool canTransformUnsafeCopyToArrayCopy() { return true; }
+   bool canTransformUnsafeCopyToArrayCopy();
 
    /**
     * @brief Generates instructions for incrementing debug counter
@@ -586,6 +586,10 @@ public:
    TR::Instruction *generateDebugCounterBump(TR::Instruction *cursor, TR::DebugCounterBase *counter, TR::Register *deltaReg, TR_ScratchRegisterManager &srm);
 
    bool internalPointerSupportImplemented() {return true;}
+
+   bool considerTypeForGRA(TR::Node *node);
+   bool considerTypeForGRA(TR::DataType dt);
+   bool considerTypeForGRA(TR::SymbolReference *symRef);
 
    private:
 

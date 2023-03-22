@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -457,10 +457,15 @@ MM_MemorySubSpaceFlat::collectorExpand(MM_EnvironmentBase* env, MM_Collector* re
 	return expansionAmount;
 }
 
-#if defined(OMR_GC_IDLE_HEAP_MANAGER)
 uintptr_t
 MM_MemorySubSpaceFlat::releaseFreeMemoryPages(MM_EnvironmentBase* env)
 {
+	return releaseFreeMemoryPages(env, MEMORY_TYPE_OLD);
+}
+
+uintptr_t
+MM_MemorySubSpaceFlat::releaseFreeMemoryPages(MM_EnvironmentBase* env, uintptr_t memoryType)
+{
+	Assert_MM_true_internal(OMR_ARE_ALL_BITS_SET(memoryType, MEMORY_TYPE_OLD));
 	return _memorySubSpace->releaseFreeMemoryPages(env);
 }
-#endif

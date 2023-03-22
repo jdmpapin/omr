@@ -48,7 +48,8 @@ namespace ILTypeProp
       Floating_Point                    = 0x00000800,
       Unsigned                          = 0x00001000,
       VectorResult                      = 0x00002000,
-      LastOMRILTypeProp                 = VectorResult
+      MaskResult                        = 0x00004000,
+      LastOMRILTypeProp                 = MaskResult
       };
    }
 
@@ -144,6 +145,7 @@ static_assert(TR::NumAllTypes < 254, "There are too many data types to fit in on
 
 #define TWO_SAME_CHILD(type)     TWO_CHILD((type), (type))
 #define THREE_SAME_CHILD(type)   THREE_CHILD((type), (type), (type))
+#define FOUR_SAME_CHILD(type)    FOUR_CHILD((type), (type), (type), (type))
 
 #define GET_FIRST_CHILD_TYPE(childProp)   TR::DataTypes(((childProp) >>  0) & 0xff)
 #define GET_SECOND_CHILD_TYPE(childProp)  TR::DataTypes(((childProp) >>  8) & 0xff)
@@ -191,7 +193,7 @@ namespace ILProp1
       TreeTop              = 0x08000000,
       HasSymbolRef         = 0x10000000,
       Switch               = 0x20000000,
-      // Available         = 0x40000000,
+      VectorMasked         = 0x40000000,
       // Available         = 0x80000000,
       };
    }
@@ -259,7 +261,7 @@ namespace ILProp3
       Abs                         = 0x00008000,
       VectorReduction             = 0x00010000, ///< Indicates if opcode performs vector reduction that produces scalar result
       Signum                      = 0x00020000, ///< For Xcmp opcodes
-      // Available                = 0x00040000,
+      MaskReduction               = 0x00040000, ///< Indicates if opcode performs mask reduction that produces scalar result
       // Available                = 0x00080000,
       // Available                = 0x00100000,
       // Available                = 0x00200000,

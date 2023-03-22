@@ -287,6 +287,7 @@ TR::OptionTable OMR::Options::_jitOptions[] = {
    {"disableCompactNullChecks",           "O\tdisable compact null checks",                    TR::Options::disableOptimization, compactNullChecks, 0, "P"},
    {"disableCompareAndBranchInstruction", "O\tdisable compareAndBranch instruction",           SET_OPTION_BIT(TR_DisableCompareAndBranchInstruction), "F"},
    {"disableCompilationAfterDLT",         "O\tdisable queueing of normal compilation for method that has been DLT compiled.", SET_OPTION_BIT(TR_DisableCompilationAfterDLT), "F"},
+   {"disableCompilationBeforeCheckpoint", "C\tdisable compilation before checkpoint", SET_OPTION_BIT(TR_DisableCompilationBeforeCheckpoint), "F", NOT_IN_SUBSET},
    {"disableConservativeColdInlining",   "O\tDo not be conservative with inlining at cold", SET_OPTION_BIT(TR_DisableConservativeColdInlining), "F" },
    {"disableConservativeHotRecompForServerMode", "R\tDo not be more conservative in server mode", SET_OPTION_BIT(TR_DisableConservativeHotRecompilationForServerMode), "F", NOT_IN_SUBSET},
    {"disableConservativeInlining",        "O\tDo not be conservative with inlining", SET_OPTION_BIT(TR_DisableConservativeInlining), "F" },
@@ -539,7 +540,7 @@ TR::OptionTable OMR::Options::_jitOptions[] = {
    {"disableStringBuilderTransformer",     "O\tenable transforming StringBuilder constructor to preallocate a buffer for String concatenation operations", SET_OPTION_BIT(TR_DisableStringBuilderTransformer), "F"},
    {"disableStringPeepholes",             "O\tdisable stringPeepholes",                        SET_OPTION_BIT(TR_DisableStringPeepholes), "F"},
    {"disableStripMining",                 "O\tdisable loop strip mining",                      SET_OPTION_BIT(TR_DisableStripMining), "F"},
-   {"disableSuffixLogs",                  "O\tdo not add the date/time/pid suffix to the file name of the logs", RESET_OPTION_BIT(TR_EnablePIDExtension), "F"},
+   {"disableSuffixLogs",                  "O\tdo not add the date/time/pid suffix to the file name of the logs", RESET_OPTION_BIT(TR_EnablePIDExtension), "F", NOT_IN_SUBSET},
    {"disableSupportForCpuSpentInCompilation", "M\tdo not provide CPU spent in compilation",    SET_OPTION_BIT(TR_DisableSupportForCpuSpentInCompilation), "F" },
    {"disableSwitchAnalyzer",              "O\tdisable switch analyzer",                        TR::Options::disableOptimization, switchAnalyzer, 0, "P"},
    {"disableSwitchAwayFromProfilingForHotAndVeryhot", "O\tdisable switch away from profiling for hot and veryhot", SET_OPTION_BIT(TR_DisableSwitchAwayFromProfilingForHotAndVeryhot), "F"},
@@ -593,6 +594,7 @@ TR::OptionTable OMR::Options::_jitOptions[] = {
    {"disableZ13",                         "O\tdisable z13 support",                        SET_OPTION_BIT(TR_DisableZ13), "F"},
    {"disableZ14",                         "O\tdisable z14 support",                            SET_OPTION_BIT(TR_DisableZ14), "F"},
    {"disableZ15",                         "O\tdisable z15 support",                        SET_OPTION_BIT(TR_DisableZ15), "F"},
+   {"disableZ16",                         "O\tdisable z16 support",                        SET_OPTION_BIT(TR_DisableZ16), "F"},
    {"disableZ196",                        "O\tdisable z196 support",                           SET_OPTION_BIT(TR_DisableZ196), "F"},
    {"disableZArraySetUnroll",             "O\tdisable arraySet unrolling on 390.",             SET_OPTION_BIT(TR_DisableZArraySetUnroll), "F"},
    {"disableZealousCodegenOpts",          "O\tdisable use of zealous codegen optimizations.", SET_OPTION_BIT(TR_DisableZealousCodegenOpts), "F"},
@@ -660,6 +662,7 @@ TR::OptionTable OMR::Options::_jitOptions[] = {
    {"enableClassChainValidationCaching",  "M\tenable class chain validation caching", SET_OPTION_BIT(TR_EnableClassChainValidationCaching), "F", NOT_IN_SUBSET},
    {"enableCodeCacheConsolidation",       "M\tenable code cache consolidation", SET_OPTION_BIT(TR_EnableCodeCacheConsolidation), "F", NOT_IN_SUBSET},
    {"enableColdCheapTacticalGRA",         "O\tenable cold cheap tactical GRA", SET_OPTION_BIT(TR_EnableColdCheapTacticalGRA), "F"},
+   {"enableCompilationBeforeCheckpoint",  "C\tenable compilation before checkpoint", RESET_OPTION_BIT(TR_DisableCompilationBeforeCheckpoint), "F", NOT_IN_SUBSET},
    {"enableCompilationSpreading",         "C\tenable adding spreading invocations to methods before compiling", SET_OPTION_BIT(TR_EnableCompilationSpreading), "F", NOT_IN_SUBSET},
    {"enableCompilationThreadThrottlingDuringStartup", "M\tenable compilation thread throttling during startup", SET_OPTION_BIT(TR_EnableCompThreadThrottlingDuringStartup), "F", NOT_IN_SUBSET },
    {"enableCompilationYieldStats",        "M\tenable statistics on time between 2 consecutive yield points", SET_OPTION_BIT(TR_EnableCompYieldStats), "F", NOT_IN_SUBSET},
@@ -1090,8 +1093,8 @@ TR::OptionTable OMR::Options::_jitOptions[] = {
    {"stressTrampolines", "O\tenables trampolines to always be used for method and helper calls", SET_OPTION_BIT(TR_StressTrampolines), "F"},
    {"subtractLoopyMethodCounts",   "C\tSubtract loopy method counts instead of dividing", SET_OPTION_BIT(TR_SubtractLoopyMethodCounts), "F", NOT_IN_SUBSET},
    {"subtractMethodCountsWhenIprofilerIsOff",   "C\tSubtract method counts instead of dividing when Iprofiler is off", SET_OPTION_BIT(TR_SubtractMethodCountsWhenIprofilerIsOff), "F", NOT_IN_SUBSET},
-   {"suffixLogs",          "O\tadd the date/time/pid suffix to the file name of the logs", SET_OPTION_BIT(TR_EnablePIDExtension), "F"},
-   {"suffixLogsFormat=",   "O\tadd the suffix in specified format to the file name of the logs", TR::Options::setString,  offsetof(OMR::Options, _suffixLogsFormat), 0, "P%s"},
+   {"suffixLogs",          "O\tadd the date/time/pid suffix to the file name of the logs", SET_OPTION_BIT(TR_EnablePIDExtension), "F", NOT_IN_SUBSET},
+   {"suffixLogsFormat=",   "O\tadd the suffix in specified format to the file name of the logs", TR::Options::setString,  offsetof(OMR::Options, _suffixLogsFormat), 0, "P%s", NOT_IN_SUBSET},
    {"supportSwitchToInterpeter", "C\tGenerate code to allow each method to switch to the interpreter", SET_OPTION_BIT(TR_SupportSwitchToInterpreter), "P"},
    {"suspendCompThreadsEarly", "M\tSuspend compilation threads when QWeight drops under a threshold", SET_OPTION_BIT(TR_SuspendEarly), "F", NOT_IN_SUBSET },
    {"terseRegisterPressureTrace","L\tinclude only summary info about register pressure tracing when traceGRA is enabled", SET_OPTION_BIT(TR_TerseRegisterPressureTrace), "P" },
@@ -1139,6 +1142,7 @@ TR::OptionTable OMR::Options::_jitOptions[] = {
    {"traceExitExtraction",              "L\ttrace extraction of structure nodes that unconditionally exit to outer regions", SET_OPTION_BIT(TR_TraceExitExtraction), "F"},
    {"traceExplicitNewInitialization",   "L\ttrace explicit new initialization",            TR::Options::traceOptimization, explicitNewInitialization, 0, "P"},
    {"traceFieldPrivatization",          "L\ttrace field privatization",                    TR::Options::traceOptimization, fieldPrivatization, 0, "P"},
+   {"traceFileLength=",    "L\ttrace file length in MB", TR::Options::setStaticNumeric, (intptr_t)&OMR::Options::_traceFileLength, 0, "F%d", NOT_IN_SUBSET},
    {"traceFull",                        "L\tturn on all trace options",                    SET_OPTION_BIT(TR_TraceAll), "P"},
    {"traceGeneralStoreSinking",         "L\ttrace general store sinking",                  TR::Options::traceOptimization, generalStoreSinking, 0, "P"},
    {"traceGlobalCopyPropagation",       "L\ttrace global copy propagation",                TR::Options::traceOptimization, globalCopyPropagation, 0, "P"},
@@ -1255,7 +1259,7 @@ TR::OptionTable OMR::Options::_jitOptions[] = {
    {"trustAllInterfaceTypeInfo",        "O\tGive Java interface type information the same level of trust afforded to class info.  The Java spec is much more lackadasical about interface type safety, and requires us to be conservative.", SET_OPTION_BIT(TR_TrustAllInterfaceTypeInfo), "F"},
    {"tryToInline=",                     "O{regex}\tlist of callee methods to be inlined if possible", TR::Options::setRegex, offsetof(OMR::Options, _tryToInline), 0, "P"},
    {"turnOffSelectiveNoOptServerIfNoStartupHint", "M\t", SET_OPTION_BIT(TR_TurnOffSelectiveNoOptServerIfNoStartupHint), "F", NOT_IN_SUBSET },
-   {"unleashStaticFieldFolding",        "O\tbypass the class white-list, and allow static final fields to be folded aggressively", RESET_OPTION_BIT(TR_RestrictStaticFieldFolding), "F"},
+   {"unleashStaticFieldFolding",        "O\tbypass the class allow-list, and allow static final fields to be folded aggressively", RESET_OPTION_BIT(TR_RestrictStaticFieldFolding), "F"},
    {"unresolvedSymbolsAreNotColdAtCold", "R\tMark unresolved symbols as cold blocks at cold or lower", SET_OPTION_BIT(TR_UnresolvedAreNotColdAtCold), "F"},
    {"upgradeBootstrapAtWarm",           "R\tRecompile bootstrap AOT methods at warm instead of cold", SET_OPTION_BIT(TR_UpgradeBootstrapAtWarm), "F", NOT_IN_SUBSET},
    {"useFlattenedArrayElementRuntimeHelpers",        "M\tuse the runtime helpers for flattened array elements", SET_OPTION_BIT(TR_UseFlattenedArrayElementRuntimeHelpers), "F"},
@@ -1652,6 +1656,8 @@ int32_t       OMR::Options::_inlinerVeryLargeCompiledMethodAdjustFactor = 20;
 int32_t       OMR::Options::_numUsableCompilationThreads = -1; // -1 means not initialized
 
 int32_t       OMR::Options::_trampolineSpacePercentage = 0; // 0 means no change from default
+
+int32_t       OMR::Options::_traceFileLength = 0; // in MBs, 0 unlimited
 
 bool          OMR::Options::_countsAreProvidedByUser = false;
 TR_YesNoMaybe OMR::Options::_startupTimeMatters = TR_maybe;
@@ -2417,9 +2423,10 @@ OMR::Options::processOptionsJIT(char *jitOptions, void *feBase, TR_FrontEnd *fe)
       _jitCmdLineOptions = new (PERSISTENT_NEW) TR::Options();
       _cmdLineOptions = _jitCmdLineOptions;
       }
-
-   if (_jitCmdLineOptions)
-      memset(_jitCmdLineOptions, 0, sizeof(TR::Options));
+   else
+      {
+      _jitCmdLineOptions->init();
+      }
 
    _feBase = feBase;
    _fe     = fe;
@@ -2458,9 +2465,8 @@ OMR::Options::processOptionsAOT(char *aotOptions, void *feBase, TR_FrontEnd *fe)
    //
    if (!_aotCmdLineOptions)
       _aotCmdLineOptions = new (PERSISTENT_NEW) TR::Options();
-
-   if (_aotCmdLineOptions)
-      memset(_aotCmdLineOptions, 0, sizeof(TR::Options));
+   else
+      _aotCmdLineOptions->init();
 
    _feBase = feBase;
    _fe     = fe;
@@ -3195,7 +3201,7 @@ OMR::Options::processOptions(
    //
    if (strlen(options) == 0 && !envOptions)
       {
-      options = OMR::Options::getDefaultOptions();
+      options = TR::Options::getDefaultOptions();
       }
 
    return TR::Options::processOptions(options, envOptions, cmdLineOptions);
@@ -4845,7 +4851,9 @@ char *OMR::Options::_verboseOptionNames[TR_NumVerboseOptions] =
    "aotcompression",
    "JITServerConns",
    "vectorAPI",
-   "iprofilerPersistence"
+   "iprofilerPersistence",
+   "CheckpointRestore",
+   "CheckpointRestoreDetails"
    };
 
 
