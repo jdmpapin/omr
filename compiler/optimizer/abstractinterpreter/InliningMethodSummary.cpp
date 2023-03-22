@@ -31,7 +31,7 @@ uint32_t TR::InliningMethodSummary::testArgument(TR::AbsValue* arg, uint32_t arg
 
    if (_optsByArg.size() <= argPos || _optsByArg[argPos] == NULL || _optsByArg[argPos]->size() == 0)
       return 0;
-   
+
    uint32_t benefit = 0;
 
    for (size_t i = 0; i < _optsByArg[argPos]->size(); i ++)
@@ -56,7 +56,7 @@ void TR::InliningMethodSummary::trace(TR::Compilation* comp)
       return;
       }
 
-   for (size_t i = 0; i < _optsByArg.size(); i ++) 
+   for (size_t i = 0; i < _optsByArg.size(); i ++)
       {
       if (_optsByArg[i] != NULL)
          {
@@ -78,10 +78,10 @@ void TR::InliningMethodSummary::addPotentialOptimizationByArgument(TR::Potential
    {
    if (_optsByArg.size() <= argPos)
       _optsByArg.resize(argPos + 1);
-      
+
    if (!_optsByArg[argPos])
        _optsByArg[argPos] = new (region()) PredicateContainer(region());
-      
+
    _optsByArg[argPos]->push_back(predicate);
    }
 
@@ -102,13 +102,13 @@ const char* TR::PotentialOptimizationPredicate::getName()
       }
    }
 
-bool TR::PotentialOptimizationVPPredicate::holdPartialOrderRelation(TR::VPConstraint* valueConstraint, TR::VPConstraint* testConstraint)  
+bool TR::PotentialOptimizationVPPredicate::holdPartialOrderRelation(TR::VPConstraint* valueConstraint, TR::VPConstraint* testConstraint)
    {
    if (testConstraint->asIntConstraint()) // partial relation for int constraint
       {
-      if (testConstraint->getLowInt() <= valueConstraint->getLowInt() && testConstraint->getHighInt() >= valueConstraint->getHighInt()) 
+      if (testConstraint->getLowInt() <= valueConstraint->getLowInt() && testConstraint->getHighInt() >= valueConstraint->getHighInt())
          return true;
-      else 
+      else
          return false;
       }
    else if (testConstraint->asClassPresence()) // partial relation for nullness
@@ -117,7 +117,7 @@ bool TR::PotentialOptimizationVPPredicate::holdPartialOrderRelation(TR::VPConstr
          return true;
       else if (testConstraint->isNullObject() && valueConstraint->isNullObject())
          return true;
-      else 
+      else
          return false;
       }
    else if (testConstraint->asClassType()) // testing for checkcast
@@ -134,7 +134,7 @@ bool TR::PotentialOptimizationVPPredicate::holdPartialOrderRelation(TR::VPConstr
          }
       else if (testConstraint->isNullObject() && valueConstraint->isNullObject())
          return true;
-      else 
+      else
          return false;
       }
    else if (testConstraint->asClass()) // partial relation for instanceof
@@ -154,7 +154,7 @@ bool TR::PotentialOptimizationVPPredicate::holdPartialOrderRelation(TR::VPConstr
          else if (yesNoMaybe == TR_no)
             return false;
          }
-      else 
+      else
          return false;
       }
 
@@ -175,4 +175,3 @@ void TR::PotentialOptimizationVPPredicate::trace(TR::Compilation* comp)
    traceMsg(comp, "Predicate Constraint: ");
    _constraint->print(_vp);
    }
-   

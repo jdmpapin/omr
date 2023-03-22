@@ -29,7 +29,7 @@ TR::IDT::IDT(TR::Region& region, TR_CallTarget* callTarget, TR::ResolvedMethodSy
       _root(new (_region) IDTNode(getNextGlobalIDTNodeIndex(), callTarget, symbol, -1, 1, NULL, budget)),
       _indices(NULL),
       _totalCost(0)
-   {   
+   {
    increaseGlobalIDTNodeIndex();
    }
 
@@ -56,7 +56,7 @@ void TR::IDT::print()
    if (traceBIIDTGen)
       traceMsg(comp(), "%s\n", line.text());
 
-   if (candidates <= 0) 
+   if (candidates <= 0)
       return;
 
    // print the IDT nodes in BFS
@@ -71,7 +71,7 @@ void TR::IDT::print()
       int32_t index = currentNode->getGlobalIndex();
 
       // skip root node
-      if (index != -1) 
+      if (index != -1)
          {
          line.clear();
          line.appendf("#IDT: #%d: #%d inlinable @%d -> bcsz=%d %s target %s, static benefit = %d, benefit = %f, cost = %d, budget = %d, callratio = %f, rootcallratio = %f",
@@ -91,10 +91,10 @@ void TR::IDT::print()
          if (verboseInlining)
             TR_VerboseLog::writeLine(TR_Vlog_BI, "%s", line.text());
 
-         if (traceBIIDTGen) 
+         if (traceBIIDTGen)
             traceMsg(comp(), "%s\n", line.text());
          }
-         
+
       // process children
       for (uint32_t i = 0; i < currentNode->getNumChildren(); i ++)
          idtNodeQueue.push_back(currentNode->getChild(i));
@@ -153,11 +153,11 @@ TR::IDTNode* TR::IDTPriorityQueue::get(uint32_t index)
    const uint32_t idtSize = size();
    TR_ASSERT_FATAL(index < idtSize, "IDTPriorityQueue::get index out of bound!");
    // already in entries
-   if (entriesSize > index) 
+   if (entriesSize > index)
       return _entries.at(index);
 
    // not in entries yet. Update entries.
-   while (_entries.size() <= index) 
+   while (_entries.size() <= index)
       {
       TR::IDTNode *newEntry = _pQueue.top();
       _pQueue.pop();
@@ -171,4 +171,3 @@ TR::IDTNode* TR::IDTPriorityQueue::get(uint32_t index)
 
    return _entries.at(index);
    }
-   

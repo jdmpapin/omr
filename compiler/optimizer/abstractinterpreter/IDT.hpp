@@ -34,8 +34,8 @@ namespace TR {
 
 /**
  * IDT stands for Inlining Dependency Tree
- * It is a structure that holds all candidate methods to be inlined. 
- * 
+ * It is a structure that holds all candidate methods to be inlined.
+ *
  * The parent-child relationship in the IDT corresponds to the caller-callee relationship.
  */
 class IDT
@@ -49,14 +49,14 @@ class IDT
 
    void addCost(uint32_t cost) { _totalCost += cost; }
    uint32_t getTotalCost() { return _totalCost; }
-   
+
    /**
     * @brief Get the total number of nodes in this IDT.
     *
     * @return the total number of node
     */
    uint32_t getNumNodes() { return _nextIdx + 1; }
-   
+
    /**
     * @brief Get the next avaible IDTNode index.
     *
@@ -77,7 +77,7 @@ class IDT
     * @return the IDT node
     */
    TR::IDTNode *getNodeByGlobalIndex(int32_t index);
-   
+
    /**
     * @brief Flatten all the IDTNodes into a list.
     */
@@ -111,7 +111,7 @@ class IDTPriorityQueue
    TR::IDTNode* get(uint32_t index);
 
    private:
-   struct IDTNodeCompare 
+   struct IDTNodeCompare
       {
       bool operator()(TR::IDTNode *left, TR::IDTNode *right)
          {
@@ -123,7 +123,7 @@ class IDTPriorityQueue
 
    typedef TR::vector<IDTNode*, TR::Region&> IDTNodeVector;
    typedef std::priority_queue<IDTNode*, IDTNodeVector, IDTNodeCompare> IDTNodePriorityQueue;
-   
+
    TR::IDT* _idt;
    IDTNodePriorityQueue _pQueue;
    IDTNodeVector _entries;

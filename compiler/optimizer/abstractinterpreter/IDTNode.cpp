@@ -24,12 +24,12 @@
 #define SINGLE_CHILD_BIT 1
 
 TR::IDTNode::IDTNode(
-      int32_t idx, 
+      int32_t idx,
       TR_CallTarget* callTarget,
       TR::ResolvedMethodSymbol* symbol,
-      uint32_t byteCodeIndex, 
-      float callRatio, 
-      IDTNode *parent, 
+      uint32_t byteCodeIndex,
+      float callRatio,
+      IDTNode *parent,
       uint32_t budget) :
    _idx(idx),
    _callTarget(callTarget),
@@ -42,24 +42,24 @@ TR::IDTNode::IDTNode(
    _callRatio(callRatio),
    _rootCallRatio(parent ? parent->_rootCallRatio * callRatio : 1),
    _inliningMethodSummary(NULL)
-   {   
+   {
    }
 
 TR::IDTNode* TR::IDTNode::addChild(
       int32_t idx,
       TR_CallTarget* callTarget,
       TR::ResolvedMethodSymbol* symbol,
-      uint32_t byteCodeIndex, 
+      uint32_t byteCodeIndex,
       float callRatio,
       TR::Region& region)
    {
    uint32_t budget =  getBudget() - callTarget->_calleeMethod->maxBytecodeIndex();
-   
+
    TR::IDTNode* newChild = new (region) TR::IDTNode(
-                                             idx, 
+                                             idx,
                                              callTarget,
                                              symbol,
-                                             byteCodeIndex, 
+                                             byteCodeIndex,
                                              callRatio,
                                              this,
                                              budget);
@@ -69,7 +69,7 @@ TR::IDTNode* TR::IDTNode::addChild(
       {
       setOnlyChild(newChild);
       return newChild;
-      }   
+      }
 
    // The case where there is 1 child
    if (getNumChildren() == 1)
@@ -79,7 +79,7 @@ TR::IDTNode* TR::IDTNode::addChild(
       TR_ASSERT_FATAL(!((uintptr_t)_children & SINGLE_CHILD_BIT), "Misaligned memory address.\n");
       _children->push_back(onlyChild);
       }
-                     
+
    _children->push_back(newChild);
    return _children->back();
    }
@@ -90,12 +90,12 @@ uint32_t TR::IDTNode::getNumDescendants()
    uint32_t sum = 0;
    for (uint32_t i =0; i < numChildren; i ++)
       {
-      sum += 1 + getChild(i)->getNumDescendants(); 
+      sum += 1 + getChild(i)->getNumDescendants();
       }
    return sum;
    }
 
-uint32_t TR::IDTNode::getRecursiveCost() 
+uint32_t TR::IDTNode::getRecursiveCost()
    {
    const uint32_t numChildren = getNumChildren();
    uint32_t cost = getCost();
@@ -104,7 +104,7 @@ uint32_t TR::IDTNode::getRecursiveCost()
       IDTNode *child = getChild(i);
       cost += child->getRecursiveCost();
       }
-   
+
    return cost;
    }
 
@@ -112,10 +112,10 @@ uint32_t TR::IDTNode::getNumChildren()
    {
    if (_children == NULL)
       return 0;
-   
+
    if (getOnlyChild() != NULL)
       return 1;
-   
+
    size_t num = _children->size();
    return num;
    }
@@ -141,16 +141,16 @@ double TR::IDTNode::getBenefit()
 TR::IDTNode* TR::IDTNode::findChildWithBytecodeIndex(uint32_t bcIndex)
    {
    const uint32_t size = getNumChildren();
-   
+
    if (size == 0)
       return NULL;
-   
+
    if (size == 1)
       {
       TR::IDTNode* onlyChild = getOnlyChild();
       return onlyChild->getByteCodeIndex() == bcIndex ? onlyChild : NULL;
       }
-   
+
    for (uint32_t i = 0; i < size; i ++)
       {
       if ((*_children)[i]->getByteCodeIndex() == bcIndex)

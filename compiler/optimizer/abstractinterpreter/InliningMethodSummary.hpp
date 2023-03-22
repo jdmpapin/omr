@@ -31,28 +31,28 @@ namespace TR { class PotentialOptimizationPredicate; }
 namespace TR {
 
 /**
- * The Inlining Method Summary captures potential optimization opportunities of inlining one particular method 
+ * The Inlining Method Summary captures potential optimization opportunities of inlining one particular method
  * and also specifies the constraints that are the maximal safe values to make the optimizations happen.
  */
 class InliningMethodSummary
    {
    public:
-   
+
    InliningMethodSummary(TR::Region& region) :
       _region(region),
       _optsByArg(region)
    {}
 
    /**
-    * @brief calculate the total static benefits from a particular argument after inlining. 
+    * @brief calculate the total static benefits from a particular argument after inlining.
     *
     * @param arg the argument
     * @param argPos the position of the argument
-    * 
+    *
     * @return the total static benefit
     */
    uint32_t testArgument(TR::AbsValue* arg, uint32_t argPos);
-   
+
    void trace(TR::Compilation* comp);
 
    void addPotentialOptimizationByArgument(TR::PotentialOptimizationPredicate* predicate, uint32_t argPos);
@@ -83,13 +83,13 @@ class PotentialOptimizationPredicate
          _kind(kind)
       {}
 
-   virtual void trace(TR::Compilation* comp)=0; 
-   
+   virtual void trace(TR::Compilation* comp)=0;
+
    /**
     * @brief Test whether the given value is a safe value given the optimization's constraint.
     *
     * @param value the value to be tested against the constraint
-    * 
+    *
     * @return true if it is a safe value to unlock the optimization. false otherwise.
     */
    virtual bool test(TR::AbsValue* value)=0;
@@ -99,7 +99,7 @@ class PotentialOptimizationPredicate
 
    protected:
 
-   uint32_t _bytecodeIndex; 
+   uint32_t _bytecodeIndex;
    TR::PotentialOptimizationPredicate::Kind _kind;
    };
 
@@ -119,9 +119,9 @@ class PotentialOptimizationVPPredicate : public PotentialOptimizationPredicate
 
    bool holdPartialOrderRelation(TR::VPConstraint* valueConstraint, TR::VPConstraint* testConstraint);
 
-   TR::ValuePropagation* _vp; 
+   TR::ValuePropagation* _vp;
    TR::VPConstraint* _constraint;
-   
+
    };
 }
 
