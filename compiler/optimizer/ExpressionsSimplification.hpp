@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -116,12 +116,29 @@ class TR_ExpressionsSimplification : public TR::Optimization
          if ((_increment > 0 && _lowerBound > _upperBound) || (_increment < 0 && _lowerBound < _upperBound))
             return 0;
 
+         // In extreme cases, the number of iterations might be greater than or equal to 2^31.
+         // Calculate the number of iterations using int64_t calculations, and return zero
+         // (i.e., unknown) as the number of iterations if the value exceeds the maximum value
+         // of type int32_t
+         int64_t lb64 = _lowerBound;
+         int64_t ub64 = _upperBound;
+         int64_t inc64 = _increment;
+         int64_t numIters;
+
          if (isEquals())
-            return (_upperBound - _lowerBound + _increment)/_increment;
+            {
+            numIters = (ub64 - lb64 + inc64)/inc64;
+            }
          else if (_increment > 0)
-            return (_upperBound - _lowerBound + _increment - 1)/_increment;
+            {
+            numIters = (ub64 - lb64 + inc64 - 1)/inc64;
+            }
          else
-            return (_upperBound - _lowerBound + _increment + 1)/_increment;
+            {
+            numIters = (ub64 - lb64 + inc64 + 1)/inc64;
+            }
+
+         return (numIters <= std::numeric_limits<int32_t>::max()) ? (int32_t) numIters : 0;
          }
 
       private:

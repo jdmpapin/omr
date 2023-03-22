@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2018
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -33,10 +33,6 @@
 #include "il/Node_inlines.hpp"
 #include "il/StaticSymbol.hpp"
 #include "runtime/CodeCacheManager.hpp"
-
-#if defined(OSX)
-#include <pthread.h> // for pthread_jit_write_protect_np
-#endif
 
 uint8_t *OMR::ARM64::Instruction::generateBinaryEncoding()
    {
@@ -181,12 +177,10 @@ uint8_t *TR::ARM64ImmSymInstruction::generateBinaryEncoding()
                TR_ASSERT_FATAL(cg()->comp()->target().cpu.isTargetWithinUnconditionalBranchImmediateRange(destination, (intptr_t)cursor),
                                "Call target address is out of range");
 
-#if defined(OSX)
                // Re-acquire permission for writing to the code buffer.
                // methodTrampolineLookup() may call createTrampoline() which will acquire/release
                // write protection leaving the write permission disabled in this path.
-               pthread_jit_write_protect_np(0);
-#endif
+               omrthread_jit_write_protect_disable();
                }
 
             intptr_t distance = destination - (intptr_t)cursor;
@@ -749,6 +743,25 @@ int32_t TR::ARM64Trg1MemInstruction::estimateBinaryLength(int32_t currentEstimat
    return currentEstimate + getEstimatedBinaryLength();
    }
 
+uint8_t *TR::ARM64Trg2MemInstruction::generateBinaryEncoding()
+   {
+   uint8_t *instructionStart = cg()->getBinaryBufferCursor();
+   uint8_t *cursor = getOpCode().copyBinaryToBuffer(instructionStart);
+   insertTargetRegister(toARM64Cursor(cursor));
+   insertTarget2Register(toARM64Cursor(cursor));
+   cursor = getMemoryReference()->generateBinaryEncoding(this, cursor, cg());
+   setBinaryLength(cursor - instructionStart);
+   setBinaryEncoding(instructionStart);
+   cg()->addAccumulatedInstructionLengthError(getEstimatedBinaryLength() - getBinaryLength());
+   return cursor;
+   }
+
+int32_t TR::ARM64Trg2MemInstruction::estimateBinaryLength(int32_t currentEstimate)
+   {
+   setEstimatedBinaryLength(getMemoryReference()->estimateBinaryLength(getOpCodeValue()));
+   return currentEstimate + getEstimatedBinaryLength();
+   }
+
 TR::Instruction *TR::ARM64MemInstruction::expandInstruction()
    {
    return getMemoryReference()->expandInstruction(self(), cg());
@@ -867,6 +880,34 @@ uint8_t *TR::ARM64ZeroSrc2Instruction::generateBinaryEncoding()
    uint8_t *instructionStart = cg()->getBinaryBufferCursor();
    uint8_t *cursor = getOpCode().copyBinaryToBuffer(instructionStart);
    insertZeroRegister(toARM64Cursor(cursor));
+   insertSource1Register(toARM64Cursor(cursor));
+   insertSource2Register(toARM64Cursor(cursor));
+   cursor += ARM64_INSTRUCTION_LENGTH;
+   setBinaryLength(ARM64_INSTRUCTION_LENGTH);
+   setBinaryEncoding(instructionStart);
+   return cursor;
+   }
+
+uint8_t *TR::ARM64Src1ImmCondInstruction::generateBinaryEncoding()
+   {
+   uint8_t *instructionStart = cg()->getBinaryBufferCursor();
+   uint8_t *cursor = getOpCode().copyBinaryToBuffer(instructionStart);
+   insertConditionCodeField(toARM64Cursor(cursor));
+   insertConditionFlags(toARM64Cursor(cursor));
+   insertSource1Register(toARM64Cursor(cursor));
+   insertImmediateField(toARM64Cursor(cursor));
+   cursor += ARM64_INSTRUCTION_LENGTH;
+   setBinaryLength(ARM64_INSTRUCTION_LENGTH);
+   setBinaryEncoding(instructionStart);
+   return cursor;
+   }
+
+uint8_t *TR::ARM64Src2CondInstruction::generateBinaryEncoding()
+   {
+   uint8_t *instructionStart = cg()->getBinaryBufferCursor();
+   uint8_t *cursor = getOpCode().copyBinaryToBuffer(instructionStart);
+   insertConditionCodeField(toARM64Cursor(cursor));
+   insertConditionFlags(toARM64Cursor(cursor));
    insertSource1Register(toARM64Cursor(cursor));
    insertSource2Register(toARM64Cursor(cursor));
    cursor += ARM64_INSTRUCTION_LENGTH;

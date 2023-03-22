@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -166,6 +166,7 @@ class VPConstraint
    virtual bool isNonNullObject();
    virtual bool isPreexistentObject();
    virtual TR_OpaqueClassBlock *getClass();
+   virtual TR_OpaqueClassBlock *getTypeHintClass();
    virtual bool isFixedClass();
    virtual bool isConstString();
    virtual TR::VPClassType *getClassType();
@@ -266,49 +267,6 @@ class VPConstraint
       TR::VPConstraint     *_other;
       const char          *_name;
    };
-
-   // The following {add,sub}WithOverflow require that the build (C++) compiler
-   // use two's complement (virtually guaranteed), and that type_t be a signed
-   // integer type.
-
-   template<typename type_t> type_t addWithOverflow(type_t a, type_t b, bool& overflow)
-      {
-      // Cast to uintmax_t to avoid undefined behaviour on signed overflow.
-      //
-      // The uintmax_t-typed operands are sign-extended from a and b. They
-      // won't undergo integer promotions, because they're already as large as
-      // possible. And they're already at a common type, so they won't undergo
-      // the "usual arithmetic conversions" either. Therefore this will do
-      // unsigned (modular) arithmitic. Converting back to type_t produces the
-      // expected two's complement result.
-      type_t sum = uintmax_t(a) + uintmax_t(b);
-
-      //The overflow flag is set when the arithmetic used to compute the sum overflows. This happens exactly
-      //when both operand have the same sign and the resulting value has the opposite sign to this.
-      //A non-negative result from xoring two numbers indicates that their sign bits are either both
-      //set, or both unset, meaning they have the same sign, while a negative result from xoring two
-      //numbers means that exactly one of them has its sign bit set, meaning the signs of the two numbers
-      //differ.
-      overflow = ( a ^ b ) >= 0 && ( a ^ sum ) < 0;
-
-      return sum;
-      }
-
-   template<typename type_t> type_t subWithOverflow(type_t a, type_t b, bool& overflow)
-      {
-      // About uintmax_t, see addWithOverflow above.
-      type_t diff = uintmax_t(a) - uintmax_t(b);
-
-      //The overflow flag is set when the arithmetic used to compute the difference overflows. This happens exactly
-      //when both operand bounds have a differing sign and the resulting value has the same sign as the first operand.
-      //A non-negative result from xoring two numbers indicates that their sign bits are either both
-      //set, or both unset, meaning they have the same sign, while a negative result from xoring two
-      //numbers means that exactly one of them has its sign bit set, meaning the signs of the two numbers
-      //differ.
-      overflow = ( a ^ b ) < 0 && ( a ^ diff ) < 0;
-
-      return diff;
-      }
 
    private:
    int32_t _mergePriority;
@@ -545,11 +503,13 @@ class VPLongRange : public TR::VPLongConstraint
 class VPClass : public TR::VPConstraint
    {
    public:
-   VPClass(TR::VPClassType *type, TR::VPClassPresence *presence, TR::VPPreexistentObject *preexistence, TR::VPArrayInfo *arrayInfo, TR::VPObjectLocation *location)
-      : TR::VPConstraint(ClassPriority), _type(type), _presence(presence),
+   VPClass(TR::VPClassType *type, TR::VPClassPresence *presence, TR::VPPreexistentObject *preexistence,
+           TR::VPArrayInfo *arrayInfo, TR::VPObjectLocation *location, TR_OpaqueClassBlock *typeHintClass=NULL)
+      : TR::VPConstraint(ClassPriority), _type(type), _typeHintClass(typeHintClass), _presence(presence),
         _preexistence(preexistence), _arrayInfo(arrayInfo), _location(location)
       {}
-   static TR::VPConstraint *create(OMR::ValuePropagation *vp, TR::VPClassType *type, TR::VPClassPresence *presence, TR::VPPreexistentObject *preexistence, TR::VPArrayInfo *arrayInfo, TR::VPObjectLocation *location);
+   static TR::VPConstraint *create(OMR::ValuePropagation *vp, TR::VPClassType *type, TR::VPClassPresence *presence, TR::VPPreexistentObject *preexistence,
+                                     TR::VPArrayInfo *arrayInfo, TR::VPObjectLocation *location, TR_OpaqueClassBlock *typeHintClass = NULL);
    virtual TR::VPClass *asClass();
 
    virtual TR::VPConstraint *merge1(TR::VPConstraint *other, OMR::ValuePropagation *vp);
@@ -565,6 +525,7 @@ class VPClass : public TR::VPConstraint
    virtual bool isFixedClass();
    virtual bool isConstString();
    virtual TR::VPClassType *getClassType();
+   virtual TR_OpaqueClassBlock *getTypeHintClass();
    virtual TR::VPArrayInfo *getArrayInfo();
    virtual TR::VPClassPresence *getClassPresence();
    virtual TR::VPPreexistentObject *getPreexistence();
@@ -583,8 +544,17 @@ class VPClass : public TR::VPConstraint
    virtual void print(TR::Compilation *, TR::FILE *);
    virtual const char *name();
 
+   static TR_OpaqueClassBlock *intersectTypeHintClasses(TR_OpaqueClassBlock *hint1, TR_OpaqueClassBlock *hint2, OMR::ValuePropagation *vp);
+
    private:
    TR::VPClassType         *_type;  // Conditional on presence.  "If the reference is non-null, it has this type info"
+   /**
+    * _typeHintClass suggests the value is LIKELY an exact type.
+    * It could be used along with runtime checks on this speculation for other optimizations.
+    *
+    * _typeHintClass is the intersect of the initial typeHintClass and _type._typeHintClass if _type exists
+    */
+   TR_OpaqueClassBlock     *_typeHintClass;
    TR::VPClassPresence     *_presence;
    TR::VPPreexistentObject *_preexistence;
    TR::VPArrayInfo         *_arrayInfo;
@@ -594,13 +564,14 @@ class VPClass : public TR::VPConstraint
 class VPClassType : public TR::VPConstraint
    {
    public:
-   VPClassType(int32_t p) : TR::VPConstraint(p) {}
+   VPClassType(int32_t p, TR_OpaqueClassBlock *typeHintClass) : TR::VPConstraint(p), _typeHintClass(typeHintClass) {}
    static TR::VPClassType *create(OMR::ValuePropagation *vp, TR::SymbolReference *symRef, bool isFixedClass, bool isPointerToClass = false);
    static TR::VPClassType *create(OMR::ValuePropagation *vp, const char *sig, int32_t len, TR_ResolvedMethod *method, bool isFixed, TR_OpaqueClassBlock *j9class = 0);
    virtual TR::VPClassType *asClassType();
 
    virtual const char *getClassSignature(int32_t &len) = 0;
    virtual TR::VPClassType *getClassType();
+   virtual TR_OpaqueClassBlock *getTypeHintClass();
    virtual TR::VPClassType *getArrayClass(OMR::ValuePropagation *vp) = 0;
 
    virtual bool isReferenceArray(TR::Compilation *) = 0;
@@ -622,7 +593,15 @@ class VPClassType : public TR::VPConstraint
 
    protected:
    TR::VPConstraint *typeIntersectLocation(TR::VPObjectLocation *location, OMR::ValuePropagation *vp);
-
+   /**
+    * _typeHintClass suggests the value is LIKELY an exact type.
+    * It could be used along with runtime checks on this speculation for other optimizations.
+    *
+    * VPResolvedClass::_typeHintClass is the likely sub type of _class
+    * VPFixedClass::_typeHintClass is _class
+    * VPUnresolvedClass::_typeHintClass is NULL
+    */
+   TR_OpaqueClassBlock *_typeHintClass;
    const char *_sig;
    int32_t _len;
    };
@@ -630,8 +609,8 @@ class VPClassType : public TR::VPConstraint
 class VPResolvedClass : public TR::VPClassType
    {
    public:
-   VPResolvedClass(TR_OpaqueClassBlock *klass, TR::Compilation *);
-   VPResolvedClass(TR_OpaqueClassBlock *klass, TR::Compilation *, int32_t p);
+   VPResolvedClass(TR_OpaqueClassBlock *klass, TR::Compilation *, TR_OpaqueClassBlock *typeHintClass);
+   VPResolvedClass(TR_OpaqueClassBlock *klass, TR::Compilation *, int32_t p, TR_OpaqueClassBlock *typeHintClass);
    static TR::VPResolvedClass *create(OMR::ValuePropagation *vp, TR_OpaqueClassBlock *klass);
    virtual TR::VPResolvedClass *asResolvedClass();
 
@@ -657,7 +636,7 @@ class VPResolvedClass : public TR::VPClassType
 class VPFixedClass : public TR::VPResolvedClass
    {
    public:
-   VPFixedClass(TR_OpaqueClassBlock *klass, TR::Compilation * comp, int32_t p = FixedClassPriority) : TR::VPResolvedClass(klass, comp, p) {}
+   VPFixedClass(TR_OpaqueClassBlock *klass, TR::Compilation * comp, int32_t p = FixedClassPriority) : TR::VPResolvedClass(klass, comp, p, klass /* typeHintClass */) {}
    static TR::VPFixedClass *create(OMR::ValuePropagation *vp, TR_OpaqueClassBlock *klass);
    virtual TR::VPFixedClass *asFixedClass();
 
@@ -709,7 +688,7 @@ class VPUnresolvedClass : public TR::VPClassType
    {
    public:
    VPUnresolvedClass(const char *sig, int32_t len, TR_ResolvedMethod *method)
-      : TR::VPClassType(UnresolvedClassPriority), _method(method)
+      : TR::VPClassType(UnresolvedClassPriority, NULL /* typeHintClass */), _method(method)
       {_sig = sig; _len = len; _definiteType = false;}
    static TR::VPUnresolvedClass *create(OMR::ValuePropagation *vp, const char *sig, int32_t len, TR_ResolvedMethod *method);
    virtual TR::VPUnresolvedClass *asUnresolvedClass();

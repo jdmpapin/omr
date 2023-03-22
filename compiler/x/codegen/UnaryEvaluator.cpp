@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -46,15 +46,19 @@ TR::Register *OMR::X86::TreeEvaluator::floatingPointAbsHelper(TR::Node *node, TR
 
    TR::InstOpCode andOpcode = TR::InstOpCode::PANDRegReg;
    TR::InstOpCode shrOpcode = et == TR::Double ? TR::InstOpCode::PSRLQRegImm1 : TR::InstOpCode::PSRLDRegImm1;
+   TR::InstOpCode cmpOpcode = TR::InstOpCode::CMPPSRegRegImm1;
+
    OMR::X86::Encoding shrEncoding = shrOpcode.getSIMDEncoding(&cg->comp()->target().cpu, vl);
    OMR::X86::Encoding andEncoding = andOpcode.getSIMDEncoding(&cg->comp()->target().cpu, vl);
+   OMR::X86::Encoding cmpEncoding = cmpOpcode.getSIMDEncoding(&cg->comp()->target().cpu, vl);
 
    TR_ASSERT_FATAL(shrEncoding != OMR::X86::Bad, "vabs: No encoding method for shift opcode");
    TR_ASSERT_FATAL(andEncoding != OMR::X86::Bad, "vabs: No encoding method for and opcode");
+   TR_ASSERT_FATAL(cmpEncoding != OMR::X86::Bad, "vabs: No encoding method for cmp opcode");
 
    // Generate mask 7fffffff for floats or 7fffffffffffffff doubles, then 'and' with input vector
 
-   if (vl == TR::VectorLength512)
+   if (cmpEncoding >= EVEX_L128)
       {
       TR_ASSERT_FATAL(cg->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_AVX512F), "512-bit vabs requires AVX512");
       TR::InstOpCode ternOpcode = et == TR::Double ? TR::InstOpCode::VPTERNLOGQRegMaskRegRegImm1 : TR::InstOpCode::VPTERNLOGDRegMaskRegRegImm1;
@@ -68,9 +72,7 @@ TR::Register *OMR::X86::TreeEvaluator::floatingPointAbsHelper(TR::Node *node, TR
       }
    else
       {
-      TR::InstOpCode cmpOpcode = TR::InstOpCode::CMPPSRegRegImm1;
       TR::InstOpCode xorOpcode = TR::InstOpCode::PXORRegReg;
-      OMR::X86::Encoding cmpEncoding = cmpOpcode.getSIMDEncoding(&cg->comp()->target().cpu, vl);
       OMR::X86::Encoding xorEncoding = xorOpcode.getSIMDEncoding(&cg->comp()->target().cpu, vl);
       TR_ASSERT_FATAL(cmpEncoding != OMR::X86::Bad, "vabs: No encoding method for compare opcode");
       TR_ASSERT_FATAL(xorEncoding != OMR::X86::Bad, "vabs: No encoding method for xor opcode");
@@ -113,7 +115,9 @@ TR::Register *OMR::X86::TreeEvaluator::unaryVectorArithmeticEvaluator(TR::Node *
       }
 
    TR::Node *valueNode = node->getChild(0);
+   TR::Node *maskNode = opcode.isVectorMasked() ? node->getChild(1) : NULL;
    TR::Register *resultReg = cg->allocateRegister(TR_VRF);
+   TR::Register *maskReg = opcode.isVectorMasked() ? cg->evaluate(maskNode) : NULL;
 
    TR::InstOpCode regRegOpcode = TR::InstOpCode::bad;
    TR::InstOpCode regMemOpcode = TR::InstOpCode::bad;
@@ -123,7 +127,7 @@ TR::Register *OMR::X86::TreeEvaluator::unaryVectorArithmeticEvaluator(TR::Node *
    node->setRegister(resultReg);
    TR_ASSERT_FATAL_WITH_NODE(node, opcode.isVectorOpCode(), "unaryVectorArithmeticEvaluator expects a vector opcode");
 
-   if (valueNode->getRegister() == NULL && valueNode->getReferenceCount() == 1 && regMemOpcode.getMnemonic() != TR::InstOpCode::bad)
+   if (!opcode.isVectorMasked() && valueNode->getRegister() == NULL && valueNode->getReferenceCount() == 1 && regMemOpcode.getMnemonic() != TR::InstOpCode::bad)
       {
       simdEncoding = regMemOpcode.getSIMDEncoding(&cg->comp()->target().cpu, type.getVectorLength());
 
@@ -140,7 +144,17 @@ TR::Register *OMR::X86::TreeEvaluator::unaryVectorArithmeticEvaluator(TR::Node *
    TR_ASSERT_FATAL_WITH_NODE(node, regRegOpcode.getMnemonic() != TR::InstOpCode::bad, "Opcode not supported by unaryVectorArithmeticEvaluator");
    simdEncoding = regRegOpcode.getSIMDEncoding(&cg->comp()->target().cpu, type.getVectorLength());
    TR::Register *valueReg = cg->evaluate(valueNode);
-   generateRegRegInstruction(regRegOpcode.getMnemonic(), node, resultReg, valueReg, cg, simdEncoding);
+
+   if (maskReg)
+      {
+      TR::TreeEvaluator::unaryVectorMaskHelper(regRegOpcode, simdEncoding, node, resultReg, valueReg, maskReg, cg);
+      cg->decReferenceCount(maskNode);
+      }
+   else
+      {
+      generateRegRegInstruction(regRegOpcode.getMnemonic(), node, resultReg, valueReg, cg, simdEncoding);
+      }
+
    cg->decReferenceCount(valueNode);
 
    return resultReg;
@@ -245,7 +259,21 @@ OMR::X86::TreeEvaluator::vnegEvaluator(TR::Node *node, TR::CodeGenerator *cg)
       }
 
    OMR::X86::Encoding subEncoding = subOpcode.getSIMDEncoding(&cg->comp()->target().cpu, type.getVectorLength());
-   generateRegRegInstruction(subOpcode.getMnemonic(), node, resultReg, valueReg, cg, subEncoding);
+
+   if (node->getOpCode().isVectorMasked())
+      {
+      TR::Node *maskNode = node->getChild(1);
+      TR::Register *maskReg = cg->evaluate(maskNode);
+      TR::Register *tmpReg = cg->allocateRegister(TR_VRF);
+      generateRegRegInstruction(subOpcode.getMnemonic(), node, tmpReg, valueReg, cg, subEncoding);
+      TR::TreeEvaluator::vectorMergeMaskHelper(node, resultReg, tmpReg, maskReg, cg);
+      cg->stopUsingRegister(tmpReg);
+      cg->decReferenceCount(maskNode);
+      }
+   else
+      {
+      generateRegRegInstruction(subOpcode.getMnemonic(), node, resultReg, valueReg, cg, subEncoding);
+      }
 
    node->setRegister(resultReg);
    cg->decReferenceCount(valueNode);

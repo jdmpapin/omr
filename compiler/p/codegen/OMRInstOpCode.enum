@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2019
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -755,16 +755,16 @@
 // vcmpeqfp_r,       // Vector Compare Equal To Floating-Point Rc=1
    vcmpequb,         // vector compare equal unsigned byte
    vcmpequb_r,       // vector compare equal unsigned byte with record
-// vcmpequd,         // Vector Compare Equal Unsigned Dword
-// vcmpequd_r,       // Vector Compare Equal Unsigned Dword Rc=1
+   vcmpequd,         // Vector Compare Equal Unsigned Dword
+   vcmpequd_r,       // Vector Compare Equal Unsigned Dword Rc=1
    vcmpequh,         // vector compare equal unsigned halfword
    vcmpequh_r,       // vector compare equal unsigned halfword with record
    vcmpequw,         // vector compare equal unsigned word
    vcmpequw_r,       // vector compare equal unsigned word with record
    vcmpgtsb,         // vector compare greater than signed byte
    vcmpgtsb_r,       // vector compare greater than signed byte with record
-// vcmpgtsd,         // Vector Compare Greater Than Signed Dword
-// vcmpgtsd_r,       // Vector Compare Greater Than Signed Dword Rc=1
+   vcmpgtsd,         // Vector Compare Greater Than Signed Dword
+   vcmpgtsd_r,       // Vector Compare Greater Than Signed Dword Rc=1
    vcmpgtsh,         // vector compare greater than signed halfword
    vcmpgtsh_r,       // vector compare greater than signed halfword with record
    vcmpgtsw,         // vector compare greater than signed word
@@ -777,10 +777,10 @@
    vcmpgtuw_r,       // vector compare greater than unsigned word with record
    vcmpneb,          // vector compare not equal Byte
    vcmpneb_r,        // vector compare not equal Byte Rc=1
-// vcmpneh,          // vector compare not equal Hword
-// vcmpneh_r,        // vector compare not equal Hword Rc=1
-// vcmpnew,          // vector compare not equal Word
-// vcmpnew_r,        // vector compare not equal Word Rc=1
+   vcmpneh,          // vector compare not equal Hword
+   vcmpneh_r,        // vector compare not equal Hword Rc=1
+   vcmpnew,          // vector compare not equal Word
+   vcmpnew_r,        // vector compare not equal Word Rc=1
 // vcmpnezb,         // vector compare not equal or zero Byte
 // vcmpnezb_r,       // vector compare not equal or zero Byte Rc=1
 // vcmpnezh,         // vector compare not equal or zero Hword

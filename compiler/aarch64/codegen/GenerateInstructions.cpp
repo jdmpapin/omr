@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2018
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -340,6 +340,14 @@ TR::Instruction *generateTrg1MemInstruction(TR::CodeGenerator *cg, TR::InstOpCod
    return new (cg->trHeapMemory()) TR::ARM64Trg1MemInstruction(op, node, treg, mr, cg);
    }
 
+TR::Instruction *generateTrg2MemInstruction(TR::CodeGenerator *cg, TR::InstOpCode::Mnemonic op, TR::Node *node,
+   TR::Register *treg1, TR::Register *treg2, TR::MemoryReference *mr, TR::Instruction *preced)
+   {
+   if (preced)
+      return new (cg->trHeapMemory()) TR::ARM64Trg2MemInstruction(op, node, treg1, treg2, mr, preced, cg);
+   return new (cg->trHeapMemory()) TR::ARM64Trg2MemInstruction(op, node, treg1, treg2, mr, cg);
+   }
+
 TR::Instruction *generateMemImmInstruction(TR::CodeGenerator *cg, TR::InstOpCode::Mnemonic op, TR::Node *node,
    TR::MemoryReference *mr, uint32_t imm, TR::Instruction *preced)
    {
@@ -487,15 +495,15 @@ TR::Instruction *generateCompareImmInstruction(TR::CodeGenerator *cg, TR::Node *
    }
 
 TR::Instruction *generateTestImmInstruction(TR::CodeGenerator *cg, TR::Node *node,
-   TR::Register *sreg, int32_t imm, bool is64bit, TR::Instruction *preced)
+   TR::Register *sreg, int32_t imm, bool N, bool is64bit, TR::Instruction *preced)
    {
    /* Alias of ANDS instruction */
 
    TR::InstOpCode::Mnemonic op = is64bit ? TR::InstOpCode::andsimmx : TR::InstOpCode::andsimmw;
 
    if (preced)
-      return new (cg->trHeapMemory()) TR::ARM64ZeroSrc1ImmInstruction(op, node, sreg, imm, preced, cg);
-   return new (cg->trHeapMemory()) TR::ARM64ZeroSrc1ImmInstruction(op, node, sreg, imm, cg);
+      return new (cg->trHeapMemory()) TR::ARM64ZeroSrc1ImmInstruction(op, node, sreg, N, imm, preced, cg);
+   return new (cg->trHeapMemory()) TR::ARM64ZeroSrc1ImmInstruction(op, node, sreg, N, imm, cg);
    }
 
 TR::Instruction *generateCompareInstruction(TR::CodeGenerator *cg, TR::Node *node,
@@ -520,6 +528,32 @@ TR::Instruction *generateTestInstruction(TR::CodeGenerator *cg, TR::Node *node,
    if (preced)
       return new (cg->trHeapMemory()) TR::ARM64ZeroSrc2Instruction(op, node, s1reg, s2reg, preced, cg);
    return new (cg->trHeapMemory()) TR::ARM64ZeroSrc2Instruction(op, node, s1reg, s2reg, cg);
+   }
+
+TR::Instruction *generateConditionalCompareImmInstruction(TR::CodeGenerator *cg, TR::Node *node,
+   TR::Register *sreg, uint32_t imm, uint32_t conditionFlags, TR::ARM64ConditionCode cc,
+   bool is64bit, bool isNegative, TR::Instruction *preced)
+   {
+   TR::InstOpCode::Mnemonic op = is64bit ? (isNegative ? TR::InstOpCode::ccmnimmx : TR::InstOpCode::ccmpimmx) :
+                                           (isNegative ? TR::InstOpCode::ccmnimmw : TR::InstOpCode::ccmpimmw);
+
+   TR_ASSERT_FATAL(constantIsUnsignedImm5(imm), "Immediate value is out of range for ccmp/ccmn");
+
+   if (preced)
+      return new (cg->trHeapMemory()) TR::ARM64Src1ImmCondInstruction(op, node, sreg, imm, cc, conditionFlags, preced, cg);
+   return new (cg->trHeapMemory()) TR::ARM64Src1ImmCondInstruction(op, node, sreg, imm, cc, conditionFlags, cg);
+   }
+
+TR::Instruction *generateConditionalCompareInstruction(TR::CodeGenerator *cg, TR::Node *node,
+   TR::Register *sreg1, TR::Register *sreg2, uint32_t conditionFlags, TR::ARM64ConditionCode cc,
+   bool is64bit, bool isNegative, TR::Instruction *preced)
+   {
+   TR::InstOpCode::Mnemonic op = is64bit ? (isNegative ? TR::InstOpCode::ccmnx : TR::InstOpCode::ccmpx) :
+                                           (isNegative ? TR::InstOpCode::ccmnw : TR::InstOpCode::ccmpw);
+
+   if (preced)
+      return new (cg->trHeapMemory()) TR::ARM64Src2CondInstruction(op, node, sreg1, sreg2, cc, conditionFlags, preced, cg);
+   return new (cg->trHeapMemory()) TR::ARM64Src2CondInstruction(op, node, sreg1, sreg2, cc, conditionFlags, cg);
    }
 
 TR::Instruction *generateMovInstruction(TR::CodeGenerator *cg, TR::Node *node,
@@ -596,6 +630,14 @@ TR::Instruction *generateCSetInstruction(TR::CodeGenerator *cg, TR::Node *node,
    if (preced)
       return new (cg->trHeapMemory()) TR::ARM64Trg1CondInstruction(op, node, treg, cc_invert(cc), preced, cg);
    return new (cg->trHeapMemory()) TR::ARM64Trg1CondInstruction(op, node, treg, cc_invert(cc), cg);
+   }
+
+TR::Instruction *generateCIncInstruction(TR::CodeGenerator *cg, TR::Node *node,
+   TR::Register *treg, TR::Register *sreg, TR::ARM64ConditionCode cc, bool is64bit, TR::Instruction *preced)
+   {
+   /* Alias of CSINC instruction with inverted condition code */
+   TR::InstOpCode::Mnemonic op = is64bit ? TR::InstOpCode::csincx : TR::InstOpCode::csincw;
+   return generateCondTrg1Src2Instruction(cg, op, node, treg, sreg, sreg, cc_invert(cc), preced);
    }
 
 TR::ARM64SynchronizationInstruction *generateSynchronizationInstruction(TR::CodeGenerator *cg, TR::InstOpCode::Mnemonic op,

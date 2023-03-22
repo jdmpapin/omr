@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -88,7 +88,7 @@ enum TR_CompilationOptions
    TR_ReportMethodEnter          = 0x00000080,
    TR_ReportMethodExit           = 0x00000100,
    TR_EntryBreakPoints           = 0x00000200,
-   // Available                  = 0x00000400,
+   TR_EnableOldEDO               = 0x00000400,
    // Available                  = 0x00000800,
    TR_RegisterMaps               = 0x00001000,
    TR_CreatePCMaps               = 0x00002000,
@@ -229,7 +229,7 @@ enum TR_CompilationOptions
    TR_EnableYieldVMAccess                 = 0x02000000 + 4,
    TR_DisableNoVMAccess                   = 0x04000000 + 4,
    TR_DisableStoreSinking                 = 0x08000000 + 4,
-   // Available                           = 0x10000000 + 4,
+   TR_DisableIlgenOpts                    = 0x10000000 + 4,
    TR_HWProfileDeleteEmptyBlocks          = 0x20000000 + 4,
    TR_DisableLiveMonitorMetadata          = 0x40000000 + 4,
    TR_DisableMonitorOpts                  = 0x80000000 + 4,
@@ -701,7 +701,7 @@ enum TR_CompilationOptions
    // Option word 21
    // Available                                       = 0x00000020 + 21,
    // Available                                       = 0x00000040 + 21,
-   TR_DisableWrtBarSrcObjCheck                        = 0x00000080 + 21, // enable srcobj range check for wrtBar
+   // Available                                       = 0x00000080 + 21,
    TR_DisableCodeCacheReclamation                     = 0x00000100 + 21, // Disable the freeing of compiled methods
    TR_DisableClearCodeCacheFullFlag                   = 0x00000200 + 21, // Disable the re-enabling of the code cache when a method body is freed after the cache has become full
    // Available                                       = 0x00000400 + 21,
@@ -922,7 +922,7 @@ enum TR_CompilationOptions
 
    // Option word 29
    TR_InlineVeryLargeCompiledMethods                  = 0x00000040 + 29,
-   TR_HCRPatchClassPointers                           = 0x00000080 + 29,
+   // Available                                       = 0x00000080 + 29,
    TR_UseOldHCRGuardAOTRelocations                    = 0x00000100 + 29,
    // Available                                       = 0x00000200 + 29,
    TR_DisableSupportForCpuSpentInCompilation          = 0x00000400 + 29,
@@ -1345,7 +1345,8 @@ public:
 
    void init()
    {
-      _optionSets = 0;
+      _optionSets = NULL;
+      _postRestoreOptionSets = NULL;
       _startOptions = NULL;
       _envOptions = NULL;
       _logFileName = NULL;
@@ -1401,6 +1402,7 @@ public:
       _memUsage = NULL;
       _classesWithFolableFinalFields = NULL;
       _disabledIdiomPatterns = NULL;
+      _suppressEA = NULL;
       _gcCardSize = 0;
       _heapBase = 0;
       _heapTop = 0;
@@ -1487,6 +1489,9 @@ public:
       _maxSzForVPInliningWarm = 0;
       _loopyAsyncCheckInsertionMaxEntryFreq = 0;
       _objectFileName = 0;
+      _edoRecompSizeThreshold = 0;
+      _edoRecompSizeThresholdInStartupMode = 0;
+      _catchBlockCounterThreshold = 0;
 
       memset(_options, 0, sizeof(_options));
       memset(_disabledOptimizations, false, sizeof(_disabledOptimizations));
@@ -1530,7 +1535,8 @@ public:
    static TR::Options *getAOTCmdLineOptions();
    static void        setAOTCmdLineOptions(TR::Options *options);
    static TR::Options *getJITCmdLineOptions();
-          void        addOptionSet(TR::OptionSet *o) {o->setNext(_optionSets);_optionSets = o;}
+          void        saveOptionSet(TR::OptionSet *o);
+          void        mergePostRestoreOptionSets();
           bool        hasOptionSets() {return _optionSets != NULL;}
    char*              setCounts();
 
@@ -1716,6 +1722,7 @@ public:
    TR::SimpleRegex * getPackedTestRegex()              {return _packedTest;}
    TR::SimpleRegex * getClassesWithFoldableFinalFields(){return _classesWithFolableFinalFields;}
    TR::SimpleRegex * getDisabledIdiomPatterns()        {return _disabledIdiomPatterns;}
+   TR::SimpleRegex * getSuppressEARegex()              {return _suppressEA;}
 
    char* getInduceOSR()                               {return _induceOSR;}
    int32_t getBigCalleeThreshold() const              {return _bigCalleeThreshold;}
@@ -1824,11 +1831,17 @@ public:
       return _loopyAsyncCheckInsertionMaxEntryFreq;
       }
 
+   int32_t getEdoRecompSizeThreshold() { return _edoRecompSizeThreshold; }
+   int32_t getEdoRecompSizeThresholdInStartupMode() { return _edoRecompSizeThresholdInStartupMode; }
+   int32_t getCatchBlockCounterThreshold() { return _catchBlockCounterThreshold; }
+
+
 public:
 
    static void shutdown(TR_FrontEnd * fe);
 
    static int32_t getNumUsableCompilationThreads() { return _numUsableCompilationThreads; }
+   static int32_t getNumAllocatedCompilationThreads() { return _numAllocatedCompilationThreads; }
 
    static int32_t getTrampolineSpacePercentage() { return _trampolineSpacePercentage; }
    static size_t getScratchSpaceLimit() { return _scratchSpaceLimit; }
@@ -1842,6 +1855,8 @@ public:
 
    static bool    _fullyInitialized;
    static bool    _canJITCompile;
+
+   static bool    _postRestoreProcessing;
 
    static int32_t _samplingFrequency;
 
@@ -1894,6 +1909,7 @@ public:
    static int32_t _inlinerVeryLargeCompiledMethodAdjustFactor;
 
    static int32_t _numUsableCompilationThreads;
+   static int32_t _numAllocatedCompilationThreads;
 
    static int32_t _trampolineSpacePercentage;
 
@@ -2003,6 +2019,18 @@ public:
 
    const char *getObjectFileName() { return _objectFileName; }
 
+   /**
+    * \brief API to process options post restore (from a checkpoint).
+    *
+    * \param jitConfig Pointer to a JitConfig instance.
+    * \param options Pointer to the options string to be parsed and processed.
+    * \param optBase Pointer to the TR::Options object that will represent the parsed options.
+    * \param isAOT bool to represent whether optBase represents relocatable compilation options.
+    *
+    * \return pointer to the end of the options string if success, or to the invalid option
+    */
+   static char *processOptionSetPostRestore(void *jitConfig, char *options, TR::Options *optBase, bool isAOT);
+
 protected:
    void  jitPreProcess();
    bool  fePreProcess(void *base);
@@ -2011,6 +2039,9 @@ protected:
    bool  fePostProcessJIT(void *base);
    bool  jitLatePostProcess(TR::OptionSet *optionSet, void *jitConfig);
    bool  feLatePostProcess(void *base, TR::OptionSet *optionSet);
+   void  addOptionSet(TR::OptionSet *o) {o->setNext(_optionSets);_optionSets = o;}
+   void  addPostRestoreOptionSet(TR::OptionSet *o) {o->setNext(_postRestoreOptionSets);_postRestoreOptionSets = o;}
+   void  setAggressivenessLevelOpts();
 
 private:
    friend class OMR::Compilation;
@@ -2275,6 +2306,7 @@ protected:
    static TR::Options    *_jitCmdLineOptions;
    static TR::Options    *_aotCmdLineOptions;
           TR::OptionSet  *_optionSets;
+          TR::OptionSet  *_postRestoreOptionSets;
    static void          *_feBase;
    static TR_FrontEnd   *_fe;
    static bool           _hasLogFile;
@@ -2355,6 +2387,7 @@ protected:
    TR::SimpleRegex *            _memUsage;
    TR::SimpleRegex *            _classesWithFolableFinalFields;
    TR::SimpleRegex *            _disabledIdiomPatterns;
+   TR::SimpleRegex *            _suppressEA;
    uintptr_t                   _gcCardSize;
    uintptr_t                   _heapBase;
    uintptr_t                   _heapTop;
@@ -2478,7 +2511,9 @@ protected:
    int32_t                     _loopyAsyncCheckInsertionMaxEntryFreq;
 
    char *                      _objectFileName; //Name of the relocatable ELF file *.o if one is to be generated
-
+   int32_t                     _edoRecompSizeThreshold; // Size threshold (in nodes) for candidates to recompilation through EDO
+   int32_t                     _edoRecompSizeThresholdInStartupMode; // Size threshold (in nodes) for candidates to recompilation through EDO during startup
+   int32_t                     _catchBlockCounterThreshold; // Counter threshold for catch blocks to trigger more aggresive inlining on the throw path
    }; // TR::Options
 
 }

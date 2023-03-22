@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2016 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -95,10 +95,15 @@ MM_VerboseWriterFileLogging::tearDown(MM_EnvironmentBase *env)
 	OMRPORT_ACCESS_FROM_OMRPORT(env->getPortLibrary());
 	MM_GCExtensionsBase *extensions = MM_GCExtensionsBase::getExtensions(env->getOmrVM());
 
-	omrstr_free_tokens(_tokens);
-	_tokens = NULL;
-	extensions->getForge()->free(_filename);
-	_filename = NULL;
+	if (NULL != _tokens) {
+		omrstr_free_tokens(_tokens);
+		_tokens = NULL;
+	}
+
+	if (NULL != _filename) {
+		extensions->getForge()->free(_filename);
+		_filename = NULL;
+	}
 
 	MM_VerboseWriter::tearDown(env);
 }
@@ -294,6 +299,13 @@ MM_VerboseWriterFileLogging::closeStream(MM_EnvironmentBase *env)
 	closeFile(env);
 }
 
+bool
+MM_VerboseWriterFileLogging::openStream(MM_EnvironmentBase *env)
+{
+	/* Pass in true to print the verbose initialize header in the file being opened. */
+	return openFile(env, true);
+}
+
 /**
  * Flushes the verbose buffer to the output stream.
  * Also cycles the output files if necessary.
@@ -322,6 +334,7 @@ bool
 MM_VerboseWriterFileLogging::reconfigure(MM_EnvironmentBase *env, const char *filename, uintptr_t numFiles, uintptr_t numCycles)
 {
 	closeFile(env);
+	tearDown(env);
 	return initialize(env, filename, numFiles, numCycles);
 }
 

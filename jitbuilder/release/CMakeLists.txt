@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2017, 2021 IBM Corp. and others
+# Copyright IBM Corp. and others 2017
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ###############################################################################
@@ -43,6 +43,7 @@ create_jitbuilder_test(nestedloop      cpp/samples/NestedLoop.cpp)
 create_jitbuilder_test(pow2            cpp/samples/Pow2.cpp)
 create_jitbuilder_test(simple          cpp/samples/Simple.cpp)
 create_jitbuilder_test(worklist        cpp/samples/Worklist.cpp)
+create_jitbuilder_test(power           cpp/samples/Power.cpp)
 
 # Extended JitBuilder Tests: These may not run properly on all platforms
 # Opt in by setting OMR_JITBUILDER_TEST_EXTENDED

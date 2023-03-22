@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -1079,6 +1079,14 @@ class X86RegImmInstruction : public TR::X86RegInstruction
                            TR::CodeGenerator *cg,
                            int32_t           reloKind=TR_NoRelocation);
 
+    X86RegImmInstruction(TR::InstOpCode::Mnemonic    op,
+                         TR::Node          *node,
+                         TR::Register      *treg,
+                         int32_t           imm,
+                         TR::CodeGenerator *cg,
+                         OMR::X86::Encoding encoding,
+                         int32_t           reloKind=TR_NoRelocation);
+
    X86RegImmInstruction(TR::Instruction   *precedingInstruction,
                            TR::InstOpCode::Mnemonic    op,
                            TR::Register      *treg,
@@ -1488,6 +1496,58 @@ class X86RegMaskRegRegInstruction : public TR::X86RegRegRegInstruction
 
 #ifdef DEBUG
         virtual uint32_t getNumOperandReferencedGPRegisters() { return 4; }
+#endif
+   };
+
+class X86RegMaskRegRegImmInstruction : public TR::X86RegMaskRegRegInstruction
+   {
+   int32_t _sourceImmediate;
+
+   public:
+
+   X86RegMaskRegRegImmInstruction(TR::Register *treg,
+                                  TR::Register *mreg,
+                                  TR::Register *slreg,
+                                  TR::Register *srreg,
+                                  int32_t imm,
+                                  TR::Node *node,
+                                  TR::InstOpCode::Mnemonic op,
+                                  TR::CodeGenerator *cg,
+                                  OMR::X86::Encoding encoding = OMR::X86::Default,
+                                  bool zeroMask = false)
+   : TR::X86RegMaskRegRegInstruction(treg, mreg, slreg, srreg, node, op, cg, encoding, zeroMask), _sourceImmediate(imm)
+      {
+      }
+
+   X86RegMaskRegRegImmInstruction(TR::Register *treg,
+                                  TR::Register *mreg,
+                                  TR::Register *slreg,
+                                  TR::Register *srreg,
+                                  int32_t imm,
+                                  TR::Node *node,
+                                  TR::InstOpCode::Mnemonic op,
+                                  TR::RegisterDependencyConditions *cond,
+                                  TR::CodeGenerator *cg,
+                                  OMR::X86::Encoding encoding = OMR::X86::Default,
+                                  bool zeroMask = false)
+   : TR::X86RegMaskRegRegInstruction(treg, mreg, slreg, srreg, node, op, cond, cg, encoding, zeroMask), _sourceImmediate(imm)
+      {
+      }
+
+   virtual char *description() { return "X86RegMaskRegRegImm"; }
+   virtual Kind getKind() { return IsRegMaskRegRegImm; }
+
+   int32_t getSourceImmediate()           {return _sourceImmediate;}
+   uint32_t getSourceImmediateAsAddress()  {return (uint32_t)_sourceImmediate;}
+   int32_t setSourceImmediate(int32_t si) {return (_sourceImmediate = si);}
+
+   virtual uint8_t* generateOperand(uint8_t* cursor);
+   virtual int32_t  estimateBinaryLength(int32_t currentEstimate);
+   virtual uint8_t  getBinaryLengthLowerBound();
+   virtual void addMetaDataForCodeAddress(uint8_t *cursor);
+
+#ifdef DEBUG
+   virtual uint32_t getNumOperandReferencedGPRegisters() { return 2; }
 #endif
    };
 
@@ -3293,6 +3353,7 @@ TR::X86VirtualGuardNOPInstruction  * generateVirtualGuardNOPInstruction(TR::Inst
 
 TR::X86RegImmInstruction  * generateRegImmInstruction(TR::InstOpCode::Mnemonic op, TR::Node *, TR::Register * reg1, int32_t imm, TR::RegisterDependencyConditions  * cond, TR::CodeGenerator *cg);
 TR::X86RegImmInstruction  * generateRegImmInstruction(TR::InstOpCode::Mnemonic op, TR::Node *, TR::Register * reg1, int32_t imm, TR::CodeGenerator *cg, int32_t reloKind=TR_NoRelocation);
+TR::X86RegImmInstruction  * generateRegImmInstruction(TR::InstOpCode::Mnemonic op, TR::Node *, TR::Register * reg1, int32_t imm, TR::CodeGenerator *cg, int32_t reloKind, OMR::X86::Encoding encoding);
 
 TR::X86RegImmSymInstruction  *generateRegImmSymInstruction(TR::InstOpCode::Mnemonic op, TR::Node *, TR::Register * reg1, int32_t imm, TR::SymbolReference *, TR::CodeGenerator *cg);
 
@@ -3318,6 +3379,9 @@ TR::X86RegRegMemInstruction  * generateRegRegMemInstruction(TR::InstOpCode::Mnem
 
 TR::X86RegMaskRegRegInstruction  * generateRegMaskRegRegInstruction(TR::InstOpCode::Mnemonic op, TR::Node *, TR::Register * reg1, TR::Register * mreg, TR::Register * reg2, TR::Register * reg3, TR::CodeGenerator *cg, OMR::X86::Encoding encoding = OMR::X86::Default, bool zeroMask = false);
 TR::X86RegMaskRegRegInstruction  * generateRegMaskRegRegInstruction(TR::InstOpCode::Mnemonic op, TR::Node *, TR::Register * reg1, TR::Register * mreg, TR::Register * reg2, TR::Register * reg3, TR::RegisterDependencyConditions *deps, TR::CodeGenerator *cg, OMR::X86::Encoding encoding = OMR::X86::Default, bool zeroMask = false);
+
+TR::X86RegMaskRegRegImmInstruction  * generateRegMaskRegRegImmInstruction(TR::InstOpCode::Mnemonic op, TR::Node *, TR::Register * reg1, TR::Register * mreg, TR::Register * reg2, TR::Register * reg3, int32_t imm, TR::CodeGenerator *cg, OMR::X86::Encoding encoding = OMR::X86::Default, bool zeroMask = false);
+TR::X86RegMaskRegRegImmInstruction  * generateRegMaskRegRegImmInstruction(TR::InstOpCode::Mnemonic op, TR::Node *, TR::Register * reg1, TR::Register * mreg, TR::Register * reg2, TR::Register * reg3, int32_t imm, TR::RegisterDependencyConditions *deps, TR::CodeGenerator *cg, OMR::X86::Encoding encoding = OMR::X86::Default, bool zeroMask = false);
 
 TR::X86RegMaskRegInstruction  * generateRegMaskRegInstruction(TR::InstOpCode::Mnemonic op, TR::Node *, TR::Register * reg1, TR::Register * mreg, TR::Register * reg2, TR::CodeGenerator *cg, OMR::X86::Encoding encoding = OMR::X86::Default, bool zeroMask = false);
 TR::X86RegMaskRegInstruction  * generateRegMaskRegInstruction(TR::InstOpCode::Mnemonic op, TR::Node *, TR::Register * reg1, TR::Register * mreg, TR::Register * reg2, TR::RegisterDependencyConditions *deps, TR::CodeGenerator *cg, OMR::X86::Encoding encoding = OMR::X86::Default, bool zeroMask = false);

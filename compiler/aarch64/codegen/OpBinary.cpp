@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2018
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -931,6 +931,8 @@ const OMR::ARM64::InstOpCode::OpCodeBinaryEntry OMR::ARM64::InstOpCode::binaryEn
 		0x4E212800,	/* XTN2    	vxtn2_16b */
 		0x4E612800,	/* XTN2    	vxtn2_8h  */
 		0x4EA12800,	/* XTN2    	vxtn2_4s  */
+		0x0E205800,	/* CNT  	vcnt8b */
+		0x4E205800,	/* CNT  	vcnt16b */
 	/* Vector Copy */
 		/* DUP (general) */
 		0x4E010C00,	/* DUP   	vdup16b */
@@ -988,6 +990,7 @@ const OMR::ARM64::InstOpCode::OpCodeBinaryEntry OMR::ARM64::InstOpCode::binaryEn
 		0x6E60C000,	/* UMULL2  	vumull2_4s */
 		0x6EA0C000,	/* UMULL2  	vumull2_2d */
 	/* Vector reduce instructions */
+		0x0E31B800,	/* ADDV   	vaddv8b */
 		0x4E31B800,	/* ADDV   	vaddv16b */
 		0x4E71B800,	/* ADDV   	vaddv8h */
 		0x4Eb1B800,	/* ADDV   	vaddv4s */
@@ -1039,6 +1042,18 @@ const OMR::ARM64::InstOpCode::OpCodeBinaryEntry OMR::ARM64::InstOpCode::binaryEn
 		0x6EE0F400,	/* FMINP 	vfminp2d */
 		0x7EB0F800,	/* FMINP(scalar) 	fminp2s */
 		0x7EF0F800,	/* FMINP(scalar) 	fminp2d */
+		0x4E20A400,	/* SMAXP 	vsmaxp16b */
+		0x4E60A400,	/* SMAXP 	vsmaxp8h */
+		0x4EA0A400,	/* SMAXP 	vsmaxp4s */
+		0x4E20AC00,	/* SMINP 	vsminp16b */
+		0x4E60AC00,	/* SMINP 	vsminp8h */
+		0x4EA0AC00,	/* SMINP 	vsminp4s */
+		0x6E20A400,	/* UMAXP 	vumaxp16b */
+		0x6E60A400,	/* UMAXP 	vumaxp8h */
+		0x6EA0A400,	/* UMAXP 	vumaxp4s */
+		0x6E20AC00,	/* UMINP 	vuminp16b */
+		0x6E60AC00,	/* UMINP 	vuminp8h */
+		0x6EA0AC00,	/* UMINP 	vuminp4s */
 	/* Hint instructions */
 		0xD503201F,	/* NOP          nop      */
 };

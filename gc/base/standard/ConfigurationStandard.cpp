@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -98,31 +98,11 @@ MM_ConfigurationStandard::initialize(MM_EnvironmentBase* env)
 	return result;
 }
 
-
-void
-MM_ConfigurationStandard::initializeGCThreadCount(MM_EnvironmentBase* env)
-{
-
-	MM_Configuration::initializeGCThreadCount(env);
-
-#if defined(OMR_GC_CONCURRENT_SCAVENGER)
-	MM_GCExtensionsBase* extensions = env->getExtensions();
-
-	/* If not explicitly set, concurrent phase of CS runs with approx 1/4 the thread count (relative to STW phases thread count */
-	if (!extensions->concurrentScavengerBackgroundThreadsForced) {
-		extensions->concurrentScavengerBackgroundThreads = OMR_MAX(1, (extensions->gcThreadCount + 1) / 4);
-	} else if (extensions->concurrentScavengerBackgroundThreads > extensions->gcThreadCount) {
-		extensions->concurrentScavengerBackgroundThreads = extensions->gcThreadCount;
-	}
-#endif
-}
-
-
 /**
  * Create the global collector for a Standard configuration
  */
 MM_GlobalCollector*
-MM_ConfigurationStandard::createGlobalCollector(MM_EnvironmentBase* env)
+MM_ConfigurationStandard::createCollectors(MM_EnvironmentBase* env)
 {
 #if defined(OMR_GC_MODRON_CONCURRENT_MARK) || defined(OMR_GC_MODRON_CONCCURENT_SWEEP)
 	MM_GCExtensionsBase *extensions = env->getExtensions();

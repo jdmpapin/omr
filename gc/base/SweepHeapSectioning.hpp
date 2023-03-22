@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -41,11 +41,10 @@ class MM_HeapRegionDescriptor;
 class MM_SweepHeapSectioning : public MM_BaseVirtual {
 private:
 protected:
-	MM_ParallelSweepChunkArray* _head; /**< head pointer to a list of Chunk arrays */
-	uintptr_t _totalUsed; /**< total elements used across all arrays */
 	uintptr_t _totalSize; /**< total elements available across all arrays */
 
-	MM_ParallelSweepChunkArray* _baseArray; /**< pointer to the base array allocated at initialization */
+	MM_ParallelSweepChunkArray* _head; /**< Head pointer to the list of chunk arrays (pointer to the base array). */
+	MM_ParallelSweepChunkArray* _tail; /**< Tail pointer to the list of chunk arrays. */
 	MM_GCExtensionsBase* _extensions;
 
 	virtual bool initialize(MM_EnvironmentBase* env);
@@ -56,6 +55,14 @@ protected:
 	virtual bool isReadyToSweep(MM_EnvironmentBase* env, MM_HeapRegionDescriptor* region) { return false; }
 
 	bool initArrays(uintptr_t);
+
+	/**
+	 * If the chunk size is not set, then set it heuristically
+	 * based on the max heap size and thread count.
+	 * @param[in] env the current environment.
+	 * @return void
+	 */
+	void initializeChunkSize(MM_EnvironmentBase* env);
 
 	friend class MM_SweepHeapSectioningIterator;
 
@@ -68,11 +75,22 @@ public:
 	void* getBackingStoreAddress();
 	uintptr_t getBackingStoreSize();
 
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+	/**
+	 * Update the sectioning data (sweep chuck size and pool)
+	 * to reflect the adjusted thread count at restore.
+	 * @param[in] env the current environment.
+	 * @return boolean indicating if the chunk size and pool were
+	 * successfully updated to accommodate the new thread count.
+	 */
+	bool reinitializeForRestore(MM_EnvironmentBase *env);
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+
 	MM_SweepHeapSectioning(MM_EnvironmentBase* env)
-		: _head(NULL)
-		, _totalUsed(0)
-		, _totalSize(0)
-		, _baseArray(NULL)
+		: _totalSize(0)
+		, _head(NULL)
+		, _tail(NULL)
 		, _extensions(env->getExtensions())
 	{
 		_typeId = __FUNCTION__;

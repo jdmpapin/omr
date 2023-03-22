@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -49,8 +49,8 @@ class TR_DataFlowAnalysis;
 class TR_LocalTransparency;
 class TR_PrimaryInductionVariable;
 class TR_RegionStructure;
-class TR_RegisterCandidate;
 class TR_StructureSubGraphNode;
+namespace TR { class RegisterCandidate; }
 namespace TR { class VPConstraint; }
 namespace TR { class RegisterMappedSymbol; }
 namespace TR { class SymbolReference; }
@@ -102,6 +102,7 @@ class TR_Structure
    bool  contains(TR_Structure *other, TR_Structure *commonParent = NULL);
 
    TR_RegionStructure *getContainingLoop();
+   TR_RegionStructure *getContainingCyclicRegion();
 
    // Finds the common parent of this and other
    // note that if A contains B, then the common parent is parent(A)
@@ -564,7 +565,7 @@ class TR_RegionStructure : public TR_Structure
 
    bool isSymbolRefInvariant(TR::SymbolReference *);
 
-   void addGlobalRegisterCandidateToExits(TR_RegisterCandidate *);
+   void addGlobalRegisterCandidateToExits(TR::RegisterCandidate *);
 
    void addSubNode(TR_StructureSubGraphNode *subNode);
    void removeSubNode(TR_StructureSubGraphNode *subNode);

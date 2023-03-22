@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -362,6 +362,34 @@ class OMR_EXTENSIBLE TreeEvaluator: public OMR::TreeEvaluator
    static TR::Register *vectorBinaryArithmeticEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *floatingPointBinaryArithmeticEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
+   static TR::Register *unaryVectorMaskHelper(TR::InstOpCode opcode,
+                                              OMR::X86::Encoding encoding,
+                                              TR::Node *node,
+                                              TR::Register *resultReg,
+                                              TR::Register *valueReg,
+                                              TR::Register *maskReg,
+                                              TR::CodeGenerator *cg);
+   static TR::Register *binaryVectorMaskHelper(TR::InstOpCode opcode,
+                                               OMR::X86::Encoding encoding,
+                                               TR::Node *node,
+                                               TR::Register *resultReg,
+                                               TR::Register *lhsReg,
+                                               TR::Register *rhsReg,
+                                               TR::Register *maskReg,
+                                               TR::CodeGenerator *cg);
+   static TR::Register *ternaryVectorMaskHelper(TR::InstOpCode opcode,
+                                                OMR::X86::Encoding encoding,
+                                                TR::Node *node,
+                                                TR::Register *resultReg,
+                                                TR::Register *lhsReg,
+                                                TR::Register *middleReg,
+                                                TR::Register *rhsReg,
+                                                TR::Register *maskReg,
+                                                TR::CodeGenerator *cg);
+   static TR::Register *vectorMergeMaskHelper(TR::Node *node, TR::VectorLength vl, TR::DataType dt, TR::Register *resultReg, TR::Register *srcReg, TR::Register *maskReg, TR::CodeGenerator *cg, bool zeroMask = false);
+   static TR::Register *vectorMergeMaskHelper(TR::Node *node, TR::Register *resultReg, TR::Register *srcReg, TR::Register *maskReg, TR::CodeGenerator *cg, bool zeroMask = false);
+   static TR::Register *arrayToVectorMaskHelper(TR::Node *node, TR::CodeGenerator *cg);
+
    // For unary ILOpcodes that can be translated to a single SSE/AVX instruction
    static TR::Register *unaryVectorArithmeticEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *floatingPointAbsHelper(TR::Node *node, TR::CodeGenerator *cg);
@@ -369,8 +397,11 @@ class OMR_EXTENSIBLE TreeEvaluator: public OMR::TreeEvaluator
    // SIMD evaluators
    static TR::Register *SIMDRegLoadEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *SIMDRegStoreEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *maskReductionIdentity(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *SIMDreductionEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *SIMDloadEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *maskLoadEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *maskStoreEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *SIMDstoreEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *SIMDsplatsEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *SIMDvgetelemEvaluator(TR::Node *node, TR::CodeGenerator *cg);

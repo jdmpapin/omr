@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2018
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -109,6 +109,16 @@ inline bool constantIsImm9(int64_t intValue)
 inline bool constantIsUnsignedImm4(uint64_t intValue)
    {
    return (intValue < (1<<4));  // 16
+   }
+
+/*
+ * @brief Answers if the unsigned integer value can be encoded in a 5-bit field
+ * @param[in] intValue : unsigned integer value
+ * @return true if the value can be encoded in a 5-bit field, false otherwise
+ */
+inline bool constantIsUnsignedImm5(uint64_t intValue)
+   {
+   return (intValue < (1<<5));  // 32
    }
 
 /*
@@ -3392,6 +3402,119 @@ class ARM64Trg1MemInstruction : public ARM64Trg1Instruction
    virtual int32_t estimateBinaryLength(int32_t currentEstimate);
    };
 
+class ARM64Trg2MemInstruction : public ARM64Trg1MemInstruction
+   {
+   TR::Register *_target2Register;
+
+   public:
+
+   /*
+    * @brief Constructor
+    * @param[in] op : instruction opcode
+    * @param[in] node : node
+    * @param[in] treg1 : target register 1
+    * @param[in] treg2 : target register 2
+    * @param[in] mr : memory reference
+    * @param[in] cg : CodeGenerator
+    */
+   ARM64Trg2MemInstruction(TR::InstOpCode::Mnemonic op,
+                            TR::Node *node,
+                            TR::Register *treg1,
+                            TR::Register *treg2,
+                            TR::MemoryReference *mr, TR::CodeGenerator *cg)
+      : ARM64Trg1MemInstruction(op, node, treg1, mr, cg), _target2Register(treg2)
+      {
+      useRegister(treg2);
+      }
+   /*
+    * @brief Constructor
+    * @param[in] op : instruction opcode
+    * @param[in] node : node
+    * @param[in] treg : target register 1
+    * @param[in] treg2 : target register 2
+    * @param[in] mr : memory reference
+    * @param[in] precedingInstruction : preceding instruction
+    * @param[in] cg : CodeGenerator
+    */
+   ARM64Trg2MemInstruction(TR::InstOpCode::Mnemonic op,
+                            TR::Node *node,
+                            TR::Register *treg1,
+                            TR::Register *treg2,
+                            TR::MemoryReference *mr,
+                            TR::Instruction *precedingInstruction, TR::CodeGenerator *cg)
+      : ARM64Trg1MemInstruction(op, node, treg1, mr, precedingInstruction, cg), _target2Register(treg2)
+      {
+      useRegister(treg2);
+      }
+   /**
+    * @brief Gets instruction kind
+    * @return instruction kind
+    */
+   virtual Kind getKind() { return IsTrg2Mem; }
+   /**
+    * @brief Gets target register 2
+    * @return target register 2
+    */
+   TR::Register *getTarget2Register() {return _target2Register;}
+   /**
+    * @brief Sets target register 2
+    * @param[in] tr : target register 2
+    * @return target register 2
+    */
+   TR::Register *setTarget2Register(TR::Register *tr) {return (_target2Register = tr);}
+   /**
+    * @brief Sets target 2 register in binary encoding
+    * @param[in] instruction : instruction cursor
+    */
+   void insertTarget2Register(uint32_t *instruction)
+      {
+      TR::RealRegister *target2 = toRealRegister(_target2Register);
+      target2->setRegisterFieldRT2(instruction);
+      }
+   /**
+    * @brief Answers whether this instruction references the given virtual register
+    * @param[in] reg : virtual register
+    * @return true when the instruction references the virtual register
+    */
+   virtual bool refsRegister(TR::Register *reg);
+   /**
+    * @brief Answers whether this instruction uses the given virtual register
+    * @param[in] reg : virtual register
+    * @return true when the instruction uses the virtual register
+    */
+   virtual bool usesRegister(TR::Register *reg);
+   /**
+    * @brief Answers whether this instruction defines the given virtual register
+    * @param[in] reg : virtual register
+    * @return true when the instruction defines the virtual register
+    */
+   virtual bool defsRegister(TR::Register *reg);
+   /**
+    * @brief Answers whether this instruction defines the given real register
+    * @param[in] reg : real register
+    * @return true when the instruction defines the real register
+    */
+   virtual bool defsRealRegister(TR::Register *reg);
+   /**
+    * @brief Assigns registers
+    * @param[in] kindToBeAssigned : register kind
+    */
+   virtual void assignRegisters(TR_RegisterKinds kindToBeAssigned);
+
+   /**
+    * @brief Generates binary encoding of the instruction
+    * @return instruction cursor
+    */
+   virtual uint8_t *generateBinaryEncoding();
+
+   /**
+    * @brief Estimates binary length
+    * @param[in] currentEstimate : current estimated length
+    * @return estimated binary length
+    */
+   virtual int32_t estimateBinaryLength(int32_t currentEstimate);
+   };
+
 class ARM64MemInstruction : public TR::Instruction
    {
    TR::MemoryReference *_memoryReference;
@@ -4371,6 +4494,187 @@ class ARM64ZeroSrc2Instruction : public ARM64Src2Instruction
       TR::RealRegister *zeroReg = cg()->machine()->getRealRegister(TR::RealRegister::xzr);
       zeroReg->setRegisterFieldRD(instruction);
       }
+
+   /**
+    * @brief Generates binary encoding of the instruction
+    * @return instruction cursor
+    */
+   virtual uint8_t *generateBinaryEncoding();
+   };
+
+
+class ARM64ConditionalCompareOp
+   {
+   TR::ARM64ConditionCode _cc;
+   uint32_t _conditionFlags;
+
+   public:
+
+   ARM64ConditionalCompareOp(TR::ARM64ConditionCode cc, uint32_t conditionFlags)
+      : _cc(cc), _conditionFlags(conditionFlags)
+      {
+      }
+
+   /**
+    * @brief Gets condition code
+    * @return condition code
+    */
+   TR::ARM64ConditionCode getConditionCode() {return _cc;}
+   /**
+    * @brief Sets condition code
+    * @param[in] cc : condition code
+    * @return condition code
+    */
+   TR::ARM64ConditionCode setConditionCode(TR::ARM64ConditionCode cc) {return (_cc = cc);}
+
+   /**
+    * @brief Get the value of the condition flags
+    * @return the value of the condition flags
+    */
+   uint32_t getConditionFlags() { return _conditionFlags;}
+
+   /**
+    * @brief Sets the condition flags
+    * @param[in] conditionFlags : condition flags
+    * @return the value of the condition flags
+    */
+   uint32_t setConditionFlags(uint32_t conditionFlags) { return (_conditionFlags = conditionFlags);}
+
+   /**
+    * @brief Sets condition code field in binary encoding
+    * @param[in] instruction : instruction cursor
+    */
+   void insertConditionCodeField(uint32_t *instruction)
+      {
+      *instruction |= ((_cc & 0xf) << 12);
+      }
+
+   /**
+    * @brief Sets condition flags in binary encoding
+    * @param[in] instruction : instruction cursor
+    */
+   void insertConditionFlags(uint32_t *instruction)
+      {
+      TR_ASSERT_FATAL(constantIsUnsignedImm4(getConditionFlags()), "Condition flags exceeds 4 bits.");
+      *instruction |= (_conditionFlags & 0xf);
+      }
+   };
+
+class ARM64Src1ImmCondInstruction : public ARM64Src1Instruction, public ARM64ConditionalCompareOp
+   {
+   uint32_t _sourceImmediate;
+
+   public:
+
+   /*
+    * @brief Constructor
+    * @param[in] op : instruction opcode
+    * @param[in] node : node
+    * @param[in] s1reg : source register 1
+    * @param[in] imm : immediate value
+    * @param[in] cc : branch condition code
+    * @param[in] conditionFlags : 4-bit NZCV condition flags
+    * @param[in] cg : CodeGenerator
+    */
+   ARM64Src1ImmCondInstruction(TR::InstOpCode::Mnemonic op, TR::Node *node, TR::Register *s1reg,
+                            uint32_t imm, TR::ARM64ConditionCode cc, uint32_t conditionFlags, TR::CodeGenerator *cg)
+      : ARM64Src1Instruction(op, node, s1reg, cg), ARM64ConditionalCompareOp(cc, conditionFlags), _sourceImmediate(imm)
+      {
+      }
+
+   /*
+    * @brief Constructor
+    * @param[in] op : instruction opcode
+    * @param[in] node : node
+    * @param[in] s1reg : source register 1
+    * @param[in] imm : immediate value
+    * @param[in] cc : branch condition code
+    * @param[in] conditionFlags : 4-bit NZCV condition flags
+    * @param[in] precedingInstruction : preceding instruction
+    * @param[in] cg : CodeGenerator
+    */
+   ARM64Src1ImmCondInstruction(TR::InstOpCode::Mnemonic op, TR::Node *node, TR::Register *s1reg,
+                            uint32_t imm, TR::ARM64ConditionCode cc, uint32_t conditionFlags,
+                            TR::Instruction *precedingInstruction, TR::CodeGenerator *cg)
+      : ARM64Src1Instruction(op, node, s1reg, precedingInstruction, cg), ARM64ConditionalCompareOp(cc, conditionFlags), _sourceImmediate(imm)
+      {
+      }
+   /**
+    * @brief Gets instruction kind
+    * @return instruction kind
+    */
+   virtual Kind getKind() { return IsSrc1ImmCond; }
+   /**
+    * @brief Gets source immediate
+    * @return source immediate
+    */
+   uint32_t getSourceImmediate() {return _sourceImmediate;}
+   /**
+    * @brief Sets source immediate
+    * @param[in] si : immediate value
+    * @return source immediate
+    */
+   uint32_t setSourceImmediate(uint32_t si) {return (_sourceImmediate = si);}
+
+   /**
+    * @brief Sets immediate field in binary encoding
+    * @param[in] instruction : instruction cursor
+    */
+   void insertImmediateField(uint32_t *instruction)
+      {
+      TR_ASSERT_FATAL(constantIsUnsignedImm5(getSourceImmediate()), "Immediate value exceeds 5 bits.");
+      *instruction |= ((getSourceImmediate() & 0x1f) << 16);
+      }
+   /**
+    * @brief Generates binary encoding of the instruction
+    * @return instruction cursor
+    */
+   virtual uint8_t *generateBinaryEncoding();
+   };
+
+class ARM64Src2CondInstruction : public ARM64Src2Instruction, public ARM64ConditionalCompareOp
+   {
+
+   public:
+
+   /*
+    * @brief Constructor
+    * @param[in] op : instruction opcode
+    * @param[in] node : node
+    * @param[in] s1reg : source register 1
+    * @param[in] s2reg : source register 2
+    * @param[in] cc : branch condition code
+    * @param[in] conditionFlags : 4-bit NZCV condition flags
+    * @param[in] cg : CodeGenerator
+    */
+   ARM64Src2CondInstruction(TR::InstOpCode::Mnemonic op, TR::Node *node, TR::Register *s1reg,
+                            TR::Register *s2reg, TR::ARM64ConditionCode cc, uint32_t conditionFlags, TR::CodeGenerator *cg)
+      : ARM64Src2Instruction(op, node, s1reg, s2reg, cg), ARM64ConditionalCompareOp(cc, conditionFlags)
+      {
+      }
+
+   /*
+    * @brief Constructor
+    * @param[in] op : instruction opcode
+    * @param[in] node : node
+    * @param[in] s1reg : source register 1
+    * @param[in] s2reg : source register 2
+    * @param[in] cc : branch condition code
+    * @param[in] conditionFlags : 4-bit NZCV condition flags
+    * @param[in] precedingInstruction : preceding instruction
+    * @param[in] cg : CodeGenerator
+    */
+   ARM64Src2CondInstruction(TR::InstOpCode::Mnemonic op, TR::Node *node, TR::Register *s1reg,
+                           TR::Register *s2reg, TR::ARM64ConditionCode cc, uint32_t conditionFlags,
+                            TR::Instruction *precedingInstruction, TR::CodeGenerator *cg)
+      : ARM64Src2Instruction(op, node, s1reg, s2reg, precedingInstruction, cg), ARM64ConditionalCompareOp(cc, conditionFlags)
+      {
+      }
+   /**
+    * @brief Gets instruction kind
+    * @return instruction kind
+    */
+   virtual Kind getKind() { return IsSrc2Cond; }
 
    /**
     * @brief Generates binary encoding of the instruction

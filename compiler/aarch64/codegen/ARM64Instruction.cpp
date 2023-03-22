@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2018
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -512,6 +512,60 @@ void TR::ARM64Trg1MemInstruction::assignRegisters(TR_RegisterKinds kindToBeAssig
    targetVirtual->block();
    mref->assignRegisters(this, cg());
    targetVirtual->unblock();
+
+   if (getDependencyConditions())
+      getDependencyConditions()->assignPreConditionRegisters(this->getPrev(), kindToBeAssigned, cg());
+   }
+
+// TR::ARM64Trg2MemInstruction:: member functions
+
+bool TR::ARM64Trg2MemInstruction::refsRegister(TR::Register *reg)
+   {
+   return (reg == getTargetRegister() || (reg == getTarget2Register()) || getMemoryReference()->refsRegister(reg));
+   }
+
+bool TR::ARM64Trg2MemInstruction::usesRegister(TR::Register *reg)
+   {
+   return getMemoryReference()->refsRegister(reg);
+   }
+
+bool TR::ARM64Trg2MemInstruction::defsRegister(TR::Register *reg)
+   {
+   return (reg == getTargetRegister() || reg == getTarget2Register());
+   }
+
+bool TR::ARM64Trg2MemInstruction::defsRealRegister(TR::Register *reg)
+   {
+   return (reg == getTargetRegister()->getAssignedRegister() || reg == getTarget2Register()->getAssignedRegister());
+   }
+
+void TR::ARM64Trg2MemInstruction::assignRegisters(TR_RegisterKinds kindToBeAssigned)
+   {
+   TR::Machine *machine = cg()->machine();
+   TR::MemoryReference *mref = getMemoryReference();
+   TR::Register *targetVirtual1 = getTargetRegister();
+   TR::Register *targetVirtual2 = getTarget2Register();
+
+   if (getDependencyConditions())
+      getDependencyConditions()->assignPostConditionRegisters(this, kindToBeAssigned, cg());
+
+   mref->blockRegisters();
+   targetVirtual2->block();
+   setTargetRegister(machine->assignOneRegister(this, targetVirtual1));
+   targetVirtual2->unblock();
+   mref->unblockRegisters();
+
+   mref->blockRegisters();
+   targetVirtual1->block();
+   setTarget2Register(machine->assignOneRegister(this, targetVirtual2));
+   targetVirtual1->unblock();
+   mref->unblockRegisters();
+
+   targetVirtual1->block();
+   targetVirtual2->block();
+   mref->assignRegisters(this, cg());
+   targetVirtual2->unblock();
+   targetVirtual1->unblock();
 
    if (getDependencyConditions())
       getDependencyConditions()->assignPreConditionRegisters(this->getPrev(), kindToBeAssigned, cg());

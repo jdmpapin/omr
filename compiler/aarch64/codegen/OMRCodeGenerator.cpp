@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2018
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -45,10 +45,6 @@
 #include "il/Node_inlines.hpp"
 #include "il/StaticSymbol.hpp"
 #include "ras/DebugCounter.hpp"
-
-#if defined(OSX)
-#include <pthread.h> // for pthread_jit_write_protect_np
-#endif
 
 OMR::ARM64::CodeGenerator::CodeGenerator(TR::Compilation *comp) :
       OMR::CodeGenerator(comp),
@@ -178,6 +174,14 @@ OMR::ARM64::CodeGenerator::initialize()
    // Enable compaction of local stack slots.  i.e. variables with non-overlapping live ranges
    // can share the same slot.
    cg->setSupportsCompactedLocals();
+   if (!TR::Compiler->om.canGenerateArraylets())
+      {
+      static const bool disableArrayCmp = feGetEnv("TR_aarch64DisableArrayCmp") != NULL;
+      if (!disableArrayCmp)
+         {
+         cg->setSupportsArrayCmp();
+         }
+      }
    }
 
 void
@@ -288,9 +292,7 @@ OMR::ARM64::CodeGenerator::doBinaryEncoding()
    uint8_t *coldCode = NULL;
    uint8_t *temp = self()->allocateCodeMemory(self()->getEstimatedCodeLength(), 0, &coldCode);
 
-#if defined(OSX)
-   pthread_jit_write_protect_np(0);
-#endif
+   omrthread_jit_write_protect_disable();
 
    self()->setBinaryBufferStart(temp);
    self()->setBinaryBufferCursor(temp);
@@ -331,9 +333,7 @@ OMR::ARM64::CodeGenerator::doBinaryEncoding()
 
    self()->getLinkage()->performPostBinaryEncoding();
 
-#if defined(OSX)
-   pthread_jit_write_protect_np(1);
-#endif
+   omrthread_jit_write_protect_enable();
    }
 
 TR::Linkage *OMR::ARM64::CodeGenerator::createLinkage(TR_LinkageConventions lc)
@@ -492,16 +492,16 @@ void OMR::ARM64::CodeGenerator::buildRegisterMapForInstruction(TR_GCStackMap *ma
    map->setInternalPointerMap(internalPtrMap);
    }
 
-TR_GlobalRegisterNumber OMR::ARM64::CodeGenerator::pickRegister(TR_RegisterCandidate *regCan,
+TR_GlobalRegisterNumber OMR::ARM64::CodeGenerator::pickRegister(TR::RegisterCandidate *regCan,
                                                           TR::Block **barr,
                                                           TR_BitVector &availRegs,
                                                           TR_GlobalRegisterNumber &highRegisterNumber,
-                                                          TR_LinkHead<TR_RegisterCandidate> *candidates)
+                                                          TR_LinkHead<TR::RegisterCandidate> *candidates)
    {
    return OMR::CodeGenerator::pickRegister(regCan, barr, availRegs, highRegisterNumber, candidates);
    }
 
-bool OMR::ARM64::CodeGenerator::allowGlobalRegisterAcrossBranch(TR_RegisterCandidate *regCan, TR::Node *branchNode)
+bool OMR::ARM64::CodeGenerator::allowGlobalRegisterAcrossBranch(TR::RegisterCandidate *regCan, TR::Node *branchNode)
    {
    // If return false, processLiveOnEntryBlocks has to dis-qualify any candidates which are referenced
    // within any CASE of a SWITCH statement.
@@ -572,15 +572,13 @@ void OMR::ARM64::CodeGenerator::apply16BitLabelRelativeRelocation(int32_t *curso
    // for "tbz/tbnz" instruction
    TR_ASSERT(label->getCodeLocation(), "Attempt to relocate to a NULL label address!");
 
-#if defined(OSX)
-   pthread_jit_write_protect_np(0);
-#endif
+   omrthread_jit_write_protect_disable();
+
    intptr_t distance = reinterpret_cast<intptr_t>(label->getCodeLocation() - reinterpret_cast<uint8_t *>(cursor));
    TR_ASSERT_FATAL(constantIsSignedImm16(distance), "offset (%d) is too large for imm14", distance);
    *cursor |= ((distance >> 2) & 0x3fff) << 5; // imm14
-#if defined(OSX)
-   pthread_jit_write_protect_np(1);
-#endif
+
+   omrthread_jit_write_protect_enable();
    }
 
 void OMR::ARM64::CodeGenerator::apply24BitLabelRelativeRelocation(int32_t *cursor, TR::LabelSymbol *label)
@@ -588,14 +586,12 @@ void OMR::ARM64::CodeGenerator::apply24BitLabelRelativeRelocation(int32_t *curso
    // for "b.cond" instruction
    TR_ASSERT(label->getCodeLocation(), "Attempt to relocate to a NULL label address!");
 
-#if defined(OSX)
-   pthread_jit_write_protect_np(0);
-#endif
+   omrthread_jit_write_protect_disable();
+
    intptr_t distance = (uintptr_t)label->getCodeLocation() - (uintptr_t)cursor;
    *cursor |= ((distance >> 2) & 0x7ffff) << 5; // imm19
-#if defined(OSX)
-   pthread_jit_write_protect_np(1);
-#endif
+
+   omrthread_jit_write_protect_enable();
    }
 
 void OMR::ARM64::CodeGenerator::apply32BitLabelRelativeRelocation(int32_t *cursor, TR::LabelSymbol *label)
@@ -603,14 +599,12 @@ void OMR::ARM64::CodeGenerator::apply32BitLabelRelativeRelocation(int32_t *curso
    // for unconditional "b" instruction
    TR_ASSERT(label->getCodeLocation(), "Attempt to relocate to a NULL label address!");
 
-#if defined(OSX)
-   pthread_jit_write_protect_np(0);
-#endif
+   omrthread_jit_write_protect_disable();
+
    intptr_t distance = (uintptr_t)label->getCodeLocation() - (uintptr_t)cursor;
    *cursor |= ((distance >> 2) & 0x3ffffff); // imm26
-#if defined(OSX)
-   pthread_jit_write_protect_np(1);
-#endif
+
+   omrthread_jit_write_protect_enable();
    }
 
 int64_t OMR::ARM64::CodeGenerator::getLargestNegConstThatMustBeMaterialized()
@@ -678,6 +672,7 @@ bool OMR::ARM64::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::I
       case TR::vmcmple:
       case TR::vmcmplt:
       case TR::vmcmpne:
+      case TR::vbitselect:
          return true;
       case TR::vand:
       case TR::vor:
@@ -689,7 +684,6 @@ bool OMR::ARM64::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::I
       case TR::vmreductionOr:
       case TR::vreductionXor:
       case TR::vmreductionXor:
-      case TR::vbitselect:
       case TR::vmand:
       case TR::vmor:
       case TR::vmxor:
@@ -737,6 +731,9 @@ bool OMR::ARM64::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::I
       case TR::m2v:
          /* For the same reason, the number of lanes is 16, which means that the type of elements is 8-bit integer. */
          return et == TR::Int8;
+
+      case TR::vcast:
+         return true;
       default:
          return false;
       }

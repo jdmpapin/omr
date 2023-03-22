@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -184,13 +184,13 @@ MM_Scavenger::deleteSweepPoolState(MM_EnvironmentBase *env, void *sweepPoolState
  * @return a new instance of the receiver or NULL on failure.
  */
 MM_Scavenger *
-MM_Scavenger::newInstance(MM_EnvironmentStandard *env, MM_HeapRegionManager *regionManager)
+MM_Scavenger::newInstance(MM_EnvironmentStandard *env)
 {
 	MM_Scavenger *scavenger;
 
 	scavenger = (MM_Scavenger *)env->getForge()->allocate(sizeof(MM_Scavenger), OMR::GC::AllocationCategory::FIXED, OMR_GET_CALLSITE());
 	if (scavenger) {
-		new(scavenger) MM_Scavenger(env, regionManager);
+		new(scavenger) MM_Scavenger(env);
 		if (!scavenger->initialize(env)) {
 			scavenger->kill(env);
 			scavenger = NULL;
@@ -205,9 +205,7 @@ MM_Scavenger::newInstance(MM_EnvironmentStandard *env, MM_HeapRegionManager *reg
 void
 MM_Scavenger::kill(MM_EnvironmentBase *env)
 {
-	MM_EnvironmentStandard *envStandard = MM_EnvironmentStandard::getEnvironment(env);
-
-	tearDown(envStandard);
+	tearDown(env);
 	env->getForge()->free(this);
 }
 
@@ -287,7 +285,7 @@ MM_Scavenger::initialize(MM_EnvironmentBase *env)
 	_cacheLineAlignment = CACHE_LINE_SIZE;
 
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
-	if (_extensions->concurrentScavenger) {
+	if (IS_CONCURRENT_ENABLED) {
 		if (!_mainGCThread.initialize(this, true, true, true)) {
 			return false;
 		}
@@ -332,7 +330,7 @@ bool
 MM_Scavenger::collectorStartup(MM_GCExtensionsBase* extensions)
 {
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
-	if (_extensions->concurrentScavenger) {
+	if (IS_CONCURRENT_ENABLED) {
 		if (!_mainGCThread.startup()) {
 			return false;
 		}
@@ -349,8 +347,16 @@ void
 MM_Scavenger::collectorShutdown(MM_GCExtensionsBase* extensions)
 {
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
-	if (_extensions->concurrentScavenger) {
+	if (IS_CONCURRENT_ENABLED) {
+
 		_mainGCThread.shutdown();
+
+		/*
+		 * While completeConcurrentCycle(env) can be invoked to stop a potentially active CS cycle,
+		 * at this point both mutator and GC threads should be down.
+		 * It is sufficient to change the concurrent phase state to idle.
+		 */
+		_concurrentPhase = concurrent_phase_idle;
 	}
 #endif /* OMR_GC_CONCURRENT_SCAVENGER */
 }
@@ -490,7 +496,7 @@ MM_Scavenger::calculateMaxCacheCount(uintptr_t activeMemorySize)
 void
 MM_Scavenger::calculateRecommendedWorkingThreads(MM_EnvironmentStandard *env)
 {
-	if (!_extensions->adaptiveThreadingEnabled() || _extensions->isConcurrentScavengerEnabled()) {
+	if (!_extensions->adaptiveThreadingEnabled() || IS_CONCURRENT_ENABLED) {
 		return;
 	}
 
@@ -873,7 +879,11 @@ MM_Scavenger::mergeThreadGCStats(MM_EnvironmentBase *env)
 	uint64_t syncStall = omrtime_hires_delta(0, (scavStats->_adjustedSyncStallTime), OMRPORT_TIME_DELTA_IN_MICROSECONDS);
 	uint64_t notifyStallTime = omrtime_hires_delta(0, (scavStats->_notifyStallTime), OMRPORT_TIME_DELTA_IN_MICROSECONDS);
 
-	Trc_MM_Scavenger_calculateRecommendedWorkingThreads_threadStallBreakDown(env->getLanguageVMThread(), env->getWorkerID(), timeToStartCollection, scanStall, syncStall, notifyStallTime);
+	if (!IS_CONCURRENT_ENABLED) {
+		Trc_MM_Scavenger_calculateRecommendedWorkingThreads_threadStallBreakDown(
+				env->getLanguageVMThread(), env->getWorkerID(), timeToStartCollection,
+				scanStall, syncStall, notifyStallTime);
+	}
 
 	omrthread_monitor_exit(_extensions->gcStatsMutex);
 
@@ -1069,8 +1079,8 @@ MM_Scavenger::activateSurvivorCopyScanCache(MM_EnvironmentStandard *env)
 		if ((uintptr_t)cache == MM_AtomicOperations::lockCompareExchange((volatile uintptr_t *)&env->_inactiveSurvivorCopyScanCache, (uintptr_t)cache, (uintptr_t)NULL)) {
 			/* succeded activating */
 			Assert_MM_true(NULL == env->_survivorCopyScanCache);
-			Assert_MM_true(0 != (cache->flags & OMR_SCAVENGER_CACHE_TYPE_CLEARED));
-			cache->flags &= ~OMR_SCAVENGER_CACHE_TYPE_CLEARED;
+			Assert_MM_true(0 != (cache->flags & OMR_COPYSCAN_CACHE_TYPE_CLEARED));
+			cache->flags &= ~OMR_COPYSCAN_CACHE_TYPE_CLEARED;
 			Assert_MM_true(env->_survivorTLHRemainderBase == cache->cacheAlloc);
 			Assert_MM_true(env->_survivorTLHRemainderTop == cache->cacheTop);
 			env->_survivorTLHRemainderBase = NULL;
@@ -1097,12 +1107,13 @@ MM_Scavenger::activateTenureCopyScanCache(MM_EnvironmentStandard *env)
 		if ((uintptr_t)cache == MM_AtomicOperations::lockCompareExchange((volatile uintptr_t *)&env->_inactiveTenureCopyScanCache, (uintptr_t)cache, (uintptr_t)NULL)) {
 			/* succeded activating */
 			Assert_MM_true(NULL == env->_tenureCopyScanCache);
-			Assert_MM_true(0 != (cache->flags & OMR_SCAVENGER_CACHE_TYPE_CLEARED));
-			cache->flags &= ~OMR_SCAVENGER_CACHE_TYPE_CLEARED;
+			Assert_MM_true(0 != (cache->flags & OMR_COPYSCAN_CACHE_TYPE_CLEARED));
+			cache->flags &= ~OMR_COPYSCAN_CACHE_TYPE_CLEARED;
 			Assert_MM_true(env->_tenureTLHRemainderBase == cache->cacheAlloc);
 			Assert_MM_true(env->_tenureTLHRemainderTop == cache->cacheTop);
 			env->_tenureTLHRemainderBase = NULL;
 			env->_tenureTLHRemainderTop = NULL;
+			env->_loaAllocation = false;
 			env->_tenureCopyScanCache = cache;
 			activateDeferredCopyScanCache(env);
 			/* Force slow path release VM access, to be able to push mutator copy caches to scanning and reliable tell if thread is inactive */
@@ -1215,8 +1226,8 @@ retry:
 #endif /* OMR_SCAVENGER_TRACE */
 
 				/* clear all flags except "allocated in heap" might be set already*/
-				copyCache->flags &= OMR_SCAVENGER_CACHE_TYPE_HEAP;
-				copyCache->flags |= OMR_SCAVENGER_CACHE_TYPE_SEMISPACE | OMR_SCAVENGER_CACHE_TYPE_COPY;
+				copyCache->flags &= OMR_COPYSCAN_CACHE_TYPE_HEAP;
+				copyCache->flags |= OMR_COPYSCAN_CACHE_TYPE_SEMISPACE | OMR_COPYSCAN_CACHE_TYPE_COPY;
 				copyCache->reinitCache(addrBase, addrTop);
 			} else {
 				/* can not allocate a copyCache header, release allocated memory */
@@ -1343,12 +1354,12 @@ retry:
 #endif /* OMR_SCAVENGER_TRACE */
 
 				/* clear all flags except "allocated in heap" might be set already*/
-				copyCache->flags &= OMR_SCAVENGER_CACHE_TYPE_HEAP;
-				copyCache->flags |= OMR_SCAVENGER_CACHE_TYPE_TENURESPACE | OMR_SCAVENGER_CACHE_TYPE_COPY;
+				copyCache->flags &= OMR_COPYSCAN_CACHE_TYPE_HEAP;
+				copyCache->flags |= OMR_COPYSCAN_CACHE_TYPE_TENURESPACE | OMR_COPYSCAN_CACHE_TYPE_COPY;
 
 #if defined(OMR_GC_LARGE_OBJECT_AREA)
 				if (satisfiedInLOA) {
-					copyCache->flags |= OMR_SCAVENGER_CACHE_TYPE_LOA;
+					copyCache->flags |= OMR_COPYSCAN_CACHE_TYPE_LOA;
 				}
 #endif /* OMR_GC_LARGE_OBJECT_AREA */
 				copyCache->reinitCache(addrBase, addrTop);
@@ -1421,7 +1432,7 @@ MM_Scavenger::copyAndForward(MM_EnvironmentStandard *env, volatile omrobjectptr_
 					/* raise the alert and return (true - must look like a new object was handled) */
 					toReturn = true;
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
-					if (_extensions->concurrentScavenger) {
+					if (IS_CONCURRENT_ENABLED) {
 						/* We have no place to copy. We will return the original location of the object.
 						 * But we must prevent any other thread of making a copy of this object.
 						 * So we will attempt to atomically self forward it.  */
@@ -1529,9 +1540,9 @@ MM_Scavenger::forwardingFailed(MM_EnvironmentStandard *env, MM_ForwardedHeader* 
 	 * the current remainder (we assert across the code, there is at most one at a give point of time).
 	 * If we see large amount of discards even with low discard threshold, we may reconsider enqueueing discarded TLHs.
 	 */
-	if (0 != (copyCache->flags & OMR_SCAVENGER_CACHE_TYPE_TENURESPACE)) {
+	if (0 != (copyCache->flags & OMR_COPYSCAN_CACHE_TYPE_TENURESPACE)) {
 		abandonTenureTLHRemainder(env);
-	} else if (0 != (copyCache->flags & OMR_SCAVENGER_CACHE_TYPE_SEMISPACE)) {
+	} else if (0 != (copyCache->flags & OMR_COPYSCAN_CACHE_TYPE_SEMISPACE)) {
 		abandonSurvivorTLHRemainder(env);
 	} else {
 		Assert_MM_unreachable();
@@ -1553,18 +1564,18 @@ MM_Scavenger::forwardingSucceeded(MM_EnvironmentStandard *env, MM_CopyScanCacheS
 
 	/* Update the stats */
 	MM_ScavengerStats *scavStats = &env->_scavengerStats;
-	if (0 != (copyCache->flags & OMR_SCAVENGER_CACHE_TYPE_TENURESPACE)) {
+	if (0 != (copyCache->flags & OMR_COPYSCAN_CACHE_TYPE_TENURESPACE)) {
 		scavStats->_tenureAggregateCount += 1;
 		scavStats->_tenureAggregateBytes += objectCopySizeInBytes;
 		scavStats->getFlipHistory(0)->_tenureBytes[oldObjectAge + 1] += objectReserveSizeInBytes;
 #if defined(OMR_GC_LARGE_OBJECT_AREA)
-		if (0 != (copyCache->flags & OMR_SCAVENGER_CACHE_TYPE_LOA)) {
+		if (0 != (copyCache->flags & OMR_COPYSCAN_CACHE_TYPE_LOA)) {
 			scavStats->_tenureLOACount += 1;
 			scavStats->_tenureLOABytes += objectCopySizeInBytes;
 		}
 #endif /* OMR_GC_LARGE_OBJECT_AREA */
 	} else {
-		Assert_MM_true(0 != (copyCache->flags & OMR_SCAVENGER_CACHE_TYPE_SEMISPACE));
+		Assert_MM_true(0 != (copyCache->flags & OMR_COPYSCAN_CACHE_TYPE_SEMISPACE));
 		scavStats->_flipCount += 1;
 		scavStats->_flipBytes += objectCopySizeInBytes;
 		scavStats->getFlipHistory(0)->_flipBytes[oldObjectAge + 1] += objectReserveSizeInBytes;
@@ -1916,8 +1927,8 @@ MM_Scavenger::splitIndexableObjectScanner(MM_EnvironmentStandard *env, GC_Object
 					splitCache->cacheAlloc = splitCache->cacheTop;
 					splitCache->_arraySplitIndex = endIndex;
 					splitCache->_arraySplitRememberedSlot = rememberedSetSlot;
-					splitCache->flags &= OMR_SCAVENGER_CACHE_TYPE_HEAP;
-					splitCache->flags |= OMR_SCAVENGER_CACHE_TYPE_SPLIT_ARRAY;
+					splitCache->flags &= OMR_COPYSCAN_CACHE_TYPE_HEAP;
+					splitCache->flags |= OMR_COPYSCAN_CACHE_TYPE_SPLIT_ARRAY;
 					indexableScanner->splitTo(env, splitCache->getObjectScanner(), scvArraySplitAmount);
 #if defined(J9MODRON_TGC_PARALLEL_STATISTICS)
 					env->_scavengerStats._arraySplitCount += 1;
@@ -2307,8 +2318,8 @@ MM_Scavenger::getNextScanCache(MM_EnvironmentStandard *env)
 		/* deferred copy caches are used to merge memory-contiguous caches that got chopped up due to large objects not fitting and resuing remainder.
 		 * we want to delay scanning them as much as possible (up to the size of the original cache size being chopped up),
 		 * but we still want to do it before we synchronizing on scan queue and realizing no more work is awailable */
-		Assert_MM_true(0 != (cache->flags & OMR_SCAVENGER_CACHE_TYPE_COPY));
-		cache->flags &= ~OMR_SCAVENGER_CACHE_TYPE_COPY;
+		Assert_MM_true(0 != (cache->flags & OMR_COPYSCAN_CACHE_TYPE_COPY));
+		cache->flags &= ~OMR_COPYSCAN_CACHE_TYPE_COPY;
 		env->_deferredCopyCache = NULL;
 		return cache;
 	}
@@ -2396,8 +2407,8 @@ MM_Scavenger::completeScanCache(MM_EnvironmentStandard *env, MM_CopyScanCacheSta
 	omrobjectptr_t objectPtr = NULL;
 
 	/* mark that cache is in use as a scan cache */
-	Assert_MM_true(0 == (scanCache->flags & OMR_SCAVENGER_CACHE_TYPE_SCAN));
-	scanCache->flags |= OMR_SCAVENGER_CACHE_TYPE_SCAN;
+	Assert_MM_true(0 == (scanCache->flags & OMR_COPYSCAN_CACHE_TYPE_SCAN));
+	scanCache->flags |= OMR_COPYSCAN_CACHE_TYPE_SCAN;
 
 	if (scanCache->isSplitArray()) {
 		/* Advance the scan pointer to the top of the cache to signify that this has been scanned */
@@ -2426,10 +2437,10 @@ MM_Scavenger::completeScanCache(MM_EnvironmentStandard *env, MM_CopyScanCacheSta
 		}
 	}
 #if defined(OMR_GC_MODRON_SCAVENGER_STRICT)
-	Assert_MM_true(0 != (scanCache->flags & OMR_SCAVENGER_CACHE_TYPE_SCAN));
+	Assert_MM_true(0 != (scanCache->flags & OMR_COPYSCAN_CACHE_TYPE_SCAN));
 #endif /* defined(OMR_GC_MODRON_SCAVENGER_STRICT) */
 	/* mark cache as no longer in use for scanning */
-	scanCache->flags &= ~OMR_SCAVENGER_CACHE_TYPE_SCAN;
+	scanCache->flags &= ~OMR_COPYSCAN_CACHE_TYPE_SCAN;
 	/* Done with the cache - build a free list entry in the hole, release the cache to the free list (if not used), and continue */
 	flushCache(env, scanCache);
 }
@@ -2448,8 +2459,8 @@ MM_Scavenger::incrementalScanCacheBySlot(MM_EnvironmentStandard *env, MM_CopySca
 {
 nextCache:
 	/* mark that cache is in use as a scan cache */
-	Assert_MM_true(0 == (scanCache->flags & OMR_SCAVENGER_CACHE_TYPE_SCAN));
-	scanCache->flags |= OMR_SCAVENGER_CACHE_TYPE_SCAN;
+	Assert_MM_true(0 == (scanCache->flags & OMR_COPYSCAN_CACHE_TYPE_SCAN));
+	scanCache->flags |= OMR_COPYSCAN_CACHE_TYPE_SCAN;
 	while (scanCache->isScanWorkAvailable()) {
 		void *cacheAlloc = scanCache->cacheAlloc;
 		GC_ObjectHeapIteratorAddressOrderedList heapChunkIterator(
@@ -2466,7 +2477,7 @@ nextCache:
 			/* object was not completely scanned in order to interrupt scan */
 			if (scanCache->_hasPartiallyScannedObject) {
 #if defined(OMR_GC_MODRON_SCAVENGER_STRICT)
-				Assert_MM_true(0 != (scanCache->flags & OMR_SCAVENGER_CACHE_TYPE_SCAN));
+				Assert_MM_true(0 != (scanCache->flags & OMR_COPYSCAN_CACHE_TYPE_SCAN));
 #endif /* defined(OMR_GC_MODRON_SCAVENGER_STRICT) */
 				/* If the scanCache has partially scanned objects then we must be aliasing to one of the copy caches,
 				 * which means the nextScanCache has to have a value!
@@ -2478,8 +2489,8 @@ nextCache:
 				 * can cause contention, just defer to later time on same thread
 				 * if deferred cache is occupied, then queue current scan cache on scan list
 				 */
-				scanCache->flags &= ~OMR_SCAVENGER_CACHE_TYPE_SCAN;
-				if (!(scanCache->flags & OMR_SCAVENGER_CACHE_TYPE_COPY)) {
+				scanCache->flags &= ~OMR_COPYSCAN_CACHE_TYPE_SCAN;
+				if (0 == (scanCache->flags & OMR_COPYSCAN_CACHE_TYPE_COPY)) {
 					if (NULL == env->_deferredScanCache) {
 						env->_deferredScanCache = scanCache;
 					} else {
@@ -2497,10 +2508,10 @@ nextCache:
 		scanCache->scanCurrent = cacheAlloc;
 	}
 #if defined(OMR_GC_MODRON_SCAVENGER_STRICT)
-	Assert_MM_true(0 != (scanCache->flags & OMR_SCAVENGER_CACHE_TYPE_SCAN));
+	Assert_MM_true(0 != (scanCache->flags & OMR_COPYSCAN_CACHE_TYPE_SCAN));
 #endif /* defined(OMR_GC_MODRON_SCAVENGER_STRICT) */
 	/* mark cache as no longer in use for scanning */
-	scanCache->flags &= ~OMR_SCAVENGER_CACHE_TYPE_SCAN;
+	scanCache->flags &= ~OMR_COPYSCAN_CACHE_TYPE_SCAN;
 	/* Done with the cache - build a free list entry in the hole, release the cache to the free list (if not used), and continue */
 	flushCache(env, scanCache);
 }
@@ -3342,12 +3353,12 @@ MM_Scavenger::createCacheInHeap(MM_EnvironmentStandard *env)
 void
 MM_Scavenger::flushCache(MM_EnvironmentStandard *env, MM_CopyScanCacheStandard *cache)
 {
-	if (0 == (cache->flags & OMR_SCAVENGER_CACHE_TYPE_COPY)) {
+	if (0 == (cache->flags & OMR_COPYSCAN_CACHE_TYPE_COPY)) {
 #if defined(OMR_SCAVENGER_TRACE)
 		OMRPORT_ACCESS_FROM_OMRPORT(env->getPortLibrary());
 		omrtty_printf("{SCAV: Flushing cache (%p) %p-%p-%p-%p}\n", cache, cache->cacheBase, cache->cacheAlloc, cache->scanCurrent, cache->cacheTop);
 #endif /* OMR_SCAVENGER_TRACE */
-		if (0 == (cache->flags & OMR_SCAVENGER_CACHE_TYPE_CLEARED)) {
+		if (0 == (cache->flags & OMR_COPYSCAN_CACHE_TYPE_CLEARED)) {
 			clearCache(env, cache);
 		}
 
@@ -3372,18 +3383,18 @@ MM_Scavenger::releaseLocalCopyCache(MM_EnvironmentStandard *env, MM_CopyScanCach
 		if (cache->isCurrentlyBeingScanned()) {
 			/* Since it is being scanned, cannot reuse and should not add to scan list */
 			/* Mark the cache entry as unused as a copy destination */
-			cache->flags &= ~OMR_SCAVENGER_CACHE_TYPE_COPY;
+			cache->flags &= ~OMR_COPYSCAN_CACHE_TYPE_COPY;
 		} else {
 
 			if (NULL != env->_deferredCopyCache) {
 				/* Deferred copy cache already exists. Check if should be merged with current cache */
 				/* Deferred copy cache should also never be a scan cache */
-				Assert_MM_false(env->_deferredCopyCache->flags & OMR_SCAVENGER_CACHE_TYPE_SCAN);
+				Assert_MM_false(env->_deferredCopyCache->flags & OMR_COPYSCAN_CACHE_TYPE_SCAN);
 				/* We have two copy caches (deferred and current). Do they create contiguous memory with no objects (fully or partially) scanned in between? */
 				if ((env->_deferredCopyCache->cacheAlloc == cache->scanCurrent) && !cache->_hasPartiallyScannedObject) {
 					/* append current copy cache to the deferred one. yet, decide whether to keep deferring it or push it for scanning */
-					Assert_MM_true((cache->flags & ~OMR_SCAVENGER_CACHE_TYPE_HEAP) == (env->_deferredCopyCache->flags & ~OMR_SCAVENGER_CACHE_TYPE_HEAP));
-					Assert_MM_false(cache->flags & OMR_SCAVENGER_CACHE_TYPE_SPLIT_ARRAY);
+					Assert_MM_true((cache->flags & ~OMR_COPYSCAN_CACHE_TYPE_HEAP) == (env->_deferredCopyCache->flags & ~OMR_COPYSCAN_CACHE_TYPE_HEAP));
+					Assert_MM_false(cache->flags & OMR_COPYSCAN_CACHE_TYPE_SPLIT_ARRAY);
 					if (remainderCreated) {
 						/* keep deferring the joint copy cache, there might be more appends to come */
 						env->_deferredCopyCache->cacheAlloc = cache->cacheAlloc;
@@ -3430,8 +3441,8 @@ MM_Scavenger::releaseLocalCopyCache(MM_EnvironmentStandard *env, MM_CopyScanCach
 
 				/* It is not being scanned, and it does have entries to scan - add to scan list */
 				/* Mark the cache entry as unused as a copy destination */
-				Assert_MM_true(0 != (cache->flags & OMR_SCAVENGER_CACHE_TYPE_COPY));
-				cache->flags &= ~OMR_SCAVENGER_CACHE_TYPE_COPY;
+				Assert_MM_true(0 != (cache->flags & OMR_COPYSCAN_CACHE_TYPE_COPY));
+				cache->flags &= ~OMR_COPYSCAN_CACHE_TYPE_COPY;
 				/* must not have local references still in use before adding to global list */
 				Assert_MM_true(cache->cacheBase <= cache->cacheAlloc);
 				Assert_MM_true(cache->cacheAlloc <= cache->cacheTop);
@@ -3452,11 +3463,11 @@ MM_Scavenger::clearCache(MM_EnvironmentStandard *env, MM_CopyScanCacheStandard *
 {
 	MM_MemorySubSpace *allocSubSpace = NULL;
 	uintptr_t discardSize = (uintptr_t)cache->cacheTop - (uintptr_t)cache->cacheAlloc;
-	Assert_MM_false(cache->flags & OMR_SCAVENGER_CACHE_TYPE_CLEARED);
+	Assert_MM_false(cache->flags & OMR_COPYSCAN_CACHE_TYPE_CLEARED);
 	bool remainderCreated = false;
 
 	if (0 < discardSize) {
-		if (cache->flags & OMR_SCAVENGER_CACHE_TYPE_TENURESPACE) {
+		if (0 != (cache->flags & OMR_COPYSCAN_CACHE_TYPE_TENURESPACE)) {
 			allocSubSpace = _tenureMemorySubSpace;
 			if (discardSize < env->getExtensions()->tlhTenureDiscardThreshold) {
 				env->_scavengerStats._tenureDiscardBytes += discardSize;
@@ -3469,9 +3480,9 @@ MM_Scavenger::clearCache(MM_EnvironmentStandard *env, MM_CopyScanCacheStandard *
 				env->_tenureTLHRemainderBase = cache->cacheAlloc;
 				Assert_MM_true(NULL == env->_tenureTLHRemainderTop);
 				env->_tenureTLHRemainderTop = cache->cacheTop;
-				env->_loaAllocation = (OMR_SCAVENGER_CACHE_TYPE_LOA == (cache->flags & OMR_SCAVENGER_CACHE_TYPE_LOA));
+				env->_loaAllocation = (OMR_COPYSCAN_CACHE_TYPE_LOA == (cache->flags & OMR_COPYSCAN_CACHE_TYPE_LOA));
 			}
-		} else if (cache->flags & OMR_SCAVENGER_CACHE_TYPE_SEMISPACE) {
+		} else if (0 != (cache->flags & OMR_COPYSCAN_CACHE_TYPE_SEMISPACE)) {
 			allocSubSpace = _survivorMemorySubSpace;
 			if (discardSize < env->getExtensions()->tlhSurvivorDiscardThreshold) {
 				env->_scavengerStats._flipDiscardBytes += discardSize;
@@ -3486,8 +3497,8 @@ MM_Scavenger::clearCache(MM_EnvironmentStandard *env, MM_CopyScanCacheStandard *
 			}
 		} else {
 			/*
-			 * In case if OMR_SCAVENGER_CACHE_TYPE_SPLIT_ARRAY flag is set none of
-			 * OMR_SCAVENGER_CACHE_TYPE_TENURESPACE or OMR_SCAVENGER_CACHE_TYPE_SEMISPACE might be set.
+			 * In case if OMR_COPYSCAN_CACHE_TYPE_SPLIT_ARRAY flag is set none of
+			 * OMR_COPYSCAN_CACHE_TYPE_TENURESPACE or OMR_COPYSCAN_CACHE_TYPE_SEMISPACE might be set.
 			 * However discardSize must be zero in this case and we should not go here
 			 */
 			Assert_MM_unreachable();
@@ -3498,7 +3509,7 @@ MM_Scavenger::clearCache(MM_EnvironmentStandard *env, MM_CopyScanCacheStandard *
 	TRIGGER_J9HOOK_MM_PRIVATE_CACHE_CLEARED(_extensions->privateHookInterface, env->getOmrVMThread(), allocSubSpace,
 									cache->cacheBase, cache->cacheAlloc, cache->cacheTop);
 
-	cache->flags |= OMR_SCAVENGER_CACHE_TYPE_CLEARED;
+	cache->flags |= OMR_COPYSCAN_CACHE_TYPE_CLEARED;
 
 	return remainderCreated;
 }
@@ -3547,19 +3558,19 @@ MM_Scavenger::finalReturnCopyCachesToFreeList(MM_EnvironmentStandard *env)
 
 	if(NULL != env->_survivorCopyScanCache) {
 		Assert_MM_false(env->_survivorCopyScanCache->isScanWorkAvailable());
-		env->_survivorCopyScanCache->flags &= ~OMR_SCAVENGER_CACHE_TYPE_COPY;
+		env->_survivorCopyScanCache->flags &= ~OMR_COPYSCAN_CACHE_TYPE_COPY;
 		flushCache(env, env->_survivorCopyScanCache);
 		env->_survivorCopyScanCache = NULL;
 	}
 	if(NULL != env->_deferredCopyCache) {
 		Assert_MM_false(env->_deferredCopyCache->isScanWorkAvailable());
-		env->_deferredCopyCache->flags &= ~OMR_SCAVENGER_CACHE_TYPE_COPY;
+		env->_deferredCopyCache->flags &= ~OMR_COPYSCAN_CACHE_TYPE_COPY;
 		flushCache(env, env->_deferredCopyCache);
 		env->_deferredCopyCache = NULL;
 	}
 	if(NULL != env->_tenureCopyScanCache) {
 		Assert_MM_false(env->_tenureCopyScanCache->isScanWorkAvailable());
-		env->_tenureCopyScanCache->flags &= ~OMR_SCAVENGER_CACHE_TYPE_COPY;
+		env->_tenureCopyScanCache->flags &= ~OMR_COPYSCAN_CACHE_TYPE_COPY;
 		flushCache(env, env->_tenureCopyScanCache);
 		env->_tenureCopyScanCache = NULL;
 	}
@@ -3569,17 +3580,17 @@ void
 MM_Scavenger::returnEmptyCopyCachesToFreeList(MM_EnvironmentStandard *env)
 {
 	if (isEmptyCacheWithCheck(env->_survivorCopyScanCache)) {
-		env->_survivorCopyScanCache->flags &= ~OMR_SCAVENGER_CACHE_TYPE_COPY;
+		env->_survivorCopyScanCache->flags &= ~OMR_COPYSCAN_CACHE_TYPE_COPY;
 		flushCache(env, env->_survivorCopyScanCache);
 		env->_survivorCopyScanCache = NULL;
 	}
 	if (isEmptyCacheWithCheck(env->_deferredCopyCache)) {
-		env->_deferredCopyCache->flags &= ~OMR_SCAVENGER_CACHE_TYPE_COPY;
+		env->_deferredCopyCache->flags &= ~OMR_COPYSCAN_CACHE_TYPE_COPY;
 		flushCache(env, env->_deferredCopyCache);
 		env->_deferredCopyCache = NULL;
 	}
 	if (isEmptyCacheWithCheck(env->_tenureCopyScanCache)) {
-		env->_tenureCopyScanCache->flags &= ~OMR_SCAVENGER_CACHE_TYPE_COPY;
+		env->_tenureCopyScanCache->flags &= ~OMR_COPYSCAN_CACHE_TYPE_COPY;
 		flushCache(env, env->_tenureCopyScanCache);
 		env->_tenureCopyScanCache = NULL;
 	}
@@ -3635,7 +3646,7 @@ MM_Scavenger::aliasToCopyCache(MM_EnvironmentStandard *env, GC_SlotObject *scann
 
 		/* If the scanCache is not an aliased copy cache try to alias to the copy cache since the copy cache will always
 		 * be better if it has objects to scan */
-		if (0 == (scanCache->flags & OMR_SCAVENGER_CACHE_TYPE_COPY)) {
+		if (0 == (scanCache->flags & OMR_COPYSCAN_CACHE_TYPE_COPY)) {
 			if (copyCache->cacheAlloc != copyCache->scanCurrent) {
 				env->_scavengerStats._aliasToCopyCacheCount += 1;
 				scanCache->_hasPartiallyScannedObject = true;
@@ -3980,7 +3991,7 @@ MM_Scavenger::processRememberedSetInBackout(MM_EnvironmentStandard *env)
 	bool const compressed = _extensions->compressObjectReferences();
 
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
-	if (_extensions->concurrentScavenger) {
+	if (IS_CONCURRENT_ENABLED) {
 		GC_SublistIterator remSetIterator(&(_extensions->rememberedSet));
 		while((puddle = remSetIterator.nextList()) != NULL) {
 			GC_SublistSlotIterator remSetSlotIterator(puddle);
@@ -4229,7 +4240,7 @@ MM_Scavenger::mainThreadGarbageCollect(MM_EnvironmentBase *envBase, MM_AllocateD
 	_cycleTimes.incrementStart = omrtime_hires_clock();
 
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
-	if (_extensions->concurrentScavenger) {
+	if (IS_CONCURRENT_ENABLED) {
 		scavengeIncremental(env);
 	} else
 #endif /* OMR_GC_CONCURRENT_SCAVENGER */
@@ -4606,7 +4617,7 @@ MM_Scavenger::internalGarbageCollect(MM_EnvironmentBase *envBase, MM_MemorySubSp
 	}
 
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
-	if (_extensions->concurrentScavenger && isBackOutFlagRaised()) {
+	if (IS_CONCURRENT_ENABLED && isBackOutFlagRaised()) {
 		bool result = percolateGarbageCollect(env, subSpace, NULL, ABORTED_SCAVENGE, J9MMCONSTANT_IMPLICIT_GC_PERCOLATE_ABORTED_SCAVENGE);
 
 		Assert_MM_true(result);
@@ -4757,7 +4768,7 @@ MM_Scavenger::internalGarbageCollect(MM_EnvironmentBase *envBase, MM_MemorySubSp
 	_collectorExpandedSize = 0;
 
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
-	if (_extensions->concurrentScavenger) {
+	if (IS_CONCURRENT_ENABLED) {
 		/* this may trigger either start or end of Concurrent Scavenge cycle */
 		triggerConcurrentScavengerTransition(env, allocDescription);
 	}
@@ -5278,8 +5289,8 @@ MM_Scavenger::flushInactiveSurvivorCopyScanCache(MM_EnvironmentStandard *current
 			/* Racing with mutator trying to activate cache */
 			if ((uintptr_t)cache == MM_AtomicOperations::lockCompareExchange((volatile uintptr_t *)&targetEnv->_inactiveSurvivorCopyScanCache, (uintptr_t)cache, (uintptr_t)NULL)) {
 				/* It's already cleared on the way it became inactive */
-				Assert_MM_true(0 != (cache->flags & (OMR_SCAVENGER_CACHE_TYPE_COPY | OMR_SCAVENGER_CACHE_TYPE_CLEARED)));
-				cache->flags &= ~OMR_SCAVENGER_CACHE_TYPE_COPY;
+				Assert_MM_true(0 != (cache->flags & (OMR_COPYSCAN_CACHE_TYPE_COPY | OMR_COPYSCAN_CACHE_TYPE_CLEARED)));
+				cache->flags &= ~OMR_COPYSCAN_CACHE_TYPE_COPY;
 
 #if defined(J9MODRON_TGC_PARALLEL_STATISTICS)
 				currentEnv->_scavengerStats._releaseScanListCount += 1;
@@ -5315,8 +5326,8 @@ MM_Scavenger::deactivateSurvivorCopyScanCache(MM_EnvironmentStandard *currentEnv
 			if (flushCaches || (_waitingCount > 0) || !remainderCreated) {
 				/* Either we are explicitly instructed to flush, or we are observing suboptimal parallelism in background threads,
 				 * or no free space in the cache -> don't deactivate, but just push it for scanning  */
-				Assert_MM_true(0 != (cache->flags & OMR_SCAVENGER_CACHE_TYPE_COPY));
-				cache->flags &= ~OMR_SCAVENGER_CACHE_TYPE_COPY;
+				Assert_MM_true(0 != (cache->flags & OMR_COPYSCAN_CACHE_TYPE_COPY));
+				cache->flags &= ~OMR_COPYSCAN_CACHE_TYPE_COPY;
 #if defined(J9MODRON_TGC_PARALLEL_STATISTICS)
 				targetEnv->_scavengerStats._releaseScanListCount += 1;
 #endif /* J9MODRON_TGC_PARALLEL_STATISTICS */
@@ -5344,8 +5355,8 @@ MM_Scavenger::flushInactiveTenureCopyScanCache(MM_EnvironmentStandard *currentEn
 			/* Racing with mutator trying to activate cache */
 			if ((uintptr_t)cache == MM_AtomicOperations::lockCompareExchange((volatile uintptr_t *)&targetEnv->_inactiveTenureCopyScanCache, (uintptr_t)cache, (uintptr_t)NULL)) {
 				/* It's already cleared on the way it became inactive */
-				Assert_MM_true(0 != (cache->flags & (OMR_SCAVENGER_CACHE_TYPE_COPY | OMR_SCAVENGER_CACHE_TYPE_CLEARED)));
-				cache->flags &= ~OMR_SCAVENGER_CACHE_TYPE_COPY;
+				Assert_MM_true(0 != (cache->flags & (OMR_COPYSCAN_CACHE_TYPE_COPY | OMR_COPYSCAN_CACHE_TYPE_CLEARED)));
+				cache->flags &= ~OMR_COPYSCAN_CACHE_TYPE_COPY;
 
 #if defined(J9MODRON_TGC_PARALLEL_STATISTICS)
 				targetEnv->_scavengerStats._releaseScanListCount += 1;
@@ -5375,8 +5386,8 @@ MM_Scavenger::deactivateTenureCopyScanCache(MM_EnvironmentStandard *currentEnv, 
 			if (flushCaches || (_waitingCount > 0) || !remainderCreated) {
 				/* Either we are explicitly instructed to flush, or we are observing suboptimal parallelism in background threads,
 				 * or no free space in the cache -> don't deactivate, but just push it for scanning  */
-				Assert_MM_true(0 != (cache->flags & OMR_SCAVENGER_CACHE_TYPE_COPY));
-				cache->flags &= ~OMR_SCAVENGER_CACHE_TYPE_COPY;
+				Assert_MM_true(0 != (cache->flags & OMR_COPYSCAN_CACHE_TYPE_COPY));
+				cache->flags &= ~OMR_COPYSCAN_CACHE_TYPE_COPY;
 #if defined(J9MODRON_TGC_PARALLEL_STATISTICS)
 				targetEnv->_scavengerStats._releaseScanListCount += 1;
 #endif /* J9MODRON_TGC_PARALLEL_STATISTICS */
@@ -5403,8 +5414,8 @@ MM_Scavenger::flushInactiveDeferredCopyScanCache(MM_EnvironmentStandard *current
 		if (flushCaches || (_waitingCount > 0)) {
 			/* Racing with mutator trying to activate cache */
 			if ((uintptr_t)cache == MM_AtomicOperations::lockCompareExchange((volatile uintptr_t *)&targetEnv->_inactiveDeferredCopyCache, (uintptr_t)cache, (uintptr_t)NULL)) {
-				Assert_MM_true(0 != (cache->flags & OMR_SCAVENGER_CACHE_TYPE_COPY));
-				cache->flags &= ~OMR_SCAVENGER_CACHE_TYPE_COPY;
+				Assert_MM_true(0 != (cache->flags & OMR_COPYSCAN_CACHE_TYPE_COPY));
+				cache->flags &= ~OMR_COPYSCAN_CACHE_TYPE_COPY;
 
 #if defined(J9MODRON_TGC_PARALLEL_STATISTICS)
 				targetEnv->_scavengerStats._releaseScanListCount += 1;
@@ -5428,11 +5439,11 @@ MM_Scavenger::deactivateDeferredCopyScanCache(MM_EnvironmentStandard *currentEnv
 			/* Race between mutator thread actual owner and another mutator thread that helps with concurrent termination */
 			if ((uintptr_t)cache == MM_AtomicOperations::lockCompareExchange((volatile uintptr_t *)&targetEnv->_deferredCopyCache, (uintptr_t)cache, (uintptr_t)NULL)) {
 				targetEnv->_deferredCopyCache = NULL;
-				Assert_MM_true(0 != (cache->flags & OMR_SCAVENGER_CACHE_TYPE_CLEARED));
+				Assert_MM_true(0 != (cache->flags & OMR_COPYSCAN_CACHE_TYPE_CLEARED));
 				if (flushCaches || (_waitingCount > 0) || (NULL == targetEnv->_survivorCopyScanCache) || (NULL == targetEnv->_tenureCopyScanCache)) {
 					/* Main thread in STW is MUTATOR type and can trigger this as well */
-					Assert_MM_true(0 != (cache->flags & OMR_SCAVENGER_CACHE_TYPE_COPY));
-					cache->flags &= ~OMR_SCAVENGER_CACHE_TYPE_COPY;
+					Assert_MM_true(0 != (cache->flags & OMR_COPYSCAN_CACHE_TYPE_COPY));
+					cache->flags &= ~OMR_COPYSCAN_CACHE_TYPE_COPY;
 #if defined(J9MODRON_TGC_PARALLEL_STATISTICS)
 					targetEnv->_scavengerStats._releaseScanListCount += 1;
 #endif /* J9MODRON_TGC_PARALLEL_STATISTICS */
@@ -5629,7 +5640,7 @@ MM_Scavenger::workThreadScan(MM_EnvironmentStandard *env)
 void
 MM_Scavenger::workThreadComplete(MM_EnvironmentStandard *env)
 {
-	Assert_MM_true(_extensions->concurrentScavenger);
+	Assert_MM_true(IS_CONCURRENT_ENABLED);
 
 	/* record that this thread is participating in this cycle */
 	env->_scavengerStats._gcCount = _extensions->scavengerStats._gcCount;

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -396,6 +396,8 @@ class OMR_EXTENSIBLE CodeGenerator : public OMR::CodeGenerator
 
    void processClobberingInstructions(TR::ClobberingInstruction * clobInstructionCursor, TR::Instruction *instructionCursor);
 
+   TR::Instruction *generateInterpreterEntryInstruction(TR::Instruction *procEntryInstruction);
+
    // different from evaluateNode in that it returns a clobberable register
    TR::Register *shortClobberEvaluate(TR::Node *node);
    TR::Register *intClobberEvaluate(TR::Node *node);
@@ -415,7 +417,7 @@ class OMR_EXTENSIBLE CodeGenerator : public OMR::CodeGenerator
    TR::RealRegister *getFrameRegister()                       {return _frameRegister;}
    TR::RealRegister *getMethodMetaDataRegister();
 
-   bool allowGlobalRegisterAcrossBranch(TR_RegisterCandidate *, TR::Node *);
+   bool allowGlobalRegisterAcrossBranch(TR::RegisterCandidate *, TR::Node *);
 
    void buildRegisterMapForInstruction(TR_GCStackMap *map);
 
@@ -622,6 +624,10 @@ class OMR_EXTENSIBLE CodeGenerator : public OMR::CodeGenerator
    TR::X86DataSnippet *create8ByteData(TR::Node *, int64_t c);
    TR::X86DataSnippet *create16ByteData(TR::Node *, void *c);
 
+   bool considerTypeForGRA(TR::Node *node);
+   bool considerTypeForGRA(TR::DataType dt);
+   bool considerTypeForGRA(TR::SymbolReference *symRef);
+
    /*
     * \brief create a data snippet.
     *
@@ -675,7 +681,7 @@ class OMR_EXTENSIBLE CodeGenerator : public OMR::CodeGenerator
    void initializeVFPState(TR::RealRegister::RegNum reg, int32_t displacement){ _vfpState._register = reg; _vfpState._displacement = displacement; }
 
 
-   void removeUnavailableRegisters(TR_RegisterCandidate * rc, TR::Block * * blocks, TR_BitVector & availableRegisters);
+   void removeUnavailableRegisters(TR::RegisterCandidate * rc, TR::Block * * blocks, TR_BitVector & availableRegisters);
 
    TR::Instruction *generateDebugCounterBump(TR::Instruction *cursor, TR::DebugCounterBase *counter, int32_t delta, TR::RegisterDependencyConditions *cond);
    TR::Instruction *generateDebugCounterBump(TR::Instruction *cursor, TR::DebugCounterBase *counter, TR::Register *deltaReg, TR::RegisterDependencyConditions *cond);

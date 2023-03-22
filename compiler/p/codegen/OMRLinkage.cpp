@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -727,17 +727,12 @@ TR::Register *OMR::Power::Linkage::pushAddressArg(TR::Node *child)
    TR_ASSERT(child->getDataType() == TR::Address, "assumption violated");
    if (child->getRegister() == NULL && child->getOpCode().isLoadConst())
       {
-      bool isClass = child->isClassPointerConstant();
       pushRegister = self()->cg()->allocateRegister();
-      if (isClass && self()->cg()->wantToPatchClassPointer((TR_OpaqueClassBlock*)child->getAddress(), child))
-         loadAddressConstantInSnippet(self()->cg(), child, child->getAddress(), pushRegister, NULL,TR::InstOpCode::Op_load, NULL, NULL);
+      if (child->isMethodPointerConstant())
+         loadAddressConstant(self()->cg(), self()->cg()->comp()->compileRelocatableCode(), child, child->getAddress(), pushRegister, NULL, false, TR_RamMethodSequence);
       else
-         {
-         if (child->isMethodPointerConstant())
-            loadAddressConstant(self()->cg(), self()->cg()->comp()->compileRelocatableCode(), child, child->getAddress(), pushRegister, NULL, false, TR_RamMethodSequence);
-         else
-            loadAddressConstant(self()->cg(), self()->cg()->comp()->compileRelocatableCode(), child, child->getAddress(), pushRegister);
-         }
+         loadAddressConstant(self()->cg(), self()->cg()->comp()->compileRelocatableCode(), child, child->getAddress(), pushRegister);
+
       child->setRegister(pushRegister);
       }
    else

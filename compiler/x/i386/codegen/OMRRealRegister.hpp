@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -218,7 +218,7 @@ class OMR_EXTENSIBLE RealRegister : public OMR::X86::RealRegister
 
    void setSourceRegisterFieldInEVEX(uint8_t *opcodeByte)
       {
-      uint8_t regNum = getRegisterNumber() - xmm0;
+      uint8_t regNum = ((_fullRegisterBinaryEncodings[_registerNumber].needsRexForByte << 3) | _fullRegisterBinaryEncodings[_registerNumber].id);
       uint8_t bits = 0;
       *opcodeByte &= 0x9F;
 
@@ -237,7 +237,7 @@ class OMR_EXTENSIBLE RealRegister : public OMR::X86::RealRegister
 
    void setSource2ndRegisterFieldInEVEX(uint8_t *opcodeByte)
       {
-      uint8_t regNum = getRegisterNumber() - xmm0;
+      uint8_t regNum = ((_fullRegisterBinaryEncodings[_registerNumber].needsRexForByte << 3) | _fullRegisterBinaryEncodings[_registerNumber].id);
 
       *opcodeByte &= 0x87; // zero out vvvv bits
       *opcodeByte |= (~(regNum << 3)) & 0x78;
@@ -252,7 +252,7 @@ class OMR_EXTENSIBLE RealRegister : public OMR::X86::RealRegister
 
    void setTargetRegisterFieldInEVEX(uint8_t *opcodeByte)
       {
-      uint8_t regNum = getRegisterNumber() - xmm0;
+      uint8_t regNum = ((_fullRegisterBinaryEncodings[_registerNumber].needsRexForByte << 3) | _fullRegisterBinaryEncodings[_registerNumber].id);
       uint8_t bits = 0;
       *opcodeByte &= 0x6F;
 

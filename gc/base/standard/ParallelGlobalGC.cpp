@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -66,6 +66,10 @@
 #include "Scavenger.hpp"
 #endif /* OMR_GC_MODRON_SCAVENGER */
 #include "WorkPackets.hpp"
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+#include "SweepHeapSectioning.hpp"
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 
 /* OMRTODO temporary workaround to allow both ut_j9mm.h and ut_omrmm.h to be included.
  *                 Dependency on ut_j9mm.h should be removed in the future.
@@ -410,6 +414,7 @@ MM_ParallelGlobalGC::cleanupAfterGC(MM_EnvironmentBase *env, MM_AllocateDescript
 		MM_EnvironmentStandard *threadEnvironment = MM_EnvironmentStandard::getEnvironment(walkThread);
 		threadEnvironment->_tenureTLHRemainderBase = NULL;
 		threadEnvironment->_tenureTLHRemainderTop = NULL;
+		threadEnvironment->_loaAllocation = false;
 	}
 
 	_extensions->_mainThreadTenureTLHRemainderTop = NULL;
@@ -1907,3 +1912,17 @@ MM_ParallelGlobalGC::healHeap(MM_EnvironmentBase *env)
 	 */
 }
 #endif /* defined(OMR_ENV_DATA64) && defined(OMR_GC_FULL_POINTERS) */
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+bool
+MM_ParallelGlobalGC::reinitializeForRestore(MM_EnvironmentBase *env)
+{
+	bool result = true;
+	/* Consider reinitializing sweepHeapSectioning through the collector's _sweepScheme. */
+	if (!_extensions->sweepHeapSectioning->reinitializeForRestore(env)) {
+		result = false;
+	}
+
+	return result;
+}
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */

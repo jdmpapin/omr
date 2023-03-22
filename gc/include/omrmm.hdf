@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Copyright (c) 2014, 2018 IBM Corp. and others
+Copyright IBM Corp. and others 2014
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
 SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -275,6 +275,14 @@ typedef uintptr_t (*condYieldFromGCFunctionPtr) (OMR_VMThread *omrVMThread, uint
 		<data type="struct OMR_VMThread *" name="currentThread" description="the current thread" />
 		<data type="omrobjectptr_t" name="oldObject" description="the old pointer to the object." />
 		<data type="omrobjectptr_t" name="newObject" description="the new pointer to the object." />
+	</event>
+
+	<event>
+		<name>J9HOOK_MM_OMR_REINITIALIZED</name>
+		<description>Triggered as soon as the GC is fully reinitialized.</description>
+		<struct>MM_ReinitializedEvent</struct>
+		<data type="struct OMR_VMThread*" name="currentThread" description="current thread" />
+		<data type="uint64_t" name="timestamp" description="time of event" />
 	</event>
 
 </interface>

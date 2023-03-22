@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -1185,7 +1185,7 @@ void TR_FieldPrivatizer::placeStoresBackInExit(TR::Block *block, bool placeAtEnd
    ListElement<TR::Node> *currentNodeElem = _privatizedFieldNodes.getListHead();
    TR::SymbolReference *currentSymRef     = NULL;
    TR_HashId          index              = 0;
-   ListElement<TR_RegisterCandidate> *privatizedCandidate = _privatizedRegCandidates.getListHead();
+   ListElement<TR::RegisterCandidate> *privatizedCandidate = _privatizedRegCandidates.getListHead();
 
    int32_t blockWeight = 1;
    optimizer()->getStaticFrequency(block, &blockWeight);
@@ -1286,7 +1286,7 @@ bool TR_FieldPrivatizer::storesBackMustBePlacedInExitBlock(TR::Block *exitBlock,
 
 void TR_FieldPrivatizer::addPrivatizedRegisterCandidates(TR_Structure *structure)
    {
-   ListElement<TR_RegisterCandidate> *privatizedCandidate = _privatizedRegCandidates.getListHead();
+   ListElement<TR::RegisterCandidate> *privatizedCandidate = _privatizedRegCandidates.getListHead();
    while (privatizedCandidate)
       {
       if (performTransformation(comp(), "%s Adding auto %d (created for privatization) as a global register candidate in loop %d\n", optDetailString(), privatizedCandidate->getData()->getSymbolReference()->getReferenceNumber(), structure->getNumber()))

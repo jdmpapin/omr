@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -69,6 +69,8 @@
 #include "optimizer/RegisterCandidate.hpp"
 #include "optimizer/Structure.hpp"
 #include "optimizer/TransformUtil.hpp"
+#include "optimizer/GlobalRegister.hpp"
+#include "optimizer/GlobalRegister_inlines.hpp"
 #include "ras/Debug.hpp"
 
 class TR_Memory;
@@ -174,7 +176,7 @@ OMR::Block::Block(TR::Block &other, TR::TreeTop *entry, TR::TreeTop *exit) :
    self()->setFrequency(other.getFrequency());
 
    if (other._globalRegisters)
-      _globalRegisters = new (other._region) TR_Array<TR_GlobalRegister>(*other._globalRegisters);
+      _globalRegisters = new (other._region) TR_Array<TR::GlobalRegister>(*other._globalRegisters);
 
    _flags.set(other._flags.getValue());
    _moreflags.set(other._moreflags.getValue());
@@ -2322,11 +2324,11 @@ OMR::Block::getNestingDepth()
    return -1;
    }
 
-TR_Array<TR_GlobalRegister> &
+TR_Array<TR::GlobalRegister> &
 OMR::Block::getGlobalRegisters(TR::Compilation *c)
    {
    if (!_globalRegisters)
-      _globalRegisters = new (c->trStackMemory()) TR_Array<TR_GlobalRegister>(c->trMemory(), c->cg()->getNumberOfGlobalRegisters(), true, stackAlloc);
+      _globalRegisters = new (c->trStackMemory()) TR_Array<TR::GlobalRegister>(c->trMemory(), c->cg()->getNumberOfGlobalRegisters(), true, stackAlloc);
    return *_globalRegisters;
    }
 

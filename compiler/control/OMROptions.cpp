@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -167,6 +167,9 @@ TR::OptionTable OMR::Options::_jitOptions[] = {
    {"breakOnThrow=",       "D{regex}\traise trap when throwing an exception whose class name matches regex", TR::Options::setRegex, offsetof(OMR::Options,             _breakOnThrow), 0, "P"},
    {"breakOnWriteBarrier", "D\tinsert breakpoint instruction ahead of inline write barrier", SET_OPTION_BIT(TR_BreakOnWriteBarrier), "F" },
    {"breakOnWriteBarrierSnippet", "D\tinsert breakpoint instruction at beginning of write barrier snippet", SET_OPTION_BIT(BreakOnWriteBarrierSnippet), "F" },
+   {"catchBlockCounterThreshold=", "O<nnn>\tInliner will inline more aggressively on the throw path "
+                                   "if the catch block counter is greater than this threshold",
+                                   TR::Options::set32BitNumeric, offsetof(TR::Options, _catchBlockCounterThreshold), 50, "F%d"},
    {"checkGRA",                "D\tPreserve stores that would otherwise be removed by GRA, and then verify that the stored value matches the global register", SET_OPTION_BIT(TR_CheckGRA), "F"},
    {"checkStructureDuringExitExtraction", "D\tCheck structure after each step of exit extraction", SET_OPTION_BIT(TR_CheckStructureDuringExitExtraction), "F"},
    {"classesWithFoldableFinalFields=",   "O{regex}\tAllow hard-coding of values of final fields in the specified classes.  Default is to fold anything considered safe.", TR::Options::setRegex, offsetof(OMR::Options, _classesWithFolableFinalFields), 0, "F"},
@@ -366,6 +369,7 @@ TR::OptionTable OMR::Options::_jitOptions[] = {
                                           TR::Options::setRegex, offsetof(OMR::Options, _disabledIdiomPatterns), 0, "P"},
    {"disableIdiomRecognition",            "O\tdisable idiom recognition",                       TR::Options::disableOptimization, idiomRecognition, 0, "P"},
 #endif
+   {"disableIlgenOpts", "O\tDo not run the optimizer during ilgen", SET_OPTION_BIT(TR_DisableIlgenOpts), "F"},
    {"disableImmutableFieldAliasing",      "O\tdisable special handling for immutable fields.", SET_OPTION_BIT(TR_DisableImmutableFieldAliasing), "P"},
    {"disableIncrementalCCR",              "O\tdisable incremental ccr",      SET_OPTION_BIT(TR_DisableIncrementalCCR), "F" ,NOT_IN_SUBSET},
 
@@ -589,7 +593,6 @@ TR::OptionTable OMR::Options::_jitOptions[] = {
    {"disableVMCSProfiling",               "O\tdisable VM data for virtual call sites", SET_OPTION_BIT(TR_DisableVMCSProfiling), "F", NOT_IN_SUBSET},
    {"disableVSSStackCompaction",          "O\tdisable VariableSizeSymbol stack compaction", SET_OPTION_BIT(TR_DisableVSSStackCompaction), "F"},
    {"disableWriteBarriersRangeCheck",     "O\tdisable adding range check to write barriers",   SET_OPTION_BIT(TR_DisableWriteBarriersRangeCheck), "F"},
-   {"disableWrtBarSrcObjCheck",           "O\tdisable to not check srcObj location for wrtBar in gc", SET_OPTION_BIT(TR_DisableWrtBarSrcObjCheck), "F"},
    {"disableZ10",                         "O\tdisable z10 support",                            SET_OPTION_BIT(TR_DisableZ10), "F"},
    {"disableZ13",                         "O\tdisable z13 support",                        SET_OPTION_BIT(TR_DisableZ13), "F"},
    {"disableZ14",                         "O\tdisable z14 support",                            SET_OPTION_BIT(TR_DisableZ14), "F"},
@@ -640,6 +643,12 @@ TR::OptionTable OMR::Options::_jitOptions[] = {
    {"dumpIprofilerMethodNamesAndCounts",  "O\tDebug Printing of Method Names and Persisted Counts.", SET_OPTION_BIT(TR_DumpPersistedIProfilerMethodNamesAndCounts), "F"},
    {"dynamicThreadPriority",              "M\tenable dynamic changing of compilation thread priority", SET_OPTION_BIT(TR_DynamicThreadPriority), "F", NOT_IN_SUBSET},
    {"earlyLPQ",                           "M\tAllow compilations from low priority queue to happen early, during startup", SET_OPTION_BIT(TR_EarlyLPQ), "F", NOT_IN_SUBSET },
+   {"edoRecompSizeThreshold=",            "R<nnn>\tThe sample counter will not be decremented in a catch block "
+                                           "if the number of nodes in the compiled method exceeds this threshold",
+                                           TR::Options::set32BitNumeric, offsetof(TR::Options, _edoRecompSizeThreshold), 50, "F%d"},
+   {"edoRecompSizeThresholdInStartupMode=", "R<nnn>\tThe sample counter will not be decremented in a catch block "
+                                           "if the number of nodes in the compiled method exceeds this threshold and the VM is in startup mode",
+                                           TR::Options::set32BitNumeric, offsetof(TR::Options, _edoRecompSizeThresholdInStartupMode), 50, "F%d"},
    {"enableAggressiveInlining",           "I\tSet additional options that makes inlining more aggressive ", SET_OPTION_BIT(TR_AggressiveInlining), "F", NOT_IN_SUBSET},
    {"enableAggressiveLiveness",           "I\tenable globalLiveVariablesForGC below warm", SET_OPTION_BIT(TR_EnableAggressiveLiveness), "F"},
    {"enableAggressiveLoopVersioning", "O\tOptions and thresholds that result in loop versioning occurring in more cases", SET_OPTION_BIT(TR_EnableAggressiveLoopVersioning), "F" },
@@ -727,6 +736,7 @@ TR::OptionTable OMR::Options::_jitOptions[] = {
    {"enableNewCheckCastInstanceOf",      "O\tenable new Checkcast/InstanceOf evaluator", SET_OPTION_BIT(TR_EnableNewCheckCastInstanceOf), "F"},
    {"enableNewX86PrefetchTLH",           "O\tenable new X86 TLH prefetch algorithm", SET_OPTION_BIT(TR_EnableNewX86PrefetchTLH), "F"},
    {"enableNodeGC",                      "M\tenable node recycling", SET_OPTION_BIT(TR_EnableNodeGC), "F"},
+   {"enableOldEDO",                       "O\tenable the old EDO mechanism", SET_OPTION_BIT(TR_EnableOldEDO), "F", NOT_IN_SUBSET},
    {"enableOnsiteCacheForSuperClassTest", "O\tenable onsite cache for super class test",       SET_OPTION_BIT(TR_EnableOnsiteCacheForSuperClassTest), "F"},
    {"enableOSR",                          "O\tenable on-stack replacement", SET_OPTION_BIT(TR_EnableOSR), "F", NOT_IN_SUBSET},
    {"enableOSROnGuardFailure",            "O\tperform a decompile using on-stack replacement every time a virtual guard fails", SET_OPTION_BIT(TR_EnableOSROnGuardFailure), "F"},
@@ -813,9 +823,8 @@ TR::OptionTable OMR::Options::_jitOptions[] = {
    {"GCRresetCount=",       "R<nnn>\tthe value to which the counter is reset to after being tripped by guarded counting recompilations (postive value)",
     TR::Options::setCount, offsetof(OMR::Options,_GCRResetCount), 0, "F%d"},
    {"generateCompleteInlineRanges", "O\tgenerate meta data ranges for each change in inliner depth", SET_OPTION_BIT(TR_GenerateCompleteInlineRanges), "F"},
-   {"hcrPatchClassPointers", "I\tcreate runtime assumptions for patching pointers to classes, even though they are now updated in-place", SET_OPTION_BIT(TR_HCRPatchClassPointers), "F"},
-   {"help",               " \tdisplay this help information", TR::Options::helpOption, 0, 0, NULL, NOT_IN_SUBSET},
-   {"help=",              " {regex}\tdisplay help for options whose names match {regex}", TR::Options::helpOption, 1, 0, NULL, NOT_IN_SUBSET},
+   {"help",               " \tdisplay this help information", TR::Options::helpOption, 0, 0, "F", NOT_IN_SUBSET},
+   {"help=",              " {regex}\tdisplay help for options whose names match {regex}", TR::Options::helpOption, 1, 0, "F", NOT_IN_SUBSET},
    {"highCodeCacheOccupancyBCount=", "R<nnn>\tthe initial invocation count used during high code cache occupancy for methods with loops",
     TR::Options::setStaticNumeric, (intptr_t)&OMR::Options::_highCodeCacheOccupancyBCount, 0, "F%d", NOT_IN_SUBSET},
    {"highCodeCacheOccupancyCount=", "R<nnn>\tthe initial invocation count used during high code cache occupancy",
@@ -985,7 +994,7 @@ TR::OptionTable OMR::Options::_jitOptions[] = {
    {NoOptString,          "O\tdeprecated; equivalent to optLevel=noOpt",
         TR::Options::set32BitValue, offsetof(OMR::Options, _optLevel), noOpt, "F"},
    {"noRecompile",        "D\tdo not recompile even when counts allow it", SET_OPTION_BIT(TR_NoRecompile), "F" },
-   {"noregmap",           "C\tgenerate GC maps without register maps",  RESET_OPTION_BIT(TR_RegisterMaps), NULL, NOT_IN_SUBSET},
+   {"noregmap",           "C\tgenerate GC maps without register maps",  RESET_OPTION_BIT(TR_RegisterMaps), "F", NOT_IN_SUBSET},
    {"noResumableTrapHandler", "C\tdo not generate traps for exception detections",
         SET_OPTION_BIT(TR_NoResumableTrapHandler), "F" },
    {"noServer",      "D\tDisable compilation strategy for large scale applications (e.g. WebSphere)",    SET_OPTION_BIT(TR_NoOptServer), "P" },
@@ -1049,7 +1058,7 @@ TR::OptionTable OMR::Options::_jitOptions[] = {
    {"randomSeedSignatureHash","R\tSet random seed value based on a hash of the method's signature, in order to get varying seeds while maintaining reproducibility", SET_OPTION_BIT(TR_RandomSeedSignatureHash),  "F" },
    {"realTimeGC",         "I\tSupport the real time GC", SET_OPTION_BIT(TR_RealTimeGC), "F" },
    {"reduceCountsForMethodsCompiledDuringStartup", "M\tNeeds SCC compilation hints\t", SET_OPTION_BIT(TR_ReduceCountsForMethodsCompiledDuringStartup), "F", NOT_IN_SUBSET },
-   {"regmap",             "C\tgenerate GC maps with register maps", SET_OPTION_BIT(TR_RegisterMaps), NULL, NOT_IN_SUBSET},
+   {"regmap",             "C\tgenerate GC maps with register maps", SET_OPTION_BIT(TR_RegisterMaps), "F", NOT_IN_SUBSET},
    {"reportEvents",       "C\tcompile event reporting hooks into code", SET_OPTION_BIT(TR_ReportMethodEnter | TR_ReportMethodExit)},
    {"reportMethodEnterExit", "D\treport method enter and exit",                   SET_OPTION_BIT(TR_ReportMethodEnter | TR_ReportMethodExit), "F"},
    {"reserveAllLocks",    "O\tenable reserving locks for all classes and methods (DEBUG Only)", SET_OPTION_BIT(TR_ReserveAllLocks), "F"},
@@ -1096,6 +1105,7 @@ TR::OptionTable OMR::Options::_jitOptions[] = {
    {"suffixLogs",          "O\tadd the date/time/pid suffix to the file name of the logs", SET_OPTION_BIT(TR_EnablePIDExtension), "F", NOT_IN_SUBSET},
    {"suffixLogsFormat=",   "O\tadd the suffix in specified format to the file name of the logs", TR::Options::setString,  offsetof(OMR::Options, _suffixLogsFormat), 0, "P%s", NOT_IN_SUBSET},
    {"supportSwitchToInterpeter", "C\tGenerate code to allow each method to switch to the interpreter", SET_OPTION_BIT(TR_SupportSwitchToInterpreter), "P"},
+   {"suppressEA=",               "O{regex}\tSuppress stack allocations by Escape Analysis at locations that match the specified regex", TR::Options::setRegex, offsetof(OMR::Options, _suppressEA), 0, "P"},
    {"suspendCompThreadsEarly", "M\tSuspend compilation threads when QWeight drops under a threshold", SET_OPTION_BIT(TR_SuspendEarly), "F", NOT_IN_SUBSET },
    {"terseRegisterPressureTrace","L\tinclude only summary info about register pressure tracing when traceGRA is enabled", SET_OPTION_BIT(TR_TerseRegisterPressureTrace), "P" },
    {"test390LitPoolBufferSize=", "L\tInsert 8byte elements into Lit Pool to force testing of large lit pool sizes",
@@ -1127,6 +1137,7 @@ TR::OptionTable OMR::Options::_jitOptions[] = {
    {"traceBlockShuffling",              "L\ttrace random rearrangement of blocks",         TR::Options::traceOptimization, blockShuffling, 0, "P"},
    {"traceBlockSplitter",               "L\ttrace block splitter",                         TR::Options::traceOptimization, blockSplitter, 0, "P"},
    {"traceBVA",                         "L\ttrace bit vector analysis",                    SET_OPTION_BIT(TR_TraceBVA), "P" },
+   {"traceCatchBlockProfiler",          "L\ttrace catch block profiler",                   TR::Options::traceOptimization, catchBlockProfiler, 0, "P"},
    {"traceCatchBlockRemoval",           "L\ttrace catch block removal",                    TR::Options::traceOptimization, catchBlockRemoval, 0, "P"},
    {"traceCFGSimplification",           "L\ttrace Control Flow Graph simplification",      TR::Options::traceOptimization, CFGSimplification, 0, "P"},
    {"traceCG",                          "L\tdump output of code generation passes",        SET_OPTION_BIT(TR_TraceCG), "P" },
@@ -1589,6 +1600,8 @@ TR_Debug *OMR::Options::_debug = 0;
 bool OMR::Options::_canJITCompile = false;
 bool OMR::Options::_fullyInitialized = false;
 
+bool OMR::Options::_postRestoreProcessing = false;
+
 OMR::Options::VerboseOptionFlagArray OMR::Options::_verboseOptionFlags;
 bool          OMR::Options::_quickstartDetected = false;
 
@@ -1654,6 +1667,7 @@ int64_t       OMR::Options::INLINE_calleeHasTooManyNodesSum      = 0;
 int32_t       OMR::Options::_inlinerVeryLargeCompiledMethodAdjustFactor = 20;
 
 int32_t       OMR::Options::_numUsableCompilationThreads = -1; // -1 means not initialized
+int32_t       OMR::Options::_numAllocatedCompilationThreads = -1; // -1 means not initialized
 
 int32_t       OMR::Options::_trampolineSpacePercentage = 0; // 0 means no change from default
 
@@ -1796,7 +1810,8 @@ OMR::Options::Options(
       TR_OptimizationPlan *optimizationPlan,
       bool isAOT,
       int32_t compThreadID) :
-   _optionSets(0),
+   _optionSets(NULL),
+   _postRestoreOptionSets(NULL),
    _logListForOtherCompThreads(0)
    {
    TR_ASSERT(optimizationPlan, "Must have an optimization plan when calling this method");
@@ -1883,7 +1898,6 @@ OMR::Options::Options(
    // Vector API, clean up is needed once we have resolved all workarounds.
    if (self()->getOption(TR_EnforceVectorAPIExpansion))
       {
-      self()->setOption(TR_DisableOSRGuardMerging);
       self()->setOption(TR_ProcessHugeMethods);
       optimizationPlan->setOptLevel(scorching);
       }
@@ -1910,7 +1924,8 @@ OMR::Options::Options(
 
 
 OMR::Options::Options(TR::Options &other) :
-   _optionSets(0),
+   _optionSets(NULL),
+   _postRestoreOptionSets(NULL),
    _logListForOtherCompThreads(0)
    {
    *this = other;
@@ -2167,15 +2182,6 @@ OMR::Options::jitLatePostProcess(TR::OptionSet *optionSet, void * jitConfig)
 
       // TODO: make cold inliner less aggressive for 2P or less
 
-#ifdef J9_PROJECT_SPECIFIC
-      if (TR::Options::_catchSamplingSizeThreshold == -1) // not yet set
-         {
-         TR::Options::_catchSamplingSizeThreshold = 1100; // in number of nodes
-         if (TR::Compiler->target.numberOfProcessors() <= 2)
-            TR::Options::_catchSamplingSizeThreshold = 850;
-         }
-#endif
-
       if (_startupMethodDontDowngradeThreshold == -1) // not yet set
          {
          _startupMethodDontDowngradeThreshold = 300;
@@ -2330,6 +2336,15 @@ OMR::Options::jitLatePostProcess(TR::OptionSet *optionSet, void * jitConfig)
    else // option set processing
       {
       _logFile = NULL;
+
+      if (_logFileName)
+         {
+         if (_logFileName[0])
+            _hasLogFile = true; // non-null log file name
+         else
+            _logFileName = NULL;// null log file name ... treat as no log file
+         }
+
       if (_logFileName)
          {
          if (!_debug)
@@ -2493,6 +2508,50 @@ OMR::Options::processOptionsAOT(char *aotOptions, void *feBase, TR_FrontEnd *fe)
    return dummy_string;
    }
 
+void
+OMR::Options::setAggressivenessLevelOpts()
+   {
+   if (this == OMR::Options::getJITCmdLineOptions() || this == OMR::Options::getAOTCmdLineOptions())
+      {
+      if (_aggressivenessLevel >= 0 && _aggressivenessLevel < LAST_AGGRESSIVENESS_LEVEL)
+         {
+         // Set some default values for JIT and AOT main command line options
+         //
+         switch (_aggressivenessLevel)
+            {
+            case OMR::Options::DEFAULT: // default behavior
+               break;
+            case OMR::Options::CONSERVATIVE_DEFAULT: // conservative default
+               self()->setConservativeDefaultBehavior();
+               break;
+            case OMR::Options::AGGRESSIVE_AOT: // aggressive AOT (Rely on AOT as much as possible)
+               self()->setGlobalAggressiveAOT();
+               break;
+            case OMR::Options::AGGRESSIVE_QUICKSTART: // aggressive quickstart (Quickstart with interpreter profiler)
+               self()->setAggressiveQuickStart();
+               break;
+            case OMR::Options::QUICKSTART: // quickstart or -client
+               self()->setQuickStart();
+               break;
+            case OMR::Options::CONSERVATIVE_QUICKSTART: // conservative quickstart
+               self()->setConservativeQuickStart();
+               break;
+            case OMR::Options::AGGRESSIVE_THROUGHPUT: // Enabled with -Xtune:throughput
+               self()->setAggressiveThroughput();
+               break;
+            } // end switch
+         }
+      else  // Some message that the aggressivenessLevel is invalid
+         {
+         if (_aggressivenessLevel != -1) // -1 means not set
+            {
+            if (OMR::Options::isAnyVerboseOptionSet())
+               TR_VerboseLog::writeLineLocked(TR_Vlog_INFO, "_aggressivenessLevel=%d; must be between 0 and 5; Option ignored", _aggressivenessLevel);
+            _aggressivenessLevel = -1;
+            }
+         }
+      }
+   }
 
 void
 OMR::Options::jitPreProcess()
@@ -2709,46 +2768,7 @@ OMR::Options::jitPreProcess()
       // The aggressivenessLevel is set as a VM option. JIT options have not been processed at this point
       // When JIT processing is taking place, some of these decisions can be overidden
       //
-      if (this == OMR::Options::getJITCmdLineOptions() || this == OMR::Options::getAOTCmdLineOptions())
-         {
-         if (_aggressivenessLevel >= 0 && _aggressivenessLevel < LAST_AGGRESSIVENESS_LEVEL)
-            {
-            // Set some default values for JIT and AOT main command line options
-            //
-            switch (_aggressivenessLevel)
-               {
-               case OMR::Options::DEFAULT: // default behavior
-                  break;
-               case OMR::Options::CONSERVATIVE_DEFAULT: // conservative default
-                  self()->setConservativeDefaultBehavior();
-                  break;
-               case OMR::Options::AGGRESSIVE_AOT: // aggressive AOT (Rely on AOT as much as possible)
-                  self()->setGlobalAggressiveAOT();
-                  break;
-               case OMR::Options::AGGRESSIVE_QUICKSTART: // aggressive quickstart (Quickstart with interpreter profiler)
-                  self()->setAggressiveQuickStart();
-                  break;
-               case OMR::Options::QUICKSTART: // quickstart or -client
-                  self()->setQuickStart();
-                  break;
-               case OMR::Options::CONSERVATIVE_QUICKSTART: // conservative quickstart
-                  self()->setConservativeQuickStart();
-                  break;
-               case OMR::Options::AGGRESSIVE_THROUGHPUT: // Enabled with -Xtune:throughput
-                  self()->setAggressiveThroughput();
-                  break;
-               } // end switch
-            }
-         else  // Some message that the aggressivenessLevel is invalid
-            {
-            if (_aggressivenessLevel != -1) // -1 means not set
-               {
-               if (OMR::Options::isAnyVerboseOptionSet())
-                     TR_VerboseLog::writeLineLocked(TR_Vlog_INFO, "_aggressivenessLevel=%d; must be between 0 and 5; Option ignored", _aggressivenessLevel);
-               _aggressivenessLevel = -1;
-               }
-            }
-         }
+      self()->setAggressivenessLevelOpts();
 
       _enableSCHintFlags = TR_HintFailedValidation;
 
@@ -2795,6 +2815,12 @@ OMR::Options::jitPreProcess()
       _stackPCDumpNumberOfFrames=5;
       _maxSpreadCountLoopless = TR_MAX_SPREAD_COUNT_LOOPLESS;
       _maxSpreadCountLoopy = TR_MAX_SPREAD_COUNT_LOOPY;
+
+      // Set the default value for _edoRecompSizeThreshold before the
+      // code that sets default based on the deterministic mode
+      _edoRecompSizeThreshold = TR::Compiler->target.numberOfProcessors() <= 2 ? 850 : 1100; // in number of nodes
+      _edoRecompSizeThresholdInStartupMode = TR::Compiler->target.numberOfProcessors() <= 2 ? 850 : 1100; // in number of nodes
+      _catchBlockCounterThreshold = 50;
 
       // This call needs to stay at the end of jitPreProcess() because
       // it changes the default values for some options
@@ -3443,9 +3469,9 @@ OMR::Options::processOptionSet(
                }
 
             if (isAOT)
-               TR::Options::getAOTCmdLineOptions()->addOptionSet(newSet);
+               TR::Options::getAOTCmdLineOptions()->saveOptionSet(newSet);
             else
-               TR::Options::getJITCmdLineOptions()->addOptionSet(newSet);
+               TR::Options::getJITCmdLineOptions()->saveOptionSet(newSet);
             }
          }
 
@@ -3501,6 +3527,41 @@ OMR::Options::processOptionSet(
       options = endOpt;
       break;
       }
+   return options;
+   }
+
+char *
+OMR::Options::processOptionSetPostRestore(void *jitConfig, char *options, TR::Options *optBase, bool isAOT)
+   {
+   _postRestoreProcessing = true;
+
+   // Process options and remember option sets
+   options = processOptionSet(options, NULL, optBase, isAOT);
+   if (*options)
+      return options;
+
+   if (!optBase->jitLatePostProcess(NULL, jitConfig))
+      return options;
+
+   // Process option sets
+   for (TR::OptionSet *optionSet = optBase->_postRestoreOptionSets; optionSet; optionSet = optionSet->getNext())
+      {
+      char *subOpts = optionSet->getOptionString();
+
+      TR::Options *newOptions = new (PERSISTENT_NEW) TR::Options(*optBase);
+      optionSet->setOptions(newOptions);
+
+      subOpts = TR::Options::processOptionSet(subOpts, optionSet, optionSet->getOptions(), isAOT);
+      if (*subOpts != ')')
+         return subOpts;
+
+      if (!optionSet->getOptions()->jitLatePostProcess(optionSet, jitConfig))
+         return subOpts;
+      }
+
+   // Once the option sets are processed, merge them with the main option sets
+   optBase->mergePostRestoreOptionSets();
+
    return options;
    }
 
@@ -4066,6 +4127,37 @@ OMR::Options::setOptLevel(int32_t o)
 static int32_t    count[numHotnessLevels] = {-2};
 static int32_t   bcount[numHotnessLevels] = {-2};
 static int32_t milcount[numHotnessLevels] = {-2};
+
+
+void
+OMR::Options::saveOptionSet(TR::OptionSet *o)
+   {
+   if (_postRestoreProcessing)
+      {
+      self()->addPostRestoreOptionSet(o);
+      }
+   else
+      {
+      self()->addOptionSet(o);
+      }
+   }
+
+/**
+ * Merge option sets stored in _postRestoreOptionSets into _optionSets.
+ * _postRestoreOptionSets is then set to NULL.
+ */
+void
+OMR::Options::mergePostRestoreOptionSets()
+   {
+   TR::OptionSet *optionSet = _postRestoreOptionSets;
+   while (optionSet)
+      {
+      TR::OptionSet *next = optionSet->getNext();
+      self()->addOptionSet(optionSet);
+      optionSet = next;
+      }
+   _postRestoreOptionSets = NULL;
+   }
 
 char*
 OMR::Options::setCounts()
@@ -5399,7 +5491,12 @@ void OMR::Options::setDefaultsForDeterministicMode()
       self()->setOption(TR_DisablePersistIProfile, true); // AOT specific
       OMR::Options::_bigAppThreshold = 1;
       if (TR::Options::getNumUsableCompilationThreads() == -1) // not yet set
+         {
          OMR::Options::_numUsableCompilationThreads = 7;
+         OMR::Options::_numAllocatedCompilationThreads = OMR::Options::_numUsableCompilationThreads;
+         }
+      _edoRecompSizeThreshold = 1000000;
+      _edoRecompSizeThresholdInStartupMode = 1000000;
 #ifdef J9_PROJECT_SPECIFIC
       TR::Options::_veryHotSampleThreshold = 240; // 12.5 %
       TR::Options::_scorchingSampleThreshold = 120; // 25% CPU
@@ -5413,7 +5510,6 @@ void OMR::Options::setDefaultsForDeterministicMode()
       TR::Options::_profileAllTheTime = 1;
       TR::Options::_scratchSpaceFactorWhenJSR292Workload = 1; // since we have maximum scratchSpaceLimit
       TR::Options::_scratchSpaceLimitKBWhenLowVirtualMemory = 2147483647;
-      TR::Options::_catchSamplingSizeThreshold = 10000000;
       TR::Options::_smallMethodBytecodeSizeThresholdForCold = 0; // Don't try filter out small methods from using GCR trees
 #endif
       switch (TR::Options::getDeterministicMode())

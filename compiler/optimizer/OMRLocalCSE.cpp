@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -1074,8 +1074,8 @@ TR::Node *OMR::LocalCSE::replaceCopySymbolReferenceByOriginalIn(TR::SymbolRefere
 
             TR::Node *convNode = NULL;
             if (TR::ILOpCode::isVectorOpCode(convOp) &&
-                TR::ILOpCode::getVectorOperation(convOp) == TR::vcast)
-               convNode = TR::Node::create(TR::ILOpCode::createVectorOpCode(TR::vcast, rhsOfStoreDefNode->getDataType(), node->getDataType()), 1, rhsOfStoreDefNode);
+                TR::ILOpCode::getVectorOperation(convOp) == TR::vconv)
+               convNode = TR::Node::create(TR::ILOpCode::createVectorOpCode(TR::vconv, rhsOfStoreDefNode->getDataType(), node->getDataType()), 1, rhsOfStoreDefNode);
             else
                convNode = TR::Node::create(convOp, 1, rhsOfStoreDefNode);
             rhsOfStoreDefNode->decReferenceCount();

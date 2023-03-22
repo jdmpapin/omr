@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -81,8 +81,8 @@ class TR_LiveReference;
 class TR_LiveRegisters;
 class TR_OSRMethodData;
 class TR_PseudoRegister;
-class TR_RegisterCandidate;
-class TR_RegisterCandidates;
+namespace TR { class RegisterCandidate; }
+namespace TR { class RegisterCandidates; }
 namespace TR { class Relocation; }
 namespace TR { class RelocationDebugInfo; }
 class TR_ResolvedMethod;
@@ -1025,13 +1025,13 @@ public:
    TR_BitVector *getGlobalFPRsPreservedAcrossCalls(){ return NULL; }
 
    int32_t getFirstBit(TR_BitVector &bv);
-   TR_GlobalRegisterNumber pickRegister(TR_RegisterCandidate *, TR::Block * *, TR_BitVector & availableRegisters, TR_GlobalRegisterNumber & highRegisterNumber, TR_LinkHead<TR_RegisterCandidate> *candidates);
-   TR_RegisterCandidate *findCoalescenceForRegisterCopy(TR::Node *node, TR_RegisterCandidate *rc, bool *isUnpreferred);
-   TR_GlobalRegisterNumber findCoalescenceRegisterForParameter(TR::Node *callNode, TR_RegisterCandidate *rc, uint32_t childIndex, bool *isUnpreferred);
-   TR_RegisterCandidate *findUsedCandidate(TR::Node *node, TR_RegisterCandidate *rc, TR_BitVector *visitedNodes);
+   TR_GlobalRegisterNumber pickRegister(TR::RegisterCandidate *, TR::Block * *, TR_BitVector & availableRegisters, TR_GlobalRegisterNumber & highRegisterNumber, TR_LinkHead<TR::RegisterCandidate> *candidates);
+   TR::RegisterCandidate *findCoalescenceForRegisterCopy(TR::Node *node, TR::RegisterCandidate *rc, bool *isUnpreferred);
+   TR_GlobalRegisterNumber findCoalescenceRegisterForParameter(TR::Node *callNode, TR::RegisterCandidate *rc, uint32_t childIndex, bool *isUnpreferred);
+   TR::RegisterCandidate *findUsedCandidate(TR::Node *node, TR::RegisterCandidate *rc, TR_BitVector *visitedNodes);
 
-   bool allowGlobalRegisterAcrossBranch(TR_RegisterCandidate *, TR::Node * branchNode);
-   void removeUnavailableRegisters(TR_RegisterCandidate * rc, TR::Block * * blocks, TR_BitVector & availableRegisters) {}
+   bool allowGlobalRegisterAcrossBranch(TR::RegisterCandidate *, TR::Node * branchNode);
+   void removeUnavailableRegisters(TR::RegisterCandidate * rc, TR::Block * * blocks, TR_BitVector & availableRegisters) {}
    void setUnavailableRegistersUsage(TR_Array<TR_BitVector>  & liveOnEntryUsage, TR_Array<TR_BitVector>   & liveOnExitUsage) {}
 
    int32_t getMaximumNumberOfGPRsAllowedAcrossEdge(TR::Node *) { return INT_MAX; }
@@ -1048,8 +1048,25 @@ public:
 
    TR_Array<TR::Register *>& getRegisterArray() {return _registerArray;}
 
+   /**
+   * \brief Checks if global register allocation is supported for the given node
+   *
+   * \return true if the node can support GRA, otherwise false
+   */
    bool considerTypeForGRA(TR::Node *node) {return true;}
+
+   /**
+   * \brief Checks if global register allocation is supported for the given type
+   *
+   * \return true if the data-type can support GRA, otherwise false
+   */
    bool considerTypeForGRA(TR::DataType dt) {return true;}
+
+   /**
+   * \brief Checks if global register allocation is supported for the symbol reference
+   *
+   * \return true if the symbol can support GRA, otherwise false
+   */
    bool considerTypeForGRA(TR::SymbolReference *symRef) {return true;}
 
    void enableLiteralPoolRegisterForGRA () {}
@@ -1324,8 +1341,6 @@ public:
    void jitAddPicToPatchOnClassRedefinition(void *classPointer, void *addressToBePatched, bool unresolved = false) {}
    void jitAdd32BitPicToPatchOnClassRedefinition(void *classPointer, void *addressToBePatched, bool unresolved = false) {}
    void jitAddUnresolvedAddressMaterializationToPatchOnClassRedefinition(void *firstInstruction) {} //J9
-   bool wantToPatchClassPointer(const TR_OpaqueClassBlock *allegedClassPointer, const TR::Node *forNode) { return false; } //J9
-   bool wantToPatchClassPointer(const TR_OpaqueClassBlock *allegedClassPointer, const uint8_t *inCodeAt) { return false; } //J9
 
    // --------------------------------------------------------------------------
    // Unclassified

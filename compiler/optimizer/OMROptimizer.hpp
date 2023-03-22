@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -134,6 +134,7 @@ enum
    IfEAOpportunitiesAndNotOptServer,
    IfAggressiveLiveness,
    IfVectorAPI,  // JEP414: Extra analysis required to optimize Vector API
+   IfExceptionHandlers,
    MarkLastRun
    };
 
@@ -176,9 +177,9 @@ class Optimizer
     * functionality as the `optTest=` parameter, it does not require
     * reinitializing the JIT, nor manually changing the optFile.
     *
-    * If _mockStrategy is NULL, has no effect on the optimizer. 
+    * If _mockStrategy is NULL, has no effect on the optimizer.
     *
-    * @param strategy The #OptimizationStrategy to return when requested. 
+    * @param strategy The #OptimizationStrategy to return when requested.
     */
    static void setMockStrategy(const OptimizationStrategy *strategy) { _mockStrategy = strategy; };
 
@@ -361,9 +362,9 @@ class Optimizer
 
    const OptimizationStrategy *          _strategy;
 
-   /* 
+   /*
     * Since mock strategies are only used in testing right now, we make this
-    * static to ease implementation. 
+    * static to ease implementation.
     *
     * This is currently not a thread-safe implementation beause doing a
     * thread-safe implementation would require a more invasive compilation

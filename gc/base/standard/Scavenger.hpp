@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -600,6 +600,13 @@ public:
 	 */
 	void calculateRecommendedWorkingThreads(MM_EnvironmentStandard *env);
 
+	/**
+	 * Sets the collector recommended thread count to UDATA_MAX (default value).
+	 *
+	 * @return void
+	 */
+	void resetRecommendedThreads() { _recommendedThreads = UDATA_MAX; };
+
 	void scavenge(MM_EnvironmentBase *env);
 	bool scavengeCompletedSuccessfully(MM_EnvironmentStandard *env);
 	virtual	void mainThreadGarbageCollect(MM_EnvironmentBase *env, MM_AllocateDescription *allocDescription, bool initMarkMap = false, bool rebuildMarkBits = false);
@@ -716,7 +723,7 @@ protected:
 	
 public:
 
-	static MM_Scavenger *newInstance(MM_EnvironmentStandard *env, MM_HeapRegionManager *regionManager);
+	static MM_Scavenger *newInstance(MM_EnvironmentStandard *env);
 	virtual void kill(MM_EnvironmentBase *env);
 
 	MM_ScavengerDelegate* getDelegate() { return &_delegate; }
@@ -918,7 +925,7 @@ public:
 	virtual bool canCollectorExpand(MM_EnvironmentBase *env, MM_MemorySubSpace *subSpace, uintptr_t expandSize);
 	virtual uintptr_t getCollectorExpandSize(MM_EnvironmentBase *env);
 
-	MM_Scavenger(MM_EnvironmentBase *env, MM_HeapRegionManager *regionManager) :
+	MM_Scavenger(MM_EnvironmentBase *env) :
 		MM_Collector()
 		, _cycleTimes()
 		, _delegate(env)
@@ -958,7 +965,7 @@ public:
 		, _backOutDoneIndex(0)
 		, _heapBase(NULL)
 		, _heapTop(NULL)
-		, _regionManager(regionManager)
+		, _regionManager(_extensions->heapRegionManager)
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
 		, _mainGCThread(env)
 		, _concurrentPhase(concurrent_phase_idle)

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2015, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2015
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -29,6 +29,10 @@
 #include <windows.h>
 #define strdup _strdup
 #endif /* defined(OMR_OS_WINDOWS) */
+
+#if __cplusplus < 201103L
+#define snprintf(buf, buf_size, format, ...) sprintf(buf, format, __VA_ARGS__)
+#endif /* __cplusplus < 201103L */
 
 #include "HookGen.hpp"
 #include "pugixml.hpp"
@@ -214,8 +218,7 @@ HookGen::writeEventToPublicHeader(const char *name, const char *description, con
 	char *exampleBuf = (char *)malloc(bufSize + 1);
 	if (NULL != exampleBuf) {
 		/* If we fail to allocate room for the example just skip writing it */
-		int length = sprintf(exampleBuf, (char *)example, name, description, name, structName);
-		exampleBuf[length] = '\0';
+		snprintf(exampleBuf, bufSize + 1, (char *)example, name, description, name, structName);
 
 		writeComment(_publicFile, exampleBuf);
 

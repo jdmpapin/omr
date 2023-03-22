@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2020, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2020
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -165,14 +165,14 @@ SPECS = [
         'label' : 'compile:riscv64:cross',
         'reference' : defaultReference,
         'environment' : [
-            'PATH+CCACHE_AND_QEMU=/usr/lib/ccache/:/home/jenkins/qemu/build'
+            'PATH+CCACHE=/usr/lib/ccache/'
         ],
         'ccache' : true,
         'buildSystem' : 'cmake',
         'builds' : [
             [
                 'buildDir' : cmakeBuildDir,
-                'configureArgs' : '-Wdev -C../cmake/caches/Travis.cmake -DOMR_DDR=OFF  -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchains/riscv64-linux-cross.cmake "-DCMAKE_SYSROOT=${CROSS_SYSROOT_RISCV64}"',
+                'configureArgs' : '-Wdev -C../cmake/caches/Travis.cmake -DOMR_DDR=OFF  -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchains/riscv64-linux-cross.cmake "-DOMR_EXE_LAUNCHER=/home/jenkins/qemu/build/qemu-riscv64;-L;${CROSS_SYSROOT_RISCV64}" "-DCMAKE_SYSROOT=${CROSS_SYSROOT_RISCV64}"',
                 'compile' : defaultCompile
             ]
         ],
@@ -274,14 +274,15 @@ SPECS = [
         'reference' : defaultReference,
         'environment' : [
             'GTEST_FILTER=-*dump_test_create_dump_*:*NumaSetAffinity:*NumaSetAffinitySuspended:PortSysinfoTest.sysinfo_test_get_tmp3:ThreadExtendedTest.TestOtherThreadCputime',
-            'GTEST_COLOR=0'
+            'GTEST_COLOR=0',
+            'PATH+TOOLS=/cygdrive/c/CMake/bin/:/cygdrive/c/Program Files (x86)/Microsoft Visual Studio/2017/Community/MSBuild/15.0/Bin/:/cygdrive/c/Program Files (x86)/Windows Kits/10/bin/x86'
         ],
         'ccache' : false,
         'buildSystem' : 'cmake',
         'builds' : [
             [
                 'buildDir' : cmakeBuildDir,
-                'configureArgs' : '-Wdev -G "Visual Studio 11 2012 Win64" -C../cmake/caches/Windows.cmake',
+                'configureArgs' : '-Wdev -G "Visual Studio 15 2017" -A x64 -C../cmake/caches/Windows.cmake',
                 'compile' : 'cmake --build . -- /m'
             ]
         ],

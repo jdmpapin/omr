@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -1006,11 +1006,27 @@ TR::Instruction *
 generateRSInstruction(TR::CodeGenerator * cg, TR::InstOpCode::Mnemonic op, TR::Node * n, TR::Register * treg, TR::Register * sreg, uint32_t imm,
                       TR::Instruction * preced)
    {
-   if (preced)
+   auto instructionFormat = TR::InstOpCode(op).getInstructionFormat();
+   TR::Instruction *result = NULL;
+   switch(instructionFormat)
       {
-      return new (INSN_HEAP) TR::S390RSInstruction(op, n, treg, sreg, imm, preced, cg);
+      case RSa_FORMAT:
+      case RSb_FORMAT:
+         result = preced != NULL ?
+            new (INSN_HEAP) TR::S390RSInstruction(op, n, treg, sreg, imm, preced, cg) :
+            new (INSN_HEAP) TR::S390RSInstruction(op, n, treg, sreg, imm, cg);
+         break;
+      case RSYa_FORMAT:
+      case RSYb_FORMAT:
+         result = preced != NULL ?
+            new (INSN_HEAP) TR::S390RSYInstruction(op, n, treg, sreg, imm, preced, cg) :
+            new (INSN_HEAP) TR::S390RSYInstruction(op, n, treg, sreg, imm, cg);
+         break;
+      default:
+         TR_ASSERT_FATAL(false, "Mnemonic (%s) is incorrectly used as RS instruction", TR::InstOpCode::metadata[op].name);
+         break;
       }
-   return new (INSN_HEAP) TR::S390RSInstruction(op, n, treg, sreg, imm, cg);
+   return result;
    }
 
 
@@ -2635,7 +2651,13 @@ generateRegLitRefInstruction(TR::CodeGenerator * cg, TR::InstOpCode::Mnemonic op
    {
 
    TR::MemoryReference * dataref = generateS390MemoryReference(imm, TR::Float, cg, node);
-   return generateRXInstruction(cg, op, node, treg, dataref);
+   auto instructionFormat = TR::InstOpCode(op).getInstructionFormat();
+   TR::Instruction *instr = NULL;
+   if (instructionFormat == RXE_FORMAT)
+      instr = generateRXEInstruction(cg, op, node, treg, dataref);
+   else
+      instr = generateRXInstruction(cg, op, node, treg, dataref);
+   return instr;
    }
 
 /**

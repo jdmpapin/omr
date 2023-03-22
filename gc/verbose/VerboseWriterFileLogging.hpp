@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -59,6 +59,13 @@ public:
 	virtual bool reconfigure(MM_EnvironmentBase *env, const char* filename, uintptr_t fileCount, uintptr_t iterations);
 
 	void closeStream(MM_EnvironmentBase *env);
+
+	/**
+	 * Open the output mechanism for the writer.
+	 * @param[in] env the current environment.
+	 * @return boolean indicating if the output stream opened successfully.
+	 */
+	bool openStream(MM_EnvironmentBase *env);
 
 	virtual void endOfCycle(MM_EnvironmentBase *env);
 

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -761,7 +761,7 @@ int32_t TR_LoopStrider::detectCanonicalizedPredictableLoops(TR_Structure *loopSt
                   for (;k<_nextExpression;k++)
                      {
                      newSymbolReference = symRefTab->getSymRef((int32_t)_linearEquations[k][1]);
-                     TR_RegisterCandidate *newInductionCandidate = comp()->getGlobalRegisterCandidates()->findOrCreate(newSymbolReference);
+                     TR::RegisterCandidate *newInductionCandidate = comp()->getGlobalRegisterCandidates()->findOrCreate(newSymbolReference);
                      //
                      // Add the derived induction variable as a global register candidate
                      // within the loop
@@ -888,7 +888,7 @@ int32_t TR_LoopStrider::detectCanonicalizedPredictableLoops(TR_Structure *loopSt
                   }
                else
                   {
-                  TR_RegisterCandidate *inductionCandidate = comp()->getGlobalRegisterCandidates()->findOrCreate(inductionVarSymRef);
+                  TR::RegisterCandidate *inductionCandidate = comp()->getGlobalRegisterCandidates()->findOrCreate(inductionVarSymRef);
                   if (performTransformation(comp(), "%s Adding auto %d as a global register candidate in loop %d\n", OPT_DETAILS, inductionCandidate->getSymbolReference()->getReferenceNumber(), loopStructure->getNumber()))
                      inductionCandidate->addAllBlocksInStructure(loopStructure, comp(), trace()?"auto":NULL);
                   }
@@ -965,7 +965,7 @@ int32_t TR_LoopStrider::detectCanonicalizedPredictableLoops(TR_Structure *loopSt
                   "inserted reassociation initialization tree : %p for new symRef #%d\n",
                   newStoreTreeTop->getNode(), reassociatedAuto->getReferenceNumber());
 
-            TR_RegisterCandidate *newInductionCandidate = comp()->getGlobalRegisterCandidates()->findOrCreate(reassociatedAuto);
+            TR::RegisterCandidate *newInductionCandidate = comp()->getGlobalRegisterCandidates()->findOrCreate(reassociatedAuto);
             //
             // Add the reassociated auto as a global register candidate
             // within the loop
@@ -1028,7 +1028,7 @@ int32_t TR_LoopStrider::detectCanonicalizedPredictableLoops(TR_Structure *loopSt
 
                dumpOptDetails(comp(), "\nO^O INDUCTION VARIABLE ANALYSIS: Induction variable analysis inserted invariant initialization tree : %p for new symRef #%d\n", newStoreTreeTop->getNode(), symRefPair->_derivedSymRef->getReferenceNumber());
 
-               TR_RegisterCandidate *newInductionCandidate = comp()->getGlobalRegisterCandidates()->findOrCreate(symRefPair->_derivedSymRef);
+               TR::RegisterCandidate *newInductionCandidate = comp()->getGlobalRegisterCandidates()->findOrCreate(symRefPair->_derivedSymRef);
                //
                // Add the reassociated auto as a global register candidate
                // within the loop

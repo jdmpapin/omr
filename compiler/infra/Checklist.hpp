@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -39,21 +39,31 @@ class Node;
 
 class Checklist
    {
-   protected :
-   TR_BitVector* _v;
-   TR::Compilation* _comp;
+   protected:
+   TR::Compilation* const _comp;
+   TR_BitVector* const _v;
 
-   public :
-   Checklist(TR::Compilation* c);
+   // These will make the right thing happen in the implicitly-declared copy
+   // constructors and copy assignment operators of subtypes. Keeping them
+   // protected guards against object slicing.
+   Checklist(const Checklist &other);
+   Checklist &operator=(const Checklist &cl);
+
+   private:
+   TR_BitVector* allocBV();
+
+   public:
+   explicit Checklist(TR::Compilation* c);
    ~Checklist();
-   bool isEmpty(){ return _v->isEmpty(); }
-   void print(TR::Compilation *c) { _v->print(c); }
+   bool isEmpty() const { return _v->isEmpty(); }
+   void clear() { _v->empty(); }
+   void print() const { _v->print(_comp); }
    };
 
-class NodeChecklist: public Checklist
+class NodeChecklist : public Checklist
    {
    public:
-   NodeChecklist(TR::Compilation* c);
+   explicit NodeChecklist(TR::Compilation* c);
    bool contains(TR::Node* n) const;
    void add(TR::Node* n);
    void remove(TR::Node* n);
@@ -64,10 +74,10 @@ class NodeChecklist: public Checklist
    bool operator!=(const NodeChecklist &other) const { return !operator==(other); }
    };
 
-class BlockChecklist: public Checklist
+class BlockChecklist : public Checklist
    {
    public:
-   BlockChecklist(TR::Compilation* c);
+   explicit BlockChecklist(TR::Compilation* c);
    bool contains(TR::Block* b) const;
    void add(TR::Block* b);
    void remove(TR::Block* b);

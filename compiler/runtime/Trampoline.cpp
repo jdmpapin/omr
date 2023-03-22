@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -32,10 +32,6 @@
 #include "runtime/CodeCacheConfig.hpp"
 #include "runtime/Runtime.hpp"
 #include "env/CompilerEnv.hpp"
-
-#if defined(OSX) && defined(TR_TARGET_ARM64)
-#include <pthread.h> // for pthread_jit_write_protect_np
-#endif
 
 #if defined(JITTEST)
 #include "env/ConcreteFE.hpp"
@@ -351,9 +347,8 @@ void arm64CreateHelperTrampolines(void *trampPtr, int32_t numHelpers)
    {
    uint32_t *buffer = (uint32_t *)((uint8_t *)trampPtr + TRAMPOLINE_SIZE);  // Skip the first trampoline for index 0
 
-#if defined(OSX)
-   pthread_jit_write_protect_np(0);
-#endif
+   omrthread_jit_write_protect_disable();
+
    for (int32_t i=1; i<numHelpers; i++)
       {
       *((int32_t *)buffer) = 0x58000050; //LDR R16 PC+8
@@ -363,9 +358,8 @@ void arm64CreateHelperTrampolines(void *trampPtr, int32_t numHelpers)
       *((intptr_t *)buffer) = (intptr_t)runtimeHelperValue((TR_RuntimeHelper)i);
       buffer += 2;
       }
-#if defined(OSX)
-   pthread_jit_write_protect_np(1);
-#endif
+
+   omrthread_jit_write_protect_enable();
    }
 
 void arm64CodeCacheParameters(int32_t *trampolineSize, void **callBacks, int32_t *numHelpers, int32_t* CCPreLoadedCodeSize)

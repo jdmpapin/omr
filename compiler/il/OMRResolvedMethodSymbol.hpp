@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -254,7 +254,7 @@ public:
    void setHasBranches(bool b)               { _methodFlags2.set(HasBranches, b); }
    bool hasVectorAPI()                       { return _methodFlags2.testAny(HasVectorAPI); }
    void setHasVectorAPI(bool b)              { _methodFlags2.set(HasVectorAPI, b); }
-   
+
    int32_t getNumberOfBackEdges();
 
    bool canDirectNativeCall()                { return _properties.testAny(CanDirectNativeCall); }
@@ -273,6 +273,8 @@ public:
 
    bool hasSnapshots()                       { return _properties.testAny(HasSnapshots); }
    void setHasSnapshots(bool v=true)         { _properties.set(HasSnapshots,v); }
+   bool hasExceptionHandlers()               { return _properties.testAny(HasExceptionHandlers); }
+   void setHasExceptionHandlers(bool v=true) { _properties.set(HasExceptionHandlers,v); }
 
    bool detectInternalCycles();
    bool catchBlocksHaveRealPredecessors();

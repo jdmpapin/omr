@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -129,6 +129,7 @@ namespace TR { class X86RegImmInstruction;                 }
 namespace TR { class X86RegRegImmInstruction;              }
 namespace TR { class X86RegRegRegInstruction;              }
 namespace TR { class X86RegMaskRegRegInstruction;          }
+namespace TR { class X86RegMaskRegRegImmInstruction;       }
 namespace TR { class X86RegMaskRegInstruction;             }
 namespace TR { class X86RegMaskMemInstruction;             }
 namespace TR { class X86MemInstruction;                    }
@@ -361,6 +362,7 @@ namespace TR { class ARM64Trg1Src2IndexedElementInstruction; }
 namespace TR { class ARM64Trg1Src2ZeroInstruction; }
 namespace TR { class ARM64Trg1Src3Instruction; }
 namespace TR { class ARM64Trg1MemInstruction; }
+namespace TR { class ARM64Trg2MemInstruction; }
 namespace TR { class ARM64MemInstruction; }
 namespace TR { class ARM64MemImmInstruction; }
 namespace TR { class ARM64MemSrc1Instruction; }
@@ -370,6 +372,8 @@ namespace TR { class ARM64Src1Instruction; }
 namespace TR { class ARM64ZeroSrc1ImmInstruction; }
 namespace TR { class ARM64Src2Instruction; }
 namespace TR { class ARM64ZeroSrc2Instruction; }
+namespace TR { class ARM64Src1ImmCondInstruction; }
+namespace TR { class ARM64Src2CondInstruction; }
 namespace TR { class ARM64HelperCallSnippet; }
 
 namespace TR { class LabelInstruction; }
@@ -463,6 +467,7 @@ public:
    virtual char *          limitfileOption(char *, void *, TR::OptionTable *, TR::Options *, bool loadLimit, TR_PseudoRandomNumbersListElement **pseudoRandomListHeadPtr = 0);
    virtual char *          inlinefileOption(char *, void *, TR::OptionTable *, TR::Options *);
    virtual char *          limitOption(char *, void *, TR::OptionTable *, TR::Options *, bool loadLimit);
+   char *                  limitOption(char *, void *, TR::OptionTable *, TR::Options *, TR::CompilationFilters * &);
    virtual int32_t *       loadCustomStrategy(char *optFileName);
    virtual bool            methodCanBeCompiled(TR_Memory *mem, TR_ResolvedMethod *, TR_FilterBST * &);
    virtual bool            methodCanBeRelocated(TR_Memory *mem, TR_ResolvedMethod *, TR_FilterBST * &);
@@ -819,6 +824,7 @@ public:
    void print(TR::FILE *, TR::X86RegRegRegInstruction *);
    void print(TR::FILE *, TR::X86RegMaskRegInstruction *);
    void print(TR::FILE *, TR::X86RegMaskRegRegInstruction *);
+   void print(TR::FILE *, TR::X86RegMaskRegRegImmInstruction *);
    void print(TR::FILE *, TR::X86MemInstruction *);
    void print(TR::FILE *, TR::X86MemImmInstruction *);
    void print(TR::FILE *, TR::X86MemRegInstruction *);
@@ -1150,6 +1156,7 @@ public:
    void print(TR::FILE *, TR::ARM64Trg1Src2ZeroInstruction *);
    void print(TR::FILE *, TR::ARM64Trg1Src3Instruction *);
    void print(TR::FILE *, TR::ARM64Trg1MemInstruction *);
+   void print(TR::FILE *, TR::ARM64Trg2MemInstruction *);
    void print(TR::FILE *, TR::ARM64MemInstruction *);
    void print(TR::FILE *, TR::ARM64MemImmInstruction *);
    void print(TR::FILE *, TR::ARM64MemSrc1Instruction *);
@@ -1159,6 +1166,8 @@ public:
    void print(TR::FILE *, TR::ARM64ZeroSrc1ImmInstruction *);
    void print(TR::FILE *, TR::ARM64Src2Instruction *);
    void print(TR::FILE *, TR::ARM64ZeroSrc2Instruction *);
+   void print(TR::FILE *, TR::ARM64Src1ImmCondInstruction *);
+   void print(TR::FILE *, TR::ARM64Src2CondInstruction *);
 #ifdef J9_PROJECT_SPECIFIC
    void print(TR::FILE *, TR::ARM64VirtualGuardNOPInstruction *);
 #endif

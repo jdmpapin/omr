@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -588,11 +588,11 @@ TR_ARMOutOfLineCodeSection *OMR::ARM::CodeGenerator::findOutLinedInstructionsFro
    return NULL;
    }
 
-TR_GlobalRegisterNumber OMR::ARM::CodeGenerator::pickRegister(TR_RegisterCandidate            *regCan,
+TR_GlobalRegisterNumber OMR::ARM::CodeGenerator::pickRegister(TR::RegisterCandidate            *regCan,
                                                           TR::Block                          ** barr,
                                                           TR_BitVector                      &  availRegs,
                                                           TR_GlobalRegisterNumber           &  highRegisterNumber,
-                                                          TR_LinkHead<TR_RegisterCandidate> *  candidates)
+                                                          TR_LinkHead<TR::RegisterCandidate> *  candidates)
    {
    // Tactical GRA
    // We delegate the decision to use register pressure simulation to common code.
@@ -601,7 +601,7 @@ TR_GlobalRegisterNumber OMR::ARM::CodeGenerator::pickRegister(TR_RegisterCandida
    // }
    }
 
-bool OMR::ARM::CodeGenerator::allowGlobalRegisterAcrossBranch(TR_RegisterCandidate *rc, TR::Node * branchNode)
+bool OMR::ARM::CodeGenerator::allowGlobalRegisterAcrossBranch(TR::RegisterCandidate *rc, TR::Node * branchNode)
    {
    // If return false, processLiveOnEntryBlocks has to dis-qualify any candidates which are referenced
    // within any CASE of a SWITCH statement.

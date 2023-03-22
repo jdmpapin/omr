@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2018
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -943,6 +943,8 @@ static const char *opCodeToNameMap[] =
    "vxtn2_16b",
    "vxtn2_8h",
    "vxtn2_4s",
+   "vcnt8b",
+   "vcnt16b",
    "vdup16b",
    "vdup8h",
    "vdup4s",
@@ -990,6 +992,7 @@ static const char *opCodeToNameMap[] =
    "vumull2_8h",
    "vumull2_4s",
    "vumull2_2d",
+   "vaddv8b",
    "vaddv16b",
    "vaddv8h",
    "vaddv4s",
@@ -1040,6 +1043,18 @@ static const char *opCodeToNameMap[] =
    "vfminp2d",
    "fminp2s",
    "fminp2d",
+   "vsmaxp16b",
+   "vsmaxp8h",
+   "vsmaxp4s",
+   "vsminp16b",
+   "vsminp8h",
+   "vsminp4s",
+   "vumaxp16b",
+   "vumaxp8h",
+   "vumaxp4s",
+   "vuminp16b",
+   "vuminp8h",
+   "vuminp4s",
    "nop",
    };
 
@@ -1163,6 +1178,9 @@ TR_Debug::print(TR::FILE *pOutFile, TR::Instruction *instr)
       case OMR::Instruction::IsTrg1Mem:
          print(pOutFile, (TR::ARM64Trg1MemInstruction *)instr);
          break;
+      case OMR::Instruction::IsTrg2Mem:
+         print(pOutFile, (TR::ARM64Trg2MemInstruction *)instr);
+         break;
       case OMR::Instruction::IsMem:
          print(pOutFile, (TR::ARM64MemInstruction *)instr);
          break;
@@ -1189,6 +1207,12 @@ TR_Debug::print(TR::FILE *pOutFile, TR::Instruction *instr)
          break;
       case OMR::Instruction::IsZeroSrc2:
          print(pOutFile, (TR::ARM64ZeroSrc2Instruction *)instr);
+         break;
+      case OMR::Instruction::IsSrc1ImmCond:
+         print(pOutFile, (TR::ARM64Src1ImmCondInstruction *)instr);
+         break;
+      case OMR::Instruction::IsSrc2Cond:
+         print(pOutFile, (TR::ARM64Src2CondInstruction *)instr);
          break;
       default:
          TR_ASSERT(false, "unexpected instruction kind");
@@ -1295,7 +1319,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64LabelInstruction *instr)
 
 #ifdef J9_PROJECT_SPECIFIC
 void
-TR_Debug::print(TR::FILE *pOutFile, TR::ARM64VirtualGuardNOPInstruction * instr)
+TR_Debug::print(TR::FILE *pOutFile, TR::ARM64VirtualGuardNOPInstruction *instr)
    {
    printPrefix(pOutFile, instr);
    trfprintf(pOutFile, "%s Site:" POINTER_PRINTF_FORMAT ", ", getOpCodeName(&instr->getOpCode()), instr->getSite());
@@ -2149,15 +2173,61 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64ZeroSrc2Instruction *instr)
    }
 
 void
+TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Src1ImmCondInstruction *instr)
+   {
+   printPrefix(pOutFile, instr);
+   TR::InstOpCode::Mnemonic op = instr->getOpCodeValue();
+
+   trfprintf(pOutFile, "%s \t", getOpCodeName(&instr->getOpCode()));
+
+   print(pOutFile, instr->getSource1Register(), TR_WordReg);
+   trfprintf(pOutFile, ", %d", instr->getSourceImmediate());
+   trfprintf(pOutFile, ", %d", instr->getConditionFlags());
+   trfprintf(pOutFile, ", %s", ARM64ConditionNames[instr->getConditionCode()]);
+
+   trfflush(_comp->getOutFile());
+   }
+
+void
+TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Src2CondInstruction *instr)
+   {
+   printPrefix(pOutFile, instr);
+   TR::InstOpCode::Mnemonic op = instr->getOpCodeValue();
+
+   trfprintf(pOutFile, "%s \t", getOpCodeName(&instr->getOpCode()));
+
+   print(pOutFile, instr->getSource1Register(), TR_WordReg); trfprintf(pOutFile, ", ");
+   print(pOutFile, instr->getSource2Register(), TR_WordReg);
+   trfprintf(pOutFile, ", %d", instr->getConditionFlags());
+   trfprintf(pOutFile, ", %s", ARM64ConditionNames[instr->getConditionCode()]);
+
+   trfflush(_comp->getOutFile());
+   }
+
+void
 TR_Debug::print(TR::FILE *pOutFile, TR::ARM64CondTrg1Src2Instruction *instr)
    {
    printPrefix(pOutFile, instr);
-   trfprintf(pOutFile, "%s \t", getOpCodeName(&instr->getOpCode()));
+   TR::Register *r1 = instr->getSource1Register();
+   TR::Register *r2 = instr->getSource2Register();
+   TR::InstOpCode::Mnemonic op = instr->getOpCodeValue();
+   if ((r1 == r2) && ((op == TR::InstOpCode::csincx) ||
+       (op == TR::InstOpCode::csincw)))
+      {
+      trfprintf(pOutFile, "%s \t", (op == TR::InstOpCode::csincx) ? "cincx" : "cincw");
+      print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
+      print(pOutFile, r1, TR_WordReg);
+      trfprintf(pOutFile, ", %s", ARM64ConditionNames[cc_invert(instr->getConditionCode())]);
+      }
+   else
+      {
+      trfprintf(pOutFile, "%s \t", getOpCodeName(&instr->getOpCode()));
 
-   print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
-   print(pOutFile, instr->getSource1Register(), TR_WordReg); trfprintf(pOutFile, ", ");
-   print(pOutFile, instr->getSource2Register(), TR_WordReg);
-   trfprintf(pOutFile, ", %s", ARM64ConditionNames[instr->getConditionCode()]);
+      print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
+      print(pOutFile, instr->getSource1Register(), TR_WordReg); trfprintf(pOutFile, ", ");
+      print(pOutFile, instr->getSource2Register(), TR_WordReg);
+      trfprintf(pOutFile, ", %s", ARM64ConditionNames[instr->getConditionCode()]);
+      }
 
    if (instr->getDependencyConditions())
       print(pOutFile, instr->getDependencyConditions());
@@ -2288,6 +2358,22 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Trg1MemInstruction *instr)
       {
       trfprintf(pOutFile, "\t\t; Backpatched branch to Unresolved Data %s", getName(instr->getSnippetForGC()->getSnippetLabel()));
       }
+
+   printMemoryReferenceComment(pOutFile, instr->getMemoryReference());
+   printInstructionComment(pOutFile, 1, instr);
+   trfflush(_comp->getOutFile());
+   }
+
+void
+TR_Debug::print(TR::FILE *pOutFile, TR::ARM64Trg2MemInstruction *instr)
+   {
+   printPrefix(pOutFile, instr);
+   trfprintf(pOutFile, "%s \t", getOpCodeName(&instr->getOpCode()));
+
+   print(pOutFile, instr->getTargetRegister(), TR_WordReg); trfprintf(pOutFile, ", ");
+   print(pOutFile, instr->getTarget2Register(), TR_WordReg); trfprintf(pOutFile, ", ");
+
+   print(pOutFile, instr->getMemoryReference());
 
    printMemoryReferenceComment(pOutFile, instr->getMemoryReference());
    printInstructionComment(pOutFile, 1, instr);
@@ -2437,7 +2523,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::RegisterDependencyConditions *conditions
 void
 TR_Debug::printAssocRegDirective(TR::FILE *pOutFile, TR::Instruction *instr)
    {
-   TR::RegisterDependencyGroup * depGroup = instr->getDependencyConditions()->getPostConditions();
+   TR::RegisterDependencyGroup *depGroup = instr->getDependencyConditions()->getPostConditions();
 
    printPrefix(pOutFile, instr);
    trfprintf(pOutFile, "%s", getOpCodeName(&instr->getOpCode()));
@@ -2630,7 +2716,7 @@ void TR_Debug::printARM64OOLSequences(TR::FILE *pOutFile)
    }
 
 const char *
-TR_Debug::getNamea64(TR::Snippet * snippet)
+TR_Debug::getNamea64(TR::Snippet *snippet)
    {
    switch (snippet->getKind())
       {
@@ -2648,6 +2734,9 @@ TR_Debug::getNamea64(TR::Snippet * snippet)
          break;
       case TR::Snippet::IsStackCheckFailure:
          return "Stack Check Failure Snippet";
+         break;
+      case TR::Snippet::IsForceRecompilation:
+         return "Force Recompilation Snippet";
          break;
       case TR::Snippet::IsUnresolvedData:
          return "Unresolved Data Snippet";
@@ -2676,7 +2765,7 @@ TR_Debug::getNamea64(TR::Snippet * snippet)
    }
 
 void
-TR_Debug::printa64(TR::FILE *pOutFile, TR::Snippet * snippet)
+TR_Debug::printa64(TR::FILE *pOutFile, TR::Snippet *snippet)
    {
    if (pOutFile == NULL)
       return;

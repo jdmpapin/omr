@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -30,6 +30,7 @@
 #include "env/StackMemoryRegion.hpp"
 #include "env/VerboseLog.hpp"
 #include "il/DataTypes.hpp"
+#include "infra/String.hpp"
 #include "ras/Debug.hpp"
 #include "ras/IgnoreLocale.hpp"
 
@@ -482,6 +483,57 @@ bool SimpleRegex::match(
    TR::StackMemoryRegion stackMemoryRegion(*comp->trMemory());
 
    bool result = regex->match(feMethod->signature(comp->trMemory(), stackAlloc), isCaseSensitive, true);
+
+   return result;
+   }
+
+bool SimpleRegex::match(
+      TR::SimpleRegex *regex,
+      TR_ByteCodeInfo& bcinfo,
+      bool isCaseSensitive)
+   {
+   TR::Compilation *comp = TR::comp();
+   TR::StackMemoryRegion stackMemoryRegion(*comp->trMemory());
+   TR::StringBuf buf(stackMemoryRegion);
+
+   // Append the signature of the outermost method
+   buf.appendf("#%s", comp->signature());
+   size_t outermostSigEnd = buf.len();
+
+   if (bcinfo.getCallerIndex() > -1)
+      {
+      int inlineDepth = 0;
+      int16_t callerIndex = bcinfo.getCallerIndex();
+      TR_Stack<int16_t> callSiteStack(comp->trMemory(), 8, false, stackAlloc);
+
+      // Populate a stack of inlined method invocations, pushing from
+      // the innermost to the outermost inlined method invocation
+      do
+         {
+         callSiteStack.push(callerIndex);
+         callerIndex = comp->getInlinedCallSite(callerIndex)._byteCodeInfo.getCallerIndex();
+         }
+      while (callerIndex > -1);
+
+      // Run through the stack of inlined method invocations from the
+      // outermost inlined method invocation to the innermost, appending the
+      // bytecode offset of the caller and the method signature of the callee
+      do
+         {
+         callerIndex = callSiteStack.pop();
+         buf.appendf("@%d#%s", comp->getInlinedCallSite(callerIndex)._byteCodeInfo.getByteCodeIndex(),
+                     comp->getInlinedResolvedMethod(callerIndex)->signature(comp->trMemory()));
+         }
+      while (!callSiteStack.isEmpty());
+      }
+
+   // Append the bytecode offset of the actual location we're interested in
+   buf.appendf("@%d", bcinfo.getByteCodeIndex());
+
+   // The outermost method signature is optional - attempt to match the regular
+   // expression both with and without that signature
+   bool result = regex->match(buf.text(), isCaseSensitive, true)
+                 || regex->match(buf.text()+outermostSigEnd, isCaseSensitive, true);
 
    return result;
    }

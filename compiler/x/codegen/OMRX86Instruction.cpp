@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -1035,6 +1035,17 @@ TR::X86RegImmInstruction::X86RegImmInstruction(TR::InstOpCode::Mnemonic     op,
                                                  TR::CodeGenerator *cg,
                                                  int32_t           reloKind)
    : TR::X86RegInstruction(treg, node, op, cg), _sourceImmediate(imm), _reloKind(reloKind)
+   {
+   }
+
+TR::X86RegImmInstruction::X86RegImmInstruction(TR::InstOpCode::Mnemonic     op,
+                                               TR::Node          *node,
+                                               TR::Register      *treg,
+                                               int32_t           imm,
+                                               TR::CodeGenerator *cg,
+                                               OMR::X86::Encoding encoding,
+                                               int32_t           reloKind)
+        : TR::X86RegInstruction(treg, node, op, cg, encoding), _sourceImmediate(imm), _reloKind(reloKind)
    {
    }
 
@@ -4865,6 +4876,12 @@ generateRegImmInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node,  TR::Reg
    return new (cg->trHeapMemory()) TR::X86RegImmInstruction(op, node, treg, imm, cg, reloKind);
    }
 
+TR::X86RegImmInstruction  *
+generateRegImmInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * treg, int32_t imm, TR::CodeGenerator *cg, int32_t reloKind, OMR::X86::Encoding encoding)
+   {
+   return new (cg->trHeapMemory()) TR::X86RegImmInstruction(op, node, treg, imm, cg, encoding, reloKind);
+   }
+
 TR::X86RegImmSymInstruction  *
 generateRegImmSymInstruction(TR::InstOpCode::Mnemonic op, TR::Node * node, TR::Register * treg, int32_t imm, TR::SymbolReference *sr, TR::CodeGenerator *cg)
    {
@@ -4959,12 +4976,50 @@ generateRegMaskRegRegInstruction(TR::InstOpCode::Mnemonic op,
                                  TR::Register * reg3,
                                  TR::RegisterDependencyConditions *deps,
                                  TR::CodeGenerator *cg,
-                                 OMR::X86::Encoding encoding)
+                                 OMR::X86::Encoding encoding,
+                                 bool zeroMask)
    {
    TR_ASSERT_FATAL(encoding != OMR::X86::Bad && encoding >= OMR::X86::Encoding::EVEX_L128, "Must use EVEX encoding for AVX-512 instructions");
    TR_ASSERT_FATAL(mreg->getKind() == TR_VMR, "Mask register must be a VMR");
 
-   return new (cg->trHeapMemory()) TR::X86RegMaskRegRegInstruction(reg3, mreg, reg2, reg1, node, op, deps, cg, encoding);
+   return new (cg->trHeapMemory()) TR::X86RegMaskRegRegInstruction(reg1, mreg, reg2, reg3, node, op, deps, cg, encoding, zeroMask);
+   }
+
+TR::X86RegMaskRegRegImmInstruction *
+generateRegMaskRegRegImmInstruction(TR::InstOpCode::Mnemonic op,
+                                    TR::Node * node,
+                                    TR::Register * reg1,
+                                    TR::Register * mreg,
+                                    TR::Register * reg2,
+                                    TR::Register * reg3,
+                                    int32_t imm,
+                                    TR::CodeGenerator *cg,
+                                    OMR::X86::Encoding encoding,
+                                    bool zeroMask)
+   {
+   TR_ASSERT_FATAL(encoding != OMR::X86::Bad && encoding >= OMR::X86::Encoding::EVEX_L128, "Must use EVEX encoding for AVX-512 instructions");
+   TR_ASSERT_FATAL(mreg->getKind() == TR_VMR, "Mask register must be a VMR");
+
+   return new (cg->trHeapMemory()) TR::X86RegMaskRegRegImmInstruction(reg1, mreg, reg2, reg3, imm, node, op, cg, encoding, zeroMask);
+   }
+
+TR::X86RegMaskRegRegImmInstruction *
+generateRegMaskRegRegImmInstruction(TR::InstOpCode::Mnemonic op,
+                                    TR::Node * node,
+                                    TR::Register * reg1,
+                                    TR::Register * mreg,
+                                    TR::Register * reg2,
+                                    TR::Register * reg3,
+                                    int32_t imm,
+                                    TR::RegisterDependencyConditions *deps,
+                                    TR::CodeGenerator *cg,
+                                    OMR::X86::Encoding encoding,
+                                    bool zeroMask)
+   {
+   TR_ASSERT_FATAL(encoding != OMR::X86::Bad && encoding >= OMR::X86::Encoding::EVEX_L128, "Must use EVEX encoding for AVX-512 instructions");
+   TR_ASSERT_FATAL(mreg->getKind() == TR_VMR, "Mask register must be a VMR");
+
+   return new (cg->trHeapMemory()) TR::X86RegMaskRegRegImmInstruction(reg1, mreg, reg2, reg3, imm, node, op, deps, cg, encoding, zeroMask);
    }
 
 TR::X86RegMaskRegInstruction *

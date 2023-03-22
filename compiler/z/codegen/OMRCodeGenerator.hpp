@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -89,7 +89,7 @@ class TR_BackingStore;
 class TR_GCStackMap;
 class TR_OpaquePseudoRegister;
 class TR_PseudoRegister;
-class TR_RegisterCandidate;
+namespace TR { class RegisterCandidate; }
 namespace TR { class S390ConstantDataSnippet; }
 namespace TR { class S390ConstantInstructionSnippet; }
 namespace TR { class S390EyeCatcherDataSnippet; }
@@ -326,7 +326,7 @@ public:
    void resetGlobalRegister(TR::RealRegister::RegNum reg, TR_BitVector &globalRegisters);
    void setGlobalRegister(TR::RealRegister::RegNum reg, TR_BitVector &globalRegisters);
    void setRegister(TR::RealRegister::RegNum reg, TR_BitVector &registers);
-   void removeUnavailableRegisters(TR_RegisterCandidate * rc, TR::Block * * blocks, TR_BitVector & availableRegisters);
+   void removeUnavailableRegisters(TR::RegisterCandidate * rc, TR::Block * * blocks, TR_BitVector & availableRegisters);
    void setUnavailableRegistersUsage(TR_Array<TR_BitVector>  &_liveOnEntryUsage, TR_Array<TR_BitVector>   &_liveOnExitUsage);
 
    void genMemCpy(TR::MemoryReference *targetMR, TR::Node *targetNode, TR::MemoryReference *sourceMR, TR::Node *sourceNode, int64_t copySize);
@@ -482,7 +482,7 @@ public:
    int32_t getMaximumNumbersOfAssignableGPRs();
    int32_t getMaximumNumbersOfAssignableFPRs();
    int32_t getMaximumNumbersOfAssignableVRs();
-   bool allowGlobalRegisterAcrossBranch(TR_RegisterCandidate *, TR::Node *);
+   bool allowGlobalRegisterAcrossBranch(TR::RegisterCandidate *, TR::Node *);
    void setRealRegisterAssociation(TR::Register     *reg,
                                    TR::RealRegister::RegNum realNum);
    bool isGlobalRegisterAvailable(TR_GlobalRegisterNumber i, TR::DataType dt);

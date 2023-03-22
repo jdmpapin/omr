@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -53,12 +53,12 @@ namespace OMR { typedef OMR::Block BlockConnector; }
 class TR_BitVector;
 class TR_BlockStructure;
 class TR_Debug;
-class TR_GlobalRegister;
+namespace TR { class GlobalRegister; }
 class TR_GlobalRegisterAllocator;
 class TR_Memory;
 class TR_RegionStructure;
-class TR_RegisterCandidate;
-class TR_RegisterCandidates;
+namespace TR { class RegisterCandidate; }
+namespace TR { class RegisterCandidates; }
 class TR_ResolvedMethod;
 namespace TR { class Block; }
 namespace TR { class CFGEdge; }
@@ -286,7 +286,7 @@ class OMR_EXTENSIBLE Block : public TR::CFGNode
    TR_BlockStructure *setStructureOf(TR_BlockStructure *p) { return (_pStructureOf = p); }
    int32_t getNestingDepth();
 
-   TR_Array<TR_GlobalRegister> & getGlobalRegisters(TR::Compilation *);
+   TR_Array<TR::GlobalRegister> & getGlobalRegisters(TR::Compilation *);
    void clearGlobalRegisters() { _globalRegisters = NULL; }
 
    struct InstructionBoundaries : TR_Link<InstructionBoundaries>
@@ -543,7 +543,7 @@ class OMR_EXTENSIBLE Block : public TR::CFGNode
    TR_BlockStructure *                   _pStructureOf;
 
    // TODO: This member is only used during GRA and should be moved out.
-   TR_Array<TR_GlobalRegister> *         _globalRegisters;
+   TR_Array<TR::GlobalRegister> *         _globalRegisters;
 
    InstructionBoundaries                 _instructionBoundaries;
    TR_LinkHead<InstructionBoundaries>    _snippetBoundaries;

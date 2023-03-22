@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2021 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -1544,16 +1544,6 @@ void OMR::Power::MemoryReference::accessStaticItem(TR::Node *node, TR::SymbolRef
    bool isStatic = symbol->isStatic() && !ref->isUnresolved();
    bool isStaticField = isStatic && (ref->getCPIndex() > 0) && !symbol->isClassObject();
    bool isClass = isStatic && symbol->isClassObject();
-   bool isPicSite = isClass;
-   if (isPicSite
-       && !cg->comp()->compileRelocatableCode()
-       && cg->wantToPatchClassPointer((TR_OpaqueClassBlock*)symbol->getStaticSymbol()->getStaticAddress(), node))
-      {
-      TR::Register *reg = _baseRegister = cg->allocateRegister();
-      intptr_t address = (intptr_t)symbol->getStaticSymbol()->getStaticAddress();
-      loadAddressConstantInSnippet(cg, node ? node : cg->getCurrentEvaluationTreeTop()->getNode(), address, reg, NULL, isStore?TR::InstOpCode::Op_st :TR::InstOpCode::Op_load, false, NULL);
-      return;
-      }
 
    TR::Node *topNode = cg->getCurrentEvaluationTreeTop()->getNode();
    TR::Node *nodeForSymbol = node ? node : topNode;

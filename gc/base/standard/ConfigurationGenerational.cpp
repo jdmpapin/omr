@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -61,18 +61,6 @@ MM_ConfigurationGenerational::newInstance(MM_EnvironmentBase *env)
 		}
 	}
 	return configuration;
-}
-
-void
-MM_ConfigurationGenerational::tearDown(MM_EnvironmentBase* env)
-{
-	MM_GCExtensionsBase* extensions = env->getExtensions();
-
-	/* unregisterScavenger before Scavenger is teared down as part of clean up of defaultMemorySpace
-	 * in MM_Configuration::tearDown. */
-	extensions->unregisterScavenger();
-
-	MM_ConfigurationStandard::tearDown(env);
 }
 
 bool
@@ -151,7 +139,6 @@ MM_ConfigurationGenerational::createDefaultMemorySpace(MM_EnvironmentBase *envBa
 	MM_MemorySubSpaceGeneric *memorySubSpaceGenericOld = NULL;
 	MM_PhysicalSubArenaVirtualMemoryFlat *physicalSubArenaFlat = NULL;
 	MM_MemorySubSpaceFlat *memorySubSpaceOld = NULL;
-	MM_Scavenger *scavenger = NULL;
 	MM_MemorySubSpaceGenerational *memorySubSpaceGenerational = NULL;
 	MM_MemorySubSpace *memorySubSpaceNew = NULL;
 	MM_PhysicalArenaVirtualMemory *physicalArena = NULL;
@@ -178,14 +165,7 @@ MM_ConfigurationGenerational::createDefaultMemorySpace(MM_EnvironmentBase *envBa
 	}
 
 	/* then we build "new-space" - note that if we fail during this we must remember to kill() the oldspace we created */
-
-	/* join them with a semispace */
-	if(NULL == (scavenger = MM_Scavenger::newInstance(env, ext->heapRegionManager))) {
-		memorySubSpaceOld->kill(env);
-		return NULL;
-	}
-
-	if(NULL == (memorySubSpaceNew = createSemiSpace(env, heap, scavenger, parameters))) {
+	if(NULL == (memorySubSpaceNew = createSemiSpace(env, heap, ext->scavenger, parameters))) {
 		memorySubSpaceOld->kill(env);
 	}
 	
@@ -201,9 +181,39 @@ MM_ConfigurationGenerational::createDefaultMemorySpace(MM_EnvironmentBase *envBa
 		return NULL;
 	}
 	
-	ext->registerScavenger(scavenger);
-
 	return MM_MemorySpace::newInstance(env, heap, physicalArena, memorySubSpaceGenerational, parameters, MEMORY_SPACE_NAME_GENERATIONAL, MEMORY_SPACE_DESCRIPTION_GENERATIONAL);
+}
+
+/**
+ * Create Local Collector and rely on parent MM_ConfigurationStandard to create Global Collector
+ */
+MM_GlobalCollector*
+MM_ConfigurationGenerational::createCollectors(MM_EnvironmentBase* envBase)
+{
+	MM_EnvironmentStandard *env = MM_EnvironmentStandard::getEnvironment(envBase);
+	MM_GCExtensionsBase *extensions = env->getExtensions();
+
+	if (NULL == (extensions->scavenger = MM_Scavenger::newInstance(env))) {
+		return NULL;
+	}
+
+	return MM_ConfigurationStandard::createCollectors(env);
+}
+
+/**
+ * Destroy Local Collector and rely on parent MM_ConfigurationStandard to destroy Global Collector
+ */
+void
+MM_ConfigurationGenerational::destroyCollectors(MM_EnvironmentBase* env)
+{
+	MM_GCExtensionsBase *extensions = env->getExtensions();
+
+	MM_ConfigurationStandard::destroyCollectors(env);
+
+	if (NULL != extensions->scavenger) {
+		extensions->scavenger->kill(env);
+		extensions->scavenger = NULL;
+	}
 }
 
 /**
@@ -260,5 +270,49 @@ MM_ConfigurationGenerational::calculateDefaultRegionSize(MM_EnvironmentBase *env
 
 	return regionSize;
 }
+
+void
+MM_ConfigurationGenerational::initializeGCThreadCount(MM_EnvironmentBase* env)
+{
+	MM_Configuration::initializeGCThreadCount(env);
+
+#if defined(OMR_GC_CONCURRENT_SCAVENGER)
+	initializeConcurrentScavengerThreadCount(env);
+#endif /* defined(OMR_GC_CONCURRENT_SCAVENGER) */
+}
+
+#if defined(OMR_GC_CONCURRENT_SCAVENGER)
+void
+MM_ConfigurationGenerational::initializeConcurrentScavengerThreadCount(MM_EnvironmentBase* env)
+{
+	MM_GCExtensionsBase* extensions = env->getExtensions();
+
+	/* If not explicitly set, concurrent phase of CS runs with approx 1/4 the
+	 * thread count (relative to STW phases thread count. */
+	if (!extensions->concurrentScavengerBackgroundThreadsForced) {
+		extensions->concurrentScavengerBackgroundThreads = OMR_MAX(1, (extensions->gcThreadCount + 1) / 4);
+	} else if (extensions->concurrentScavengerBackgroundThreads > extensions->gcThreadCount) {
+		extensions->concurrentScavengerBackgroundThreads = extensions->gcThreadCount;
+	}
+}
+#endif /* defined(OMR_GC_CONCURRENT_SCAVENGER) */
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+bool
+MM_ConfigurationGenerational::reinitializeGCThreadCountForRestore(MM_EnvironmentBase* env)
+{
+	MM_GCExtensionsBase* extensions = env->getExtensions();
+
+	bool result = MM_Configuration::reinitializeGCThreadCountForRestore(env);
+
+#if defined(OMR_GC_CONCURRENT_SCAVENGER)
+	initializeConcurrentScavengerThreadCount(env);
+#endif /* OMR_GC_CONCURRENT_SCAVENGER */
+
+	extensions->scavenger->resetRecommendedThreads();
+
+	return result;
+}
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 
 #endif /* defined(OMR_GC_MODRON_SCAVENGER) */

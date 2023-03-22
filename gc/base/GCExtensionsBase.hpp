@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -616,6 +616,10 @@ public:
 
 	MM_ParallelDispatcher* dispatcher;
 
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+	uintptr_t checkpointGCthreadCount;
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+
 	MM_CardTable* cardTable;
 
 	/* Begin command line options temporary home */
@@ -981,20 +985,6 @@ public:
 		return scavengerEnabled;
 #else /* defined(OMR_GC_MODRON_SCAVENGER) */
 		return false;
-#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
-	}
-
-	virtual void registerScavenger(MM_Scavenger *scavenger)
-	{
-#if defined(OMR_GC_MODRON_SCAVENGER)
-		this->scavenger = scavenger;
-#endif /* defined(OMR_GC_MODRON_SCAVENGER) */
-	}
-
-	virtual void unregisterScavenger()
-	{
-#if defined(OMR_GC_MODRON_SCAVENGER)
-		scavenger = NULL;
 #endif /* defined(OMR_GC_MODRON_SCAVENGER) */
 	}
 
@@ -1453,6 +1443,15 @@ public:
 	bool isSATBBarrierActive();
 	bool usingSATBBarrier();
 
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+	/**
+	 * Helper function to determine whether a GC reinitialization is taking place
+	 * as a result of a VM snapshot restore.
+	 * @return boolean indicating whether GC reinitialization is taking place.
+	 */
+	MMINLINE virtual bool reinitializationInProgress() { return false; }
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+
 	MM_GCExtensionsBase()
 		: MM_BaseVirtual()
 #if defined(OMR_GC_MODRON_SCAVENGER)
@@ -1742,7 +1741,7 @@ public:
 		, heapRegionManager(NULL)
 		, memoryManager(NULL)
 		, aggressive(0)
-		, sweepHeapSectioning(0)
+		, sweepHeapSectioning(NULL)
 #if defined(OMR_GC_MODRON_COMPACTION)
 		, compactOnGlobalGC(0) /* By default we will only compact on triggers, no forced compactions */
 		, noCompactOnGlobalGC(0)
@@ -1773,6 +1772,9 @@ public:
 		, fvtest_forceCardTableDecommitFailure(0)
 		, fvtest_forceCardTableDecommitFailureCounter(0)
 		, dispatcher(NULL)
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+		, checkpointGCthreadCount(4)
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 		, cardTable(NULL)
 		, memoryMax(0)
 		, initialMemorySize(0)

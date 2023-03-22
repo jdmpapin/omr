@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2016, 2020 IBM Corp. and others
+# Copyright IBM Corp. and others 2016
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ###############################################################################
@@ -121,6 +121,7 @@ JIT_PRODUCT_BACKEND_SOURCES+=\
     $(JIT_OMR_DIRTY_DIR)/optimizer/FieldPrivatizer.cpp \
     $(JIT_OMR_DIRTY_DIR)/optimizer/GeneralLoopUnroller.cpp \
     $(JIT_OMR_DIRTY_DIR)/optimizer/GlobalAnticipatability.cpp \
+    $(JIT_OMR_DIRTY_DIR)/optimizer/OMRGlobalRegister.cpp \
     $(JIT_OMR_DIRTY_DIR)/optimizer/GlobalRegisterAllocator.cpp \
     $(JIT_OMR_DIRTY_DIR)/optimizer/Inliner.cpp \
     $(JIT_OMR_DIRTY_DIR)/optimizer/RematTools.cpp \
@@ -157,7 +158,7 @@ JIT_PRODUCT_BACKEND_SOURCES+=\
     $(JIT_OMR_DIRTY_DIR)/optimizer/ReachingDefinitions.cpp \
     $(JIT_OMR_DIRTY_DIR)/optimizer/OMRRecognizedCallTransformer.cpp \
     $(JIT_OMR_DIRTY_DIR)/optimizer/RedundantAsyncCheckRemoval.cpp \
-    $(JIT_OMR_DIRTY_DIR)/optimizer/RegisterCandidate.cpp \
+    $(JIT_OMR_DIRTY_DIR)/optimizer/OMRRegisterCandidate.cpp \
     $(JIT_OMR_DIRTY_DIR)/optimizer/ReorderIndexExpr.cpp \
     $(JIT_OMR_DIRTY_DIR)/optimizer/SinkStores.cpp \
     $(JIT_OMR_DIRTY_DIR)/optimizer/StripMiner.cpp \

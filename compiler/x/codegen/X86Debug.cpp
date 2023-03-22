@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -126,6 +126,9 @@ TR_Debug::printx(TR::FILE *pOutFile, TR::Instruction  * instr)
          break;
       case TR::Instruction::IsRegMaskRegReg:
          print(pOutFile, (TR::X86RegMaskRegRegInstruction  *)instr);
+         break;
+      case TR::Instruction::IsRegMaskRegRegImm:
+         print(pOutFile, (TR::X86RegMaskRegRegImmInstruction  *)instr);
          break;
       case TR::Instruction::IsRegRegImm:
          print(pOutFile, (TR::X86RegRegImmInstruction  *)instr);
@@ -1111,6 +1114,44 @@ TR_Debug::print(TR::FILE *pOutFile, TR::X86RegMaskRegRegInstruction  * instr)
    }
 
 void
+TR_Debug::print(TR::FILE *pOutFile, TR::X86RegMaskRegRegImmInstruction  * instr)
+   {
+   if (pOutFile == NULL)
+      return;
+
+   printPrefix(pOutFile, instr);
+   trfprintf(pOutFile, "%s\t", getMnemonicName(&instr->getOpCode()));
+
+   if (instr->getOpCode().targetRegIsImplicit() == 0 || instr->getMaskRegister())
+      {
+      print(pOutFile, instr->getTargetRegister(), getTargetSizeFromInstruction(instr));
+      if (instr->getMaskRegister())
+         {
+         trfprintf(pOutFile, "{");
+         print(pOutFile, instr->getMaskRegister());
+         trfprintf(pOutFile, "}");
+         }
+      trfprintf(pOutFile, ", ");
+      }
+
+   TR_RegisterSizes sourceSize = getSourceSizeFromInstruction(instr);
+
+   if (instr->getOpCode().sourceRegIsImplicit() == 0)
+      {
+      print(pOutFile, instr->getSource2ndRegister(), sourceSize);
+      trfprintf(pOutFile, ", ");
+      print(pOutFile, instr->getSourceRegister(), sourceSize);
+      }
+
+   trfprintf(pOutFile, ", ");
+   printIntConstant(pOutFile, instr->getSourceImmediate(), 16, getImmediateSizeFromInstruction(instr), true);
+
+   printInstructionComment(pOutFile, 2, instr);
+   dumpDependencies(pOutFile, instr);
+   trfflush(pOutFile);
+   }
+
+void
 TR_Debug::print(TR::FILE *pOutFile, TR::X86RegRegRegInstruction  * instr)
    {
    if (pOutFile == NULL)
@@ -1863,7 +1904,14 @@ TR_Debug::printMemoryReferenceComment(TR::FILE *pOutFile, TR::MemoryReference  *
 TR_RegisterSizes
 TR_Debug::getTargetSizeFromInstruction(TR::Instruction  *instr)
    {
-   TR_RegisterSizes targetSize;
+   if (instr->getOpCode().hasIntTarget() != 0)
+      return TR_WordReg;
+   else if (instr->getOpCode().hasShortTarget() != 0)
+      return TR_HalfWordReg;
+   else if (instr->getOpCode().hasByteTarget() != 0)
+      return TR_ByteReg;
+   else if ((instr->getOpCode().hasLongTarget() != 0) || (instr->getOpCode().doubleFPOp() != 0))
+      return TR_DoubleWordReg;
 
    OMR::X86::Encoding encoding = instr->getEncodingMethod();
 
@@ -1873,35 +1921,32 @@ TR_Debug::getTargetSizeFromInstruction(TR::Instruction  *instr)
       }
 
    if (encoding == OMR::X86::VEX_L128 || encoding == OMR::X86::EVEX_L128)
-      targetSize = TR_VectorReg128;
+      return TR_VectorReg128;
    else if (encoding == OMR::X86::VEX_L256 || encoding == OMR::X86::EVEX_L256)
-      targetSize = TR_VectorReg256;
+      return TR_VectorReg256;
    else if (encoding == OMR::X86::EVEX_L512)
-      targetSize = TR_VectorReg512;
-   else if (instr->getOpCode().hasXMMTarget() != 0)
-      targetSize = TR_QuadWordReg;
+      return TR_VectorReg512;
+   else if (instr->getOpCode().hasXMMTarget())
+      return TR_QuadWordReg;
    else if (instr->getOpCode().hasYMMTarget())
-      targetSize = TR_VectorReg256;
+      return TR_VectorReg256;
    else if (instr->getOpCode().hasZMMTarget())
-      targetSize = TR_VectorReg512;
-   else if (instr->getOpCode().hasIntTarget() != 0)
-      targetSize = TR_WordReg;
-   else if (instr->getOpCode().hasShortTarget() != 0)
-      targetSize = TR_HalfWordReg;
-   else if (instr->getOpCode().hasByteTarget() != 0)
-      targetSize = TR_ByteReg;
-   else if ((instr->getOpCode().hasLongTarget() != 0) || (instr->getOpCode().doubleFPOp() != 0))
-      targetSize = TR_DoubleWordReg;
+      return TR_VectorReg512;
    else
-      targetSize = TR_WordReg;
-
-   return targetSize;
+      return TR_WordReg;
    }
 
 TR_RegisterSizes
 TR_Debug::getSourceSizeFromInstruction(TR::Instruction  *instr)
    {
-   TR_RegisterSizes sourceSize;
+   if (instr->getOpCode().hasIntSource() != 0)
+      return TR_WordReg;
+   else if (instr->getOpCode().hasShortSource() != 0)
+      return TR_HalfWordReg;
+   else if ((&instr->getOpCode())->hasByteSource())
+      return TR_ByteReg;
+   else if ((instr->getOpCode().hasLongSource() != 0) || (instr->getOpCode().doubleFPOp() != 0))
+      return TR_DoubleWordReg;
 
    OMR::X86::Encoding encoding = instr->getEncodingMethod();
 
@@ -1911,29 +1956,19 @@ TR_Debug::getSourceSizeFromInstruction(TR::Instruction  *instr)
       }
 
    if (encoding == OMR::X86::VEX_L128 || encoding == OMR::X86::EVEX_L128)
-      sourceSize = TR_VectorReg128;
+      return TR_VectorReg128;
    else if (encoding == OMR::X86::VEX_L256 || encoding == OMR::X86::EVEX_L256)
-      sourceSize = TR_VectorReg256;
+      return TR_VectorReg256;
    else if (encoding == OMR::X86::EVEX_L512)
-      sourceSize = TR_VectorReg512;
-   else if (instr->getOpCode().hasXMMSource() != 0)
-      sourceSize = TR_QuadWordReg;
+      return TR_VectorReg512;
+   else if (instr->getOpCode().hasXMMSource())
+      return TR_QuadWordReg;
    else if (instr->getOpCode().hasYMMSource())
-      sourceSize = TR_VectorReg256;
+      return TR_VectorReg256;
    else if (instr->getOpCode().hasZMMSource())
-      sourceSize = TR_VectorReg512;
-   else if (instr->getOpCode().hasIntSource() != 0)
-      sourceSize = TR_WordReg;
-   else if (instr->getOpCode().hasShortSource() != 0)
-      sourceSize = TR_HalfWordReg;
-   else if ((&instr->getOpCode())->hasByteSource())
-      sourceSize = TR_ByteReg;
-   else if ((instr->getOpCode().hasLongSource() != 0) || (instr->getOpCode().doubleFPOp() != 0))
-      sourceSize = TR_DoubleWordReg;
+      return TR_VectorReg512;
    else
-      sourceSize = TR_WordReg;
-
-   return sourceSize;
+      return TR_WordReg;
    }
 
 TR_RegisterSizes

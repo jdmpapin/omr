@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2014, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 2014
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -149,8 +149,9 @@ DATMerge::merge(J9TDFOptions *options, const char *fromFileName)
 		if (0 != fclose(toFile)) {
 			perror("fclose error");
 		}
-		char *newToFileName = (char *)Port::omrmem_calloc(1, strlen(toFileName) + strlen(".new") + 1);
-		sprintf(newToFileName, "%s.new", toFileName);
+		size_t bufLen = strlen(toFileName) + strlen(".new") + 1;
+		char *newToFileName = (char *)Port::omrmem_calloc(1, bufLen);
+		snprintf(newToFileName, bufLen, "%s.new", toFileName);
 
 		char *buffer = (char *)Port::omrmem_calloc(1, 1024);
 

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2018
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -687,6 +687,26 @@ TR::Instruction *generateTrg1MemInstruction(
                    TR::Instruction *preced = NULL);
 
 /*
+ * @brief Generates mem-to-trg2 instruction
+ * @param[in] cg : CodeGenerator
+ * @param[in] op : instruction opcode
+ * @param[in] node : node
+ * @param[in] treg1 : target 1 register
+ * @param[in] treg2 : target 2 register
+ * @param[in] mr : memory reference
+ * @param[in] preced : preceding instruction
+ * @return generated instruction
+ */
+TR::Instruction *generateTrg2MemInstruction(
+                   TR::CodeGenerator *cg,
+                   TR::InstOpCode::Mnemonic op,
+                   TR::Node *node,
+                   TR::Register *treg1,
+                   TR::Register *treg2,
+                   TR::MemoryReference *mr,
+                   TR::Instruction *preced = NULL);
+
+/*
  * @brief Generates mem-imm instruction
  * @param[in] cg : CodeGenerator
  * @param[in] op : instruction opcode
@@ -914,12 +934,63 @@ TR::Instruction *generateCompareInstruction(
                   bool is64bit = false,
                   TR::Instruction *preced = NULL);
 
+/**
+ * @brief Generates CCMP or CCMN (immediate) instruction
+ *
+ * @param[in] cg : CodeGenerator
+ * @param[in] node : node
+ * @param[in] sreg : source register
+ * @param[in] imm : unsigned 5-bit immediate
+ * @param[in] conditionFlags : condition flags to set if condition specified by cc is true
+ * @param[in] cc : Condition code
+ * @param[in] is64bit : true when it is 64-bit operation
+ * @param[in] isNegative : Generates CCMN instruction if true
+ * @param[in] preced : preceding instruction
+ * @return generated instruction
+ */
+TR::Instruction *generateConditionalCompareImmInstruction(
+                  TR::CodeGenerator *cg,
+                  TR::Node *node,
+                  TR::Register *sreg,
+                  uint32_t imm,
+                  uint32_t conditionFlags,
+                  TR::ARM64ConditionCode cc,
+                  bool is64bit = false,
+                  bool isNegative = false,
+                  TR::Instruction *preced = NULL);
+
+/**
+ * @brief Generates CCMP or CCMN (register) instruction
+ *
+ * @param[in] cg : CodeGenerator
+ * @param[in] node : node
+ * @param[in] sreg1 : source register1
+ * @param[in] sreg2 : source register2
+ * @param[in] conditionFlags : condition flags to set if condition specified by cc is true
+ * @param[in] cc : Condition code
+ * @param[in] is64bit : true when it is 64-bit operation
+ * @param[in] isNegative : Generates CCMN instruction if true
+ * @param[in] preced : preceding instruction
+ * @return generated instruction
+ */
+TR::Instruction *generateConditionalCompareInstruction(
+                  TR::CodeGenerator *cg,
+                  TR::Node *node,
+                  TR::Register *sreg1,
+                  TR::Register *sreg2,
+                  uint32_t conditionFlags,
+                  TR::ARM64ConditionCode cc,
+                  bool is64bit = false,
+                  bool isNegative = false,
+                  TR::Instruction *preced = NULL);
+
 /*
  * @brief Generates TST (immediate) instruction
  * @param[in] cg : CodeGenerator
  * @param[in] node : node
  * @param[in] sreg : source register
  * @param[in] imm : immediate value
+ * @param[in] N : N bit (bit 22) value
  * @param[in] is64bit : true when it is 64-bit operation
  * @param[in] preced : preceding instruction
  * @return generated instruction
@@ -929,6 +1000,7 @@ TR::Instruction *generateTestImmInstruction(
                   TR::Node *node,
                   TR::Register *sreg,
                   int32_t imm,
+                  bool N = false,
                   bool is64bit = false,
                   TR::Instruction *preced = NULL);
 
@@ -1076,6 +1148,26 @@ TR::Instruction *generateCSetInstruction(
                   TR::Node *node,
                   TR::Register *treg,
                   TR::ARM64ConditionCode cc,
+                  TR::Instruction *preced = NULL);
+
+/*
+ * @brief Generates CINC instruction
+ * @param[in] cg : CodeGenerator
+ * @param[in] node : node
+ * @param[in] treg : target register
+ * @param[in] sreg : source register
+ * @param[in] cc : branch condition code
+ * @param[in] is64bit : true when it is 64-bit operation
+ * @param[in] preced : preceding instruction
+ * @return generated instruction
+ */
+TR::Instruction *generateCIncInstruction(
+                  TR::CodeGenerator *cg,
+                  TR::Node *node,
+                  TR::Register *treg,
+                  TR::Register *sreg,
+                  TR::ARM64ConditionCode cc,
+                  bool is64bit,
                   TR::Instruction *preced = NULL);
 
 /*

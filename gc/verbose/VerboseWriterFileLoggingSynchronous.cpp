@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -95,7 +95,9 @@ MM_VerboseWriterFileLoggingSynchronous::openFile(MM_EnvironmentBase *env, bool p
 		return false;
 	}
 	
-	_logFileDescriptor = omrfile_open(filenameToOpen, EsOpenRead | EsOpenWrite | EsOpenCreate | EsOpenTruncate, 0666);
+	int32_t openFlags =  EsOpenRead | EsOpenWrite | EsOpenCreate | _manager->fileOpenMode(env);
+
+	_logFileDescriptor = omrfile_open(filenameToOpen, openFlags, 0666);
 	if(-1 == _logFileDescriptor) {
 		char *cursor = filenameToOpen;
 		/**
@@ -109,7 +111,7 @@ MM_VerboseWriterFileLoggingSynchronous::openFile(MM_EnvironmentBase *env, bool p
 		}
 
 		/* Try again */
-		_logFileDescriptor = omrfile_open(filenameToOpen, EsOpenRead | EsOpenWrite | EsOpenCreate | EsOpenTruncate, 0666);
+		_logFileDescriptor = omrfile_open(filenameToOpen, openFlags, 0666);
 		if (-1 == _logFileDescriptor) {
 			_manager->handleFileOpenError(env, filenameToOpen);
 			extensions->getForge()->free(filenameToOpen);

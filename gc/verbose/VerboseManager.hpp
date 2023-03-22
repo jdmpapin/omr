@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -115,6 +115,40 @@ public:
 	 * @param env vm thread.
 	 */
 	virtual void closeStreams(MM_EnvironmentBase *env);
+
+	/**
+	 * Open all output mechanisms on the receiver.
+	 * @param[in] env the current environment.
+	 * @return boolean indicating if all output streams opened successfully.
+	 */
+	virtual bool openStreams(MM_EnvironmentBase *env);
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+	/**
+	 * Prepare the Verbose GC Components for checkpoint.
+	 * @param[in] env the current environment.
+	 * @return void
+	 */
+	virtual void
+	prepareForCheckpoint(MM_EnvironmentBase *env)
+	{
+		closeStreams(env);
+		disableVerboseGC();
+	}
+
+	/**
+	 * Reinitalize the Verbose GC Components for restore.
+	 * @param[in] env the current environment.
+	 * @return boolean indicating if the verbose manager reinitialized successfully.
+	 */
+	virtual bool
+	reinitializeForRestore(MM_EnvironmentBase *env)
+	{
+		OMRPORT_ACCESS_FROM_OMRPORT(env->getPortLibrary());
+		setInitializedTime(omrtime_hires_clock());
+		return openStreams(env);
+	}
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 
 	MMINLINE MM_VerboseWriterChain* getWriterChain() { return _writerChain; }
 	MM_VerboseHandlerOutput* getVerboseHandlerOutput() { return _verboseHandlerOutput; }

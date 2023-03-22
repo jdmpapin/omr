@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -1020,35 +1020,46 @@ bool OMR::X86::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::ILO
    TR_ASSERT_FATAL(et == TR::Int8 || et == TR::Int16 || et == TR::Int32 || et == TR::Int64 || et == TR::Float || et == TR::Double,
                    "Unexpected vector element type\n");
 
+   if (opcode.isVectorMasked() && !cpu->supportsFeature(OMR_FEATURE_X86_SSE4_1))
+      return false;
+
    // implemented vector opcodes
    switch (opcode.getVectorOperation())
       {
-      case TR::vmin:
-      case TR::vmax:
-         if (et.isFloatingPoint() && ot.getVectorLength() == TR::VectorLength512)
+      case TR::mload:
+      case TR::mloadi:
+         return cpu->supportsFeature(OMR_FEATURE_X86_SSE4_1);
+      case TR::vmabs:
+         if (et.isFloatingPoint())
             return false;
          break;
       case TR::vabs:
-         if (et.isFloatingPoint())
+         if (!et.isFloatingPoint())
             {
-            switch (ot.getVectorLength())
-               {
-               case TR::VectorLength128:
-                  return true;
-               case TR::VectorLength256:
-                  return cpu->supportsFeature(OMR_FEATURE_X86_AVX2);
-               case TR::VectorLength512:
-                  return cpu->supportsFeature(OMR_FEATURE_X86_AVX512F);
-               default:
-                  return false;
-               }
+            break;
             }
-         break;
+      case TR::b2m:
+      case TR::s2m:
+      case TR::i2m:
+      case TR::l2m:
+      case TR::v2m:
+         switch (ot.getVectorLength())
+            {
+            case TR::VectorLength128:
+               return true;
+            case TR::VectorLength256:
+               return cpu->supportsFeature(OMR_FEATURE_X86_AVX2);
+            case TR::VectorLength512:
+               return cpu->supportsFeature(OMR_FEATURE_X86_AVX512F);
+            default:
+               return false;
+            }
+      case TR::vmfma:
       case TR::vfma:
          {
          TR::InstOpCode fmaOpcode = TR::InstOpCode::VFMADD213PRegRegReg(et.isDouble());
 
-         if (fmaOpcode.getSIMDEncoding(cpu, ot.getVectorLength()))
+         if (fmaOpcode.getSIMDEncoding(cpu, ot.getVectorLength()) != OMR::X86::Bad)
             return true;
 
          TR::ILOpCodes vMul = TR::ILOpCode::createVectorOpCode(TR::vmul, opcode.getType());
@@ -1134,14 +1145,18 @@ bool OMR::X86::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::ILO
 #endif //closes the if 0
             return false;
 
+      case TR::vcast:
+         return true;
       default:
          break;
       }
 
+   static bool enableFPReductions = feGetEnv("TR_EnableFPReductions") != NULL;
+
    // Leave floating-point reductions disabled due to a precision tolerance
    // issue in openjdk tests. Min/max f/d reductions cannot be enabled at
    // 512-bits until vector masking support is enabled.
-   if (opcode.isVectorReduction() && !et.isFloatingPoint())
+   if (opcode.isVectorReduction() && (!et.isFloatingPoint() || enableFPReductions))
       {
       TR::ILOpCodes ilOp = OMR::ILOpCode::reductionToVerticalOpcode(opcode.getOpCodeValue(), ot.getVectorLength());
       TR::InstOpCode nativeOpcode = TR::TreeEvaluator::getNativeSIMDOpcode(ilOp, ot, false);
@@ -1577,6 +1592,52 @@ void OMR::X86::CodeGenerator::processClobberingInstructions(TR::ClobberingInstru
       }
    }
 
+TR::Instruction *OMR::X86::CodeGenerator::generateInterpreterEntryInstruction(TR::Instruction *procEntryInstruction)
+   {
+   TR::Instruction * interpreterEntryInstruction;
+   if (self()->comp()->target().is64Bit())
+      {
+      if (self()->comp()->getMethodSymbol()->getLinkageConvention() != TR_System)
+         interpreterEntryInstruction = self()->getLinkage()->copyStackParametersToLinkageRegisters(procEntryInstruction);
+      else
+         interpreterEntryInstruction = procEntryInstruction;
+
+      // Patching can occur at the jit entry point, so insert padding if necessary.
+      //
+      if (self()->comp()->target().isSMP())
+         {
+         TR::Recompilation * recompilation = self()->comp()->getRecompilationInfo();
+         const TR_AtomicRegion *atomicRegions;
+#ifdef J9_PROJECT_SPECIFIC
+         if (recompilation && !recompilation->useSampling())
+            {
+            // Counting recomp can patch a 5-byte call instruction
+            static const TR_AtomicRegion countingAtomicRegions[] = { {0,5}, {0,0} };
+            atomicRegions = countingAtomicRegions;
+            }
+         else
+#endif
+            {
+            // It's safe to protect just the first 2 bytes because we won't patch anything other than a 2-byte jmp
+            static const TR_AtomicRegion samplingAtomicRegions[] = { {0,2}, {0,0} };
+            atomicRegions = samplingAtomicRegions;
+            }
+
+         TR::Instruction *pcai = generatePatchableCodeAlignmentInstruction(atomicRegions, procEntryInstruction, self());
+         if (interpreterEntryInstruction == procEntryInstruction)
+            {
+            // Interpreter prologue contains no instructions other than this
+            // nop, so the nop becomes the interpreter entry instruction
+            interpreterEntryInstruction = pcai;
+            }
+         }
+      }
+   else
+      interpreterEntryInstruction = procEntryInstruction;
+
+   return interpreterEntryInstruction;
+   }
+
 void OMR::X86::CodeGenerator::doBackwardsRegisterAssignment(
       TR_RegisterKinds kindsToAssign,
       TR::Instruction *instructionCursor,
@@ -1781,46 +1842,7 @@ void OMR::X86::CodeGenerator::doBinaryEncoding()
       procEntryInstruction = procEntryInstruction->getNext();
       }
 
-   TR::Instruction * interpreterEntryInstruction;
-   if (self()->comp()->target().is64Bit())
-      {
-      if (self()->comp()->getMethodSymbol()->getLinkageConvention() != TR_System)
-         interpreterEntryInstruction = self()->getLinkage()->copyStackParametersToLinkageRegisters(procEntryInstruction);
-      else
-         interpreterEntryInstruction = procEntryInstruction;
-
-      // Patching can occur at the jit entry point, so insert padding if necessary.
-      //
-      if (self()->comp()->target().isSMP())
-         {
-         TR::Recompilation * recompilation = self()->comp()->getRecompilationInfo();
-         const TR_AtomicRegion *atomicRegions;
-#ifdef J9_PROJECT_SPECIFIC
-         if (recompilation && !recompilation->useSampling())
-            {
-            // Counting recomp can patch a 5-byte call instruction
-            static const TR_AtomicRegion countingAtomicRegions[] = { {0,5}, {0,0} };
-            atomicRegions = countingAtomicRegions;
-            }
-         else
-#endif
-            {
-            // It's safe to protect just the first 2 bytes because we won't patch anything other than a 2-byte jmp
-            static const TR_AtomicRegion samplingAtomicRegions[] = { {0,2}, {0,0} };
-            atomicRegions = samplingAtomicRegions;
-            }
-
-         TR::Instruction *pcai = generatePatchableCodeAlignmentInstruction(atomicRegions, procEntryInstruction, self());
-         if (interpreterEntryInstruction == procEntryInstruction)
-            {
-            // Interpreter prologue contains no instructions other than this
-            // nop, so the nop becomes the interpreter entry instruction
-            interpreterEntryInstruction = pcai;
-            }
-         }
-      }
-   else
-      interpreterEntryInstruction = procEntryInstruction;
+   TR::Instruction * interpreterEntryInstruction = self()->generateInterpreterEntryInstruction(procEntryInstruction);
 
    // Sort data snippets before encoding to compact spaces
    //
@@ -2380,7 +2402,7 @@ void OMR::X86::CodeGenerator::buildRegisterMapForInstruction(TR_GCStackMap * map
    map->setInternalPointerMap(internalPtrMap);
    }
 
-bool OMR::X86::CodeGenerator::allowGlobalRegisterAcrossBranch(TR_RegisterCandidate * rc, TR::Node * node)
+bool OMR::X86::CodeGenerator::allowGlobalRegisterAcrossBranch(TR::RegisterCandidate * rc, TR::Node * node)
    {
    // if a float is being kept alive across a switch make sure it's live across
    // all case destinations
@@ -3045,7 +3067,7 @@ TR::Instruction *OMR::X86::CodeGenerator::generateDebugCounterBump(TR::Instructi
    return self()->generateDebugCounterBump(cursor, counter, deltaReg, NULL);
    }
 
-void OMR::X86::CodeGenerator::removeUnavailableRegisters(TR_RegisterCandidate * rc, TR::Block * * blocks, TR_BitVector & availableRegisters)
+void OMR::X86::CodeGenerator::removeUnavailableRegisters(TR::RegisterCandidate * rc, TR::Block * * blocks, TR_BitVector & availableRegisters)
    {
    TR_BitVectorIterator loe(rc->getBlocksLiveOnExit());
    TR::SymbolReference*  rcSymRef = rc->getSymbolReference();
@@ -3226,4 +3248,29 @@ OMR::X86::CodeGenerator::directCallRequiresTrampoline(intptr_t targetAddress, in
    return
       !self()->comp()->target().cpu.isTargetWithinRIPRange(targetAddress, sourceAddress+5) ||
       self()->comp()->getOption(TR_StressTrampolines);
+   }
+
+bool
+OMR::X86::CodeGenerator::considerTypeForGRA(TR::Node *node)
+   {
+   return !node->getOpCode().isVectorOpCode();
+   }
+
+bool
+OMR::X86::CodeGenerator::considerTypeForGRA(TR::DataType dt)
+   {
+   return !(dt.isVector() || dt.isMask());
+   }
+
+bool
+OMR::X86::CodeGenerator::considerTypeForGRA(TR::SymbolReference *symRef)
+   {
+   if (symRef && symRef->getSymbol())
+      {
+      return self()->considerTypeForGRA(symRef->getSymbol()->getDataType());
+      }
+   else
+      {
+      return true;
+      }
    }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -72,7 +72,7 @@
 #endif
 
 
-class TR_RegisterCandidate;
+namespace TR { class RegisterCandidate; }
 
 static int32_t numIterations = 0;
 
@@ -327,11 +327,11 @@ int32_t TR_PartialRedundancy::perform()
    _newSymbols = (TR::Symbol **)trMemory()->allocateStackMemory(_numberOfBits*sizeof(TR::Symbol *));
    _newSymbolReferences = (TR::SymbolReference **)trMemory()->allocateStackMemory(_numberOfBits*sizeof(TR::SymbolReference *));
    _newSymbolsMap = (int32_t*) trMemory()->allocateStackMemory(_numberOfBits*sizeof(int32_t));
-   _registerCandidates = (TR_RegisterCandidate **)trMemory()->allocateStackMemory(_numberOfBits*sizeof(TR_RegisterCandidate *));
+   _registerCandidates = (TR::RegisterCandidate **)trMemory()->allocateStackMemory(_numberOfBits*sizeof(TR::RegisterCandidate *));
 
    memset(_newSymbols, 0, _numberOfBits*sizeof(TR::Symbol *));
    memset(_newSymbolReferences, 0, _numberOfBits*sizeof(TR::SymbolReference *));
-   memset(_registerCandidates, 0, _numberOfBits*sizeof(TR_RegisterCandidate *));
+   memset(_registerCandidates, 0, _numberOfBits*sizeof(TR::RegisterCandidate *));
 
    // Initialize the map to -1 values
    //
@@ -2064,9 +2064,9 @@ bool TR_PartialRedundancy::eliminateRedundantSupportedNodes(TR::Node *parent, TR
 
                      TR::ILOpCodes conversionOpCode = TR::ILOpCode::getProperConversion(newLoad->getDataType(), node->getDataType(), false /* !wantZeroExtension */);
                      if (TR::ILOpCode::isVectorOpCode(conversionOpCode) &&
-                         TR::ILOpCode::getVectorOperation(conversionOpCode) == TR::vcast)
+                         TR::ILOpCode::getVectorOperation(conversionOpCode) == TR::vconv)
                         {
-                        node = TR::Node::create(TR::ILOpCode::createVectorOpCode(TR::vcast, newLoad->getDataType(), node->getDataType()), 1, newLoad);
+                        node = TR::Node::create(TR::ILOpCode::createVectorOpCode(TR::vconv, newLoad->getDataType(), node->getDataType()), 1, newLoad);
                         }
                      else
                         {

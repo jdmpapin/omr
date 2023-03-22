@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -479,6 +479,35 @@ class ValuePropagation : public TR::Optimization
 
    bool checkAllUnsafeReferences(TR::Node *node, vcount_t visitCount);
    virtual void doDelayedTransformations();
+
+   /**
+    * @brief Look for a likely sub type for a given class
+    *
+    * @param[in] klass : The class to be used to look for its sub type
+    *
+    * @return Resulting sub type class
+    */
+   virtual TR_OpaqueClassBlock *findLikelySubtype(TR_OpaqueClassBlock *klass);
+   /**
+    * @brief Look for a likely sub type for a given class signature
+    *
+    * @param[in] sig : The class signature to be used to look for its sub type
+    * @param[in] len : The class signature length
+    * @param[in] owningMethod : The owning method
+    *
+    * @return Resulting sub type class
+    */
+   virtual TR_OpaqueClassBlock *findLikelySubtype(const char *sig, int32_t len, TR_ResolvedMethod *owningMethod);
+   /**
+    * @brief Create a constraint if a likely sub type for a given class signature is found
+    *
+    * @param[in] owningMethod : The owning method
+    * @param[in] sig : The class signature to be used to look for its sub type
+    * @param[in] len : The class signature length
+    *
+    * @return Resulting constraint
+    */
+   virtual TR::VPConstraint *createTypeHintConstraint(TR_ResolvedMethod *owningMethod, const char *sig, int32_t len);
 
    struct TR_TreeTopNodePair
       {

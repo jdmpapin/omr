@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2005 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -170,5 +170,8 @@
 #define J9NLS_PORT_DUMP_PATH_EXISTS__MODULE 0x504f5254
 #define J9NLS_PORT_DUMP_PATH_EXISTS__ID 48
 #define J9NLS_PORT_DUMP_PATH_EXISTS J9NLS_PORT_DUMP_PATH_EXISTS__MODULE, J9NLS_PORT_DUMP_PATH_EXISTS__ID
+#define J9NLS_PORT_LINUXDUMP_PIPE_CORE_NOT_FOUND__MODULE 0x504f5254
+#define J9NLS_PORT_LINUXDUMP_PIPE_CORE_NOT_FOUND__ID 49
+#define J9NLS_PORT_LINUXDUMP_PIPE_CORE_NOT_FOUND J9NLS_PORT_LINUXDUMP_PIPE_CORE_NOT_FOUND__MODULE, J9NLS_PORT_LINUXDUMP_PIPE_CORE_NOT_FOUND__ID
 
 #endif

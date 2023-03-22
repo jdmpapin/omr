@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -2362,7 +2362,19 @@ TR::S390RSInstruction::generateBinaryEncoding()
       }
    else
       {
-      (*(int16_t *) (cursor + 2)) |= bos(getSourceImmediate());
+      /**
+       * We should only reach here where RS-a or RSY type instruction is used
+       * with source immediate (Shit or Rotate instructions where shift amount
+       * is in the displacement field only. In this bits 16-19 which are used fo
+       * Base Register should be set to 0 and Disp field are stored in bits
+       * 20-31. In case of RSY type instruction that would need long
+       * displacement, bits 32-39 contains higher 8 bits of displacement.
+       */
+      (*(int16_t *) (cursor + 2)) |= (0xFFF & bos(getSourceImmediate()));
+      if (getKind() == TR::Instruction::IsRSY)
+         {
+         (*(int8_t *) (cursor + 3)) |= (bos(getSourceImmediate() >> 12));
+         }
       }
 
    if (getMaskImmediate())
@@ -3192,9 +3204,16 @@ TR::S390RXEInstruction::generateBinaryEncoding()
 
    cursor += (getOpCode().getInstructionLength());
 
+   // Finish patching up if long disp was needed
+   int32_t longDispTouchUpPadding = 0;
+   if (getMemoryReference() != NULL)
+      {
+      longDispTouchUpPadding = getMemoryReference()->generateBinaryEncodingTouchUpForLongDisp(cursor, cg(), this);
+      }
+
    setBinaryLength(cursor - instructionStart);
    setBinaryEncoding(instructionStart);
-   cg()->addAccumulatedInstructionLengthError(getEstimatedBinaryLength() - getBinaryLength() - padding);
+   cg()->addAccumulatedInstructionLengthError(getEstimatedBinaryLength() - getBinaryLength() - padding - longDispTouchUpPadding);
 
    return cursor;
    }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2017 IBM Corp. and others
+ * Copyright IBM Corp. and others 1991
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -81,7 +81,25 @@ public:
 								   uintptr_t tenureFlags,
 								   MM_InitializationParameters* parameters);
 
-	virtual MM_GlobalCollector* createGlobalCollector(MM_EnvironmentBase* env) = 0;
+	/**
+	 * Create set of collectors for given configuration.
+	 * It might be a Global Collector accompanied with Local Collector if necessary.
+	 *
+	 * @param env[in] the current thread
+	 *
+	 * @return Pointer to created Global Collector or NULL
+	 */
+	virtual MM_GlobalCollector* createCollectors(MM_EnvironmentBase* env) = 0;
+
+	/**
+	 * Destroy Garbage Collectors
+	 *
+	 * @param[in] env the current environment.
+	 *
+	 * @return void
+	 */
+	virtual void destroyCollectors(MM_EnvironmentBase* env);
+
 	MM_Heap* createHeap(MM_EnvironmentBase* env, uintptr_t heapBytesRequested);
 	virtual MM_Heap* createHeapWithManager(MM_EnvironmentBase* env, uintptr_t heapBytesRequested, MM_HeapRegionManager* regionManager) = 0;
 	virtual MM_HeapRegionManager* createHeapRegionManager(MM_EnvironmentBase* env) = 0;
@@ -125,6 +143,28 @@ public:
 	virtual void defaultMemorySpaceAllocated(MM_GCExtensionsBase* extensions, void* defaultMemorySpace);
 
 	virtual void kill(MM_EnvironmentBase* env);
+
+	/* Number of GC threads supported based on hardware and dispatcher's max. */
+	virtual uintptr_t supportedGCThreadCount(MM_EnvironmentBase* env);
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+	/**
+	 * Shutdown GC threads on checkpoint.
+	 *
+	 * @param[in] env the current environment
+	 * @return void
+	 */
+	virtual void adjustGCThreadCountForCheckpoint(MM_EnvironmentBase* env);
+
+	/**
+	 * Startup GC threads on restore.
+	 *
+	 * @param[in] env the current environment
+	 * @return bool indicating if the restore thread count was
+	 * successfully set and accommodated (thread pool resized).
+	 */
+	virtual bool reinitializeGCThreadCountForRestore(MM_EnvironmentBase* env);
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 
 	MM_Configuration(MM_EnvironmentBase* env, MM_GCPolicy gcPolicy, MM_AlignmentType alignmentType, uintptr_t defaultRegionSize, uintptr_t defaultArrayletLeafSize, MM_GCWriteBarrierType writeBarrierType, MM_GCAllocationType allocationType)
 		: MM_BaseVirtual()

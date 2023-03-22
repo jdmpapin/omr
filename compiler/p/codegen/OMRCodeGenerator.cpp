@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -872,6 +872,30 @@ void OMR::Power::CodeGenerator::buildRegisterMapForInstruction(TR_GCStackMap *ma
    map->setInternalPointerMap(internalPtrMap);
    }
 
+bool
+OMR::Power::CodeGenerator::considerTypeForGRA(TR::Node *node)
+   {
+   return !node->getDataType().isMask();
+   }
+
+bool
+OMR::Power::CodeGenerator::considerTypeForGRA(TR::DataType dt)
+   {
+   return !dt.isMask();
+   }
+
+bool
+OMR::Power::CodeGenerator::considerTypeForGRA(TR::SymbolReference *symRef)
+   {
+   if (symRef && symRef->getSymbol())
+      {
+      return self()->considerTypeForGRA(symRef->getSymbol()->getDataType());
+      }
+   else
+      {
+      return true;
+      }
+   }
 
 void OMR::Power::CodeGenerator::findOrCreateFloatConstant(void *v, TR::DataType t,
                              TR::Instruction *n0, TR::Instruction *n1,
@@ -1034,11 +1058,11 @@ void OMR::Power::CodeGenerator::simulateNodeEvaluation(TR::Node * node, TR_Regis
       }
    }
 
-TR_GlobalRegisterNumber OMR::Power::CodeGenerator::pickRegister(TR_RegisterCandidate              *  regCan,
+TR_GlobalRegisterNumber OMR::Power::CodeGenerator::pickRegister(TR::RegisterCandidate              *  regCan,
                                                           TR::Block                          ** barr,
                                                           TR_BitVector                      &  availRegs,
                                                           TR_GlobalRegisterNumber           &  highRegisterNumber,
-                                                          TR_LinkHead<TR_RegisterCandidate> *  candidates)
+                                                          TR_LinkHead<TR::RegisterCandidate> *  candidates)
    {
    if (!self()->comp()->getOption(TR_DisableRegisterPressureSimulation))
       return OMR::CodeGenerator::pickRegister(regCan, barr, availRegs, highRegisterNumber, candidates);
@@ -1155,7 +1179,7 @@ TR_GlobalRegisterNumber OMR::Power::CodeGenerator::pickRegister(TR_RegisterCandi
 
          _assignedGlobalRegisters->empty();
          int32_t numAssignedGlobalRegs = 0;
-         TR_RegisterCandidate *prev;
+         TR::RegisterCandidate *prev;
          for (prev = candidates->getFirst(); prev; prev = prev->getNext())
             {
             bool gprCandidate = true;
@@ -1267,7 +1291,7 @@ TR_GlobalRegisterNumber OMR::Power::CodeGenerator::pickRegister(TR_RegisterCandi
      }
   }
 
-bool OMR::Power::CodeGenerator::allowGlobalRegisterAcrossBranch(TR_RegisterCandidate *rc, TR::Node * branchNode)
+bool OMR::Power::CodeGenerator::allowGlobalRegisterAcrossBranch(TR::RegisterCandidate *rc, TR::Node * branchNode)
    {
    // If return false, processLiveOnEntryBlocks has to dis-qualify any candidates which are referenced
    // within any CASE of a SWITCH statement.
@@ -1784,23 +1808,13 @@ bool OMR::Power::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::I
        et != TR::Int64)
       return false;
 
-   if (cpu->isAtLeast(OMR_PROCESSOR_PPC_P8) &&
-       (opcode.getVectorOperation() == TR::vadd || opcode.getVectorOperation() == TR::vsub || opcode.getVectorOperation() == TR::vmul || opcode.getVectorOperation() == TR::vabs || opcode.getVectorOperation() == TR::vmin || opcode.getVectorOperation() == TR::vmax) &&
-       et == TR::Int64)
-      return true;
-
-   if (cpu->isAtLeast(OMR_PROCESSOR_PPC_P8) &&
-       (opcode.getVectorOperation() == TR::vmin || opcode.getVectorOperation() == TR::vmax) &&
-       et == TR::Double)
-      return true;
-
    // implemented vector opcodes
    switch (opcode.getVectorOperation())
       {
       case TR::vadd:
       case TR::vsub:
       case TR::vmul:
-         if (et == TR::Int8 || et == TR::Int16 || et == TR::Int32 || et == TR::Float || et == TR::Double)
+         if (et == TR::Int8 || et == TR::Int16 || et == TR::Int32 || (et == TR::Int64 && cpu->isAtLeast(OMR_PROCESSOR_PPC_P8)) || et == TR::Float || et == TR::Double)
             return true;
          else
             return false;
@@ -1812,7 +1826,7 @@ bool OMR::Power::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::I
       case TR::vneg:
          return true;
       case TR::vabs:
-         if (et == TR::Int8 || et == TR::Int16 || et == TR::Int32 || et == TR::Float || et == TR::Double)
+         if (et == TR::Int8 || et == TR::Int16 || et == TR::Int32 || (et == TR::Int64 && cpu->isAtLeast(OMR_PROCESSOR_PPC_P8)) || et == TR::Float || et == TR::Double)
             return true;
          else
             return false;
@@ -1839,7 +1853,7 @@ bool OMR::Power::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::I
       case TR::vxor:
       case TR::vor:
       case TR::vand:
-         if (et == TR::Int32 || et == TR::Int64)
+         if (et == TR::Int8 || et == TR::Int16 || et == TR::Int32 || et == TR::Int64)
             return true;
          else
             return false;
@@ -1847,7 +1861,7 @@ bool OMR::Power::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::I
             return true;
       case TR::vmin:
       case TR::vmax:
-         if (et == TR::Int8 || et == TR::Int16 || et == TR::Int32 || et == TR::Float)
+         if (et == TR::Int8 || et == TR::Int16 || et == TR::Int32 || (et == TR::Int64 && cpu->isAtLeast(OMR_PROCESSOR_PPC_P8)) || et == TR::Float || (et == TR::Double && cpu->isAtLeast(OMR_PROCESSOR_PPC_P8)))
             return true;
          else
             return false;
@@ -1865,14 +1879,26 @@ bool OMR::Power::CodeGenerator::getSupportsOpCodeForAutoSIMD(TR::CPU *cpu, TR::I
          if (et == TR::Double &&
              opcode.getVectorSourceDataType().getVectorElementType() == TR::Int64)
             return true;
+         else
+            return false;
       case TR::vmadd:
+         if (et == TR::Int8 || et == TR::Int16 || et == TR::Int32 || (et == TR::Int64 && cpu->isAtLeast(OMR_PROCESSOR_PPC_P8)) || et == TR::Float || et == TR::Double)
+            return true;
+         else
+            return false;
       case TR::vcmpeq:
+      case TR::vcmpne:
       case TR::vcmplt:
       case TR::vcmpgt:
       case TR::vcmple:
       case TR::vcmpge:
-         if (et == TR::Double)
+         if (et == TR::Int8 || et == TR::Int16 || et == TR::Int32 || (et == TR::Int64 && cpu->isAtLeast(OMR_PROCESSOR_PPC_P8)) || et == TR::Float || et == TR::Double)
             return true;
+         else
+            return false;
+      case TR::vbitselect:
+      case TR::vcast:
+         return true;
       default:
          return false;
       }

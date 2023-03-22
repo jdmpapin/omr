@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2022 IBM Corp. and others
+ * Copyright IBM Corp. and others 2000
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
  * License, version 2 with the OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -2353,15 +2353,7 @@ genLoadAddressConstant(TR::CodeGenerator * cg, TR::Node * node, uintptr_t value,
       return generateRegLitRefInstruction(cg, TR::InstOpCode::getLoadOpCode(), node, targetRegister, (uintptr_t) value, reloKind, cond, cursor, base);
       }
 
-   TR::Symbol *symbol = NULL;
    TR::Compilation *comp = cg->comp();
-
-   if (node && node->getOpCode().hasSymbolReference())
-      symbol = node->getSymbol();
-   bool isPICCandidate = symbol ? symbol->isStatic() && symbol->isClassObject() : false;
-   if (isPICCandidate && !cg->comp()->compileRelocatableCode()
-       && cg->wantToPatchClassPointer((TR_OpaqueClassBlock*)value, node))
-      return genLoadAddressConstantInSnippet(cg, node, (uintptr_t)value, targetRegister, cursor, cond, base, true);
 
    if (node->isClassUnloadingConst())
       {
@@ -2453,7 +2445,7 @@ generateLoad32BitConstant(TR::CodeGenerator * cg, TR::Node * constExpr)
          }
       case TR::Float:
          tempReg = cg->allocateRegister(TR_FPR);
-         generateRegLitRefInstruction(cg, TR::InstOpCode::LE, constExpr, tempReg, constExpr->getFloat());
+         generateRegLitRefInstruction(cg, TR::InstOpCode::LDE, constExpr, tempReg, constExpr->getFloat());
          break;
       case TR::Double:
          tempReg = cg->allocateRegister(TR_FPR);
@@ -6894,32 +6886,11 @@ aloadHelper(TR::Node * node, TR::CodeGenerator * cg, TR::MemoryReference * tempM
       }
 
    TR::SymbolReference * symRef = node->getSymbolReference();
-   TR::Symbol * symbol = symRef->getSymbol();
    TR::Node *constNode = reinterpret_cast<TR::Node *>(node->getSymbolReference()->getOffset());
    bool dynLitPoolLoad = false;
    tempReg = TR::TreeEvaluator::checkAndAllocateReferenceRegister(node, cg, dynLitPoolLoad);
 
-   bool isStatic = symbol->isStatic() && !symRef->isUnresolved();
-   bool isPICCandidate = isStatic && symbol->isClassObject();
-   if (isPICCandidate
-           && !cg->comp()->compileRelocatableCode() // AOT Class Address are loaded via snippets already
-           && cg->wantToPatchClassPointer((TR_OpaqueClassBlock*)symbol->getStaticSymbol()->getStaticAddress(), node))
-      {
-      if (tempMR == NULL)
-         {
-         uintptr_t value = (uintptr_t) symbol->getStaticSymbol()->getStaticAddress();
-         genLoadAddressConstantInSnippet(cg, node, value, tempReg, NULL, NULL, NULL, true);
-         }
-      // HCR to do for compressed references
-      else
-         {
-         generateRXInstruction(cg, TR::InstOpCode::getLoadOpCode(), node, tempReg, tempMR);
-         }
-
-      updateReferenceNode(node, tempReg);
-      cg->decReferenceCount(node->getFirstChild());
-      }
-   else if ((symRef->isLiteralPoolAddress()) && (node->getOpCodeValue() == TR::aload))
+   if ((symRef->isLiteralPoolAddress()) && (node->getOpCodeValue() == TR::aload))
       {
       // the imm. operand will be patched when the actual address of
       // the literal pool is known
