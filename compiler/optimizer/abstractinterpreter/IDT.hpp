@@ -102,7 +102,7 @@ class IDT
  * The queue has overwrite the operator for comparing he IDTNodes:
  * - the node has the larger cost will have higher priority
  * - the queue breaks the tie by comparing the benefit (node with larger benefit will have higher priority)
- * 
+ *
  * When accessing the queue using the get() function, if the given index is not in the _entries, it will
  * pop the queue (_pQueue) with the highest priority node, add it to the _entries, and then add all children
  * of the popped node to the priority queue (_pQueue).
