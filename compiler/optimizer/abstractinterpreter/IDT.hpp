@@ -98,9 +98,16 @@ class IDT
 
 /**
  * Accessing IDTNode by the priority of its cost.
- * The queue has overwrite the operator for comparing he IDTNodes
- * The node has the larger cost will have the higher priority
- * The queue breaks the tie by comparing the benefit
+ *
+ * The queue has overwrite the operator for comparing he IDTNodes:
+ * - the node has the larger cost will have higher priority
+ * - the queue breaks the tie by comparing the benefit (node with larger benefit will have higher priority)
+ * 
+ * When accessing the queue using the get() function, if the given index is not in the _entries, it will
+ * pop the queue (_pQueue) with the highest priority node, add it to the _entries, and then add all children
+ * of the popped node to the priority queue (_pQueue).
+ * This priority queue can ensure accessing the IDT in the order of node priority while all predecessors
+ * are listed before their successors in the _entries.
  */
 class IDTPriorityQueue
    {
