@@ -97,17 +97,28 @@ class IDT
    };
 
 /**
- * Accessing IDTNode by the priority of its cost.
+ * Accessing IDTNode by the priority of its cost and benefit.
+ * This priority queue is to prepare an ordered list of inlining options as described in following page:
+ * https://patents.google.com/patent/US10055210B2/en
+ *
+ * It has 3 private variables:
+ * _idt: same as the input IDT.
+ * _entries: a vector used to store the result IDTNodes which were popped out from _pQueue.
+ * _pQueue: a priority queue keeps IDTNode in the order of priority from highest to lowest.
  *
  * The queue has overwrite the operator for comparing he IDTNodes:
- * - the node has the larger cost will have higher priority
- * - the queue breaks the tie by comparing the benefit (node with larger benefit will have higher priority)
+ * - the node with the lowest benefit will have the highest priority;
+ * - the queue breaks the tie by comparing the cost (node with lowest cost will have higher priority).
  *
- * When accessing the queue using the get() function, if the given index is not in the _entries, it will
- * pop the queue (_pQueue) with the highest priority node, add it to the _entries, and then add all children
- * of the popped node to the priority queue (_pQueue).
- * This priority queue can ensure accessing the IDT in the order of node priority while all predecessors
- * are listed before their successors in the _entries.
+ * Right after the priority queue is constructed, only the root of given IDT will be pushed into _pQueue.
+ * When getting the IDTNode at the specific index at the priority queue, it will check if the node has
+ * already been saved in _entries first. If yes, return the IDTNode at the given index from _entries, else:
+ *    1. pop the IDTNode which has the highest priority from _pQueue;
+ *    2. append the popped node at the end of _entries;
+ *    3. push all children of the popped node into _pQueue;
+ *    4. return the IDTNode at the given index from _entries.
+ * 
+ * This priority queue traverses all predecessors in preorder before accessing a successor.
  */
 class IDTPriorityQueue
    {
@@ -123,8 +134,8 @@ class IDTPriorityQueue
       bool operator()(TR::IDTNode *left, TR::IDTNode *right)
          {
          TR_ASSERT_FATAL(left && right, "Comparing against null");
-         return left->getCost() < right->getCost()
-            || (left->getCost() == right->getCost() && left->getBenefit() < right->getBenefit());
+         if (left->getBenefit() == right->getBenefit()) return left->getCost() >= right->getCost();
+         else return left->getBenefit() > right->getBenefit();
          }
       };
 
