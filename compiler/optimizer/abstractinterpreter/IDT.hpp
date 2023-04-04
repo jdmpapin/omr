@@ -117,7 +117,7 @@ class IDT
  *    2. append the popped node at the end of _entries;
  *    3. push all children of the popped node into _pQueue;
  *    4. return the IDTNode at the given index from _entries.
- * 
+ *
  * This priority queue traverses all predecessors in preorder before accessing a successor.
  */
 class IDTPriorityQueue
