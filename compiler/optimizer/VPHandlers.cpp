@@ -793,6 +793,228 @@ static bool refineUnsafeAccess(OMR::ValuePropagation *vp, TR::Node *node)
     return okToConstrainNormally;
 }
 
+// TODO: this is OpenJ9-specific because <ramStaticsFromClass> is...
+//
+// Returns true to tell the handler to leave node unconstrained, or false to
+// allow it to keep constraining. When the result is false, node may have been
+// mutated.
+static bool refineUnsafeStaticAccess(OMR::ValuePropagation *vp, TR::Node *node)
+{
+    const bool okToConstrainNormally = false;
+
+    static const bool enable = feGetEnv("TR_enableUnsafeShadowStaticRefinement") != NULL;
+
+    if (!enable) {
+        return okToConstrainNormally;
+    }
+
+    TR::Compilation *comp = vp->comp();
+    TR_J9VMBase *fej9 = comp->fej9();
+    if (comp->compileRelocatableCode() || comp->isOutOfProcessCompilation()) {
+        return okToConstrainNormally;
+    }
+
+    if (!node->getOpCode().isIndirect()) {
+        return okToConstrainNormally;
+    }
+
+    TR::SymbolReference *symRef = node->getSymbolReference();
+    TR::Symbol *sym = symRef->getSymbol();
+    if (!sym->isShadow() || !sym->isUnsafeShadowSymbol()) {
+        return okToConstrainNormally;
+    }
+
+    TR::Node *addr = node->getChild(0);
+    if (!addr->getOpCode().isArrayRef()) {
+        return okToConstrainNormally;
+    }
+
+    TR::Node *baseAddr = addr->getChild(0);
+    if (baseAddr->getOpCodeValue() != TR::aloadi) {
+        return okToConstrainNormally;
+    }
+
+    TR::SymbolReference *baseAddrSymRef = baseAddr->getSymbolReference();
+    TR::SymbolReference *ramStaticsSymRef = comp->getSymRefTab()->findOrCreateRamStaticsFromClassSymbolRef();
+
+    if (baseAddrSymRef != ramStaticsSymRef) {
+        return okToConstrainNormally;
+    }
+
+    // At this point, node looks like
+    //
+    //    ?(load|store|wrtbar)i <unsafe shadow>
+    //      a[li]add
+    //        aloadi <ramStaticsFromClass>
+    //          $classNode
+    //        $offsetNode
+    //
+    // If we fail to refine from here on, we should tell the caller not to
+    // constrain. If any handler were to try to go on as usual, it would just
+    // get told not to constrain by refineUnsafeAccess() anyway.
+    //
+    TR::Node *classNode = baseAddr->getChild(0);
+    TR::Node *offsetNode = addr->getChild(1);
+
+    bool trace = vp->trace();
+    OMR::Logger *log = comp->log();
+
+    logprintf(trace, log, "Found unsafe static access n%un [%p] with class n%un [%p] and offset n%un [%p]\n",
+        node->getGlobalIndex(), node, classNode->getGlobalIndex(), classNode, offsetNode->getGlobalIndex(), offsetNode);
+
+    // The children of node haven't been constrained yet because constraining
+    // them might have folded <ramStaticsFromClass> before reaching this point.
+    // Constrain classNode and offsetNode now.
+
+    TR::Node *oldParent = vp->getCurrentParent();
+
+    vp->setCurrentParent(baseAddr);
+    vp->launchNode(classNode, baseAddr, 0);
+
+    vp->setCurrentParent(addr);
+    vp->launchNode(offsetNode, addr, 1);
+
+    vp->setCurrentParent(oldParent);
+
+    // The nodes might have been replaced in launchNode().
+    classNode = baseAddr->getChild(0);
+    offsetNode = addr->getChild(1);
+
+    // If the class and the offset are both known at compile time, then we can
+    // try to identify the static field being accessed.
+    bool classIsGlobal, offsetIsGlobal;
+    TR::VPConstraint *classConstraint = vp->getConstraint(classNode, classIsGlobal);
+    TR::VPConstraint *offsetConstraint = vp->getConstraint(offsetNode, offsetIsGlobal);
+
+    TR_OpaqueClassBlock *klass = NULL;
+    if (classConstraint != NULL && classConstraint->isJ9ClassObject() == TR_yes && classConstraint->isFixedClass()
+        && classConstraint->getClass() != NULL) {
+        klass = classConstraint->getClass();
+    }
+
+    const char *klassName = "unknown (prevents refinement)";
+    int32_t klassNameLen = strlen(klassName);
+    if (klass != NULL) {
+        klassName = TR::VPResolvedClass::create(vp, klass)->getClassSignature(klassNameLen);
+
+        if (klassName[0] == 'L' && klassName[klassNameLen - 1] == ';') {
+            klassName++;
+            klassNameLen -= 2;
+        }
+    }
+
+    logprintf(trace, log, "Unsafe static access defining class: %p %.*s\n", klass, klassNameLen, klassName);
+
+    int64_t offsetLow = 1;
+    int64_t offsetHigh = 0;
+    TR::VPConstraint *offsetLongConstraint = offsetConstraint->asLongConstraint();
+    TR::VPConstraint *offsetIntConstraint = offsetConstraint->asIntConstraint();
+    if (offsetLongConstraint != NULL) {
+        offsetLow = offsetLongConstraint->getLowLong();
+        offsetHigh = offsetLongConstraint->getHighLong();
+    } else if (offsetIntConstraint != NULL) {
+        offsetLow = offsetIntConstraint->getLowInt();
+        offsetHigh = offsetIntConstraint->getHighInt();
+    }
+
+    bool offsetIsConst = offsetLow == offsetHigh;
+    int64_t signedOffset = (uintptr_t)offsetLow; // used only when offsetIsConst
+    if (trace) {
+        log->prints("Unsafe static access offset: ");
+        if (!offsetIsConst) {
+            log->prints("unknown (prevents refinement)\n");
+        } else if (signedOffset < 0) {
+            log->printf("%+lld (negative, prevents refinement)\n", signedOffset);
+        } else {
+            log->printf("%+lld\n", signedOffset);
+        }
+    }
+
+    if (klass == NULL || !offsetIsConst || signedOffset < 0) {
+        return refuseToConstrainUnsafe(vp, node, "cannot refine unsafe static access");
+    }
+
+    uintptr_t offset = (uintptr_t)signedOffset;
+
+    // Look for a static field in klass with the matching type and offset
+    J9ROMFieldShape *field
+        = fej9->_vmFunctionTable->findStaticFieldByOffset(fej9->vmThread(), (J9Class *)klass, offset);
+
+    if (field == NULL)
+        return refuseToConstrainUnsafe(vp, node, "no static field matching offset");
+
+    J9UTF8 *nameUtf8 = J9ROMFIELDSHAPE_NAME(field);
+    J9UTF8 *sigUtf8 = J9ROMFIELDSHAPE_SIGNATURE(field);
+    const char *name = (const char *)J9UTF8_DATA(nameUtf8);
+    int32_t nameLen = J9UTF8_LENGTH(nameUtf8);
+    const char *sig = (const char *)J9UTF8_DATA(sigUtf8);
+    int32_t sigLen = J9UTF8_LENGTH(sigUtf8);
+    logprintf(trace, log, "Found static field matching offset: %.*s %.*s\n", nameLen, name, sigLen, sig);
+
+    // Determine the expected type of the load
+    TR::DataTypes sigDT = TR::NoType;
+    switch (sig[0]) {
+        case 'L':
+        case '[':
+            sigDT = TR::Address;
+            break;
+
+        case 'F':
+            sigDT = TR::Float;
+            break;
+
+        case 'D':
+            sigDT = TR::Double;
+            break;
+
+        case 'J':
+            sigDT = TR::Int64;
+            break;
+
+        case 'I':
+        case 'S':
+        case 'B':
+        case 'C':
+        case 'Z':
+            sigDT = TR::Int32;
+            break;
+    }
+
+    if (sigDT != node->getOpCode().getDataType()) {
+        const char *what = sigDT == TR::NoType ? "unknown type" : "type mismatch";
+        return refuseToConstrainUnsafe(vp, node, what);
+    }
+
+    bool staticFieldIsVolatile = (field->modifiers & J9AccVolatile) != 0;
+    if (staticFieldIsVolatile != sym->isVolatile()) {
+        // We don't have a representation for statics with the unexpected
+        // volatility, and it's not straightforward to add one because we'd have
+        // to move volatile status to SymbolReference from Symbol.
+        //
+        // Functionally it would be fine to go on and refine anyway if the field
+        // is volatile. Doing so would still improve aliasing, but it would make
+        // the access itself more expensive, so just leave it alone for now.
+        //
+        const char *mismatch = staticFieldIsVolatile ? "non-volatile access to volatile static field"
+                                                     : "volatile access to non-volatile static field";
+
+        return refuseToConstrainUnsafe(vp, node, mismatch);
+    }
+
+    // OK to refine!
+    TR::SymbolReference *refinedSymRef = symRef; // TODO!
+    if (!performTransformation(comp, "%sRefine unsafe shadow access n%un [%p] to static #%d %.*s.%.*s %.*s\n",
+            OPT_DETAILS, node->getGlobalIndex(), node, refinedSymRef->getReferenceNumber(), klassNameLen, klassName,
+            nameLen, name, sigLen, sig)) {
+        return refuseToConstrainUnsafe(vp, node, "performTransformation denied");
+    }
+
+    // TODO: transmute to corresponding direct accesss opcode
+    // TODO: set symref
+    // TODO: remove base addr child
+    return okToConstrainNormally;
+}
+
 static bool owningMethodDoesNotContainNullChecks(OMR::ValuePropagation *vp, TR::Node *node)
 {
     TR::ResolvedMethodSymbol *method = node->getSymbolReference()->getOwningMethodSymbol(vp->comp());
@@ -1383,6 +1605,10 @@ TR::Node *constrainLload(OMR::ValuePropagation *vp, TR::Node *node)
 {
     if (findConstant(vp, node))
         return node;
+
+    if (refineUnsafeStaticAccess(vp, node))
+        return node;
+
     constrainChildren(vp, node);
 
     if (node->getOpCode().isIndirect()) {
@@ -1423,6 +1649,9 @@ TR::Node *constrainLload(OMR::ValuePropagation *vp, TR::Node *node)
 //
 TR::Node *constrainFload(OMR::ValuePropagation *vp, TR::Node *node)
 {
+    if (refineUnsafeStaticAccess(vp, node))
+        return node;
+
     if (!findConstant(vp, node))
         constrainChildren(vp, node);
 
@@ -1441,6 +1670,9 @@ TR::Node *constrainFload(OMR::ValuePropagation *vp, TR::Node *node)
 //
 TR::Node *constrainDload(OMR::ValuePropagation *vp, TR::Node *node)
 {
+    if (refineUnsafeStaticAccess(vp, node))
+        return node;
+
     if (!findConstant(vp, node))
         constrainChildren(vp, node);
 
@@ -1803,6 +2035,10 @@ TR::Node *constrainIloadi(OMR::ValuePropagation *vp, TR::Node *node)
 {
     if (findConstant(vp, node))
         return node;
+
+    if (refineUnsafeStaticAccess(vp, node))
+        return node;
+
     constrainChildren(vp, node);
 
     if (refineUnsafeAccess(vp, node))
@@ -1868,6 +2104,10 @@ TR::Node *constrainAloadi(OMR::ValuePropagation *vp, TR::Node *node)
 {
     if (findConstant(vp, node))
         return node;
+
+    if (refineUnsafeStaticAccess(vp, node))
+        return node;
+
     constrainChildren(vp, node);
 
     if (refineUnsafeAccess(vp, node))
@@ -2410,6 +2650,9 @@ TR::Node *constrainStore(OMR::ValuePropagation *vp, TR::Node *node)
 {
     OMR::Logger *log = vp->comp()->log();
 
+    if (refineUnsafeStaticAccess(vp, node))
+        return node;
+
     constrainChildren(vp, node);
 
     // storage access here, sync region ends
@@ -2609,6 +2852,9 @@ void canRemoveWrtBar(OMR::ValuePropagation *vp, TR::Node *node)
 //
 TR::Node *constrainWrtBar(OMR::ValuePropagation *vp, TR::Node *node)
 {
+    if (refineUnsafeStaticAccess(vp, node))
+        return node;
+
     constrainChildren(vp, node);
 
     if (node->getOpCode().isIndirect()) {
