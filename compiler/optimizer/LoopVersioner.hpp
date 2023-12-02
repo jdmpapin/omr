@@ -425,7 +425,6 @@ protected:
      * TR_LoopVersioner.
      *
      * \see createLoopEntryPrep()
-     * \see createChainedLoopEntryPrep()
      * \see depsForLoopEntryPrep()
      * \see emitPrep()
      * \see unsafelyEmitAllTests()
@@ -500,7 +499,8 @@ protected:
 
     /**
      * \brief A deferred transformation that can improve a loop body, so long as
-     * a particular LoopEntryPrep (typically a versioning test) is emitted.
+     * one or more particular \ref LoopEntryPrep "LoopEntryPreps" (typically
+     * versioning tests) are emitted.
      *
      * For an overview of privatization and the deferral of transformations see
      * TR_LoopVersioner.
@@ -513,12 +513,33 @@ protected:
          * Construct this LoopImprovement.
          *
          * \param versioner The optimization pass object
-         * \param prep The LoopEntryPrep required to allow for this improvement
+         * \param prep The only LoopEntryPrep required to allow for this improvement
          */
         LoopImprovement(TR_LoopVersioner *versioner, LoopEntryPrep *prep)
             : _versioner(versioner)
-            , _prep(prep)
-        {}
+            , _preps(1, prep, versioner->_curLoop->_memRegion)
+            , _requiresPrivatization(initRequiresPrivatization())
+            , _requiresHCRGuardVersioning(initRequiresHCRGuardVersioning())
+            , _requiresOSRGuardVersioning(initRequiresOSRGuardVersioning())
+        {
+            assertHasPreps();
+        }
+
+        /**
+         * Construct this LoopImprovement.
+         *
+         * \param versioner The optimization pass object
+         * \param preps All \ref LoopEntryPrep "LoopEntryPreps" required to allow for this improvement
+         */
+        LoopImprovement(TR_LoopVersioner *versioner, const TR::list<LoopEntryPrep *, TR::Region &> &preps)
+            : _versioner(versioner)
+            , _preps(preps)
+            , _requiresPrivatization(initRequiresPrivatization())
+            , _requiresHCRGuardVersioning(initRequiresHCRGuardVersioning())
+            , _requiresOSRGuardVersioning(initRequiresOSRGuardVersioning())
+        {
+            assertHasPreps();
+        }
 
         /// Improve the loop, for example by removing a check.
         virtual void improveLoop() = 0;
@@ -527,8 +548,17 @@ protected:
 
         TR_FrontEnd *fe() { return _versioner->fe(); }
 
-        TR_LoopVersioner * const _versioner;
-        LoopEntryPrep * const _prep;
+        TR_LoopVersioner * const _versioner; ///< The optimization pass
+        const TR::list<LoopEntryPrep *, TR::Region &> _preps; ///< All required preps
+        const bool _requiresPrivatization; ///< True if privatization is required.
+        const bool _requiresHCRGuardVersioning; ///< True if HCR guard versioning is required.
+        const bool _requiresOSRGuardVersioning; ///< True if OSR guard versioning is required.
+
+    private:
+        bool initRequiresPrivatization();
+        bool initRequiresHCRGuardVersioning();
+        bool initRequiresOSRGuardVersioning();
+        void assertHasPreps();
     };
 
     /**
@@ -618,15 +648,13 @@ protected:
     };
 
     struct PrepKey {
-        PrepKey(LoopEntryPrep::Kind kind, const Expr *expr, LoopEntryPrep *prev)
+        PrepKey(LoopEntryPrep::Kind kind, const Expr *expr)
             : _kind(kind)
             , _expr(expr)
-            , _prev(prev)
         {}
 
         const LoopEntryPrep::Kind _kind;
         const Expr * const _expr;
-        LoopEntryPrep * const _prev;
 
         bool operator<(const PrepKey &rhs) const;
     };
@@ -653,8 +681,8 @@ protected:
     typedef TR::typed_allocator<std::pair<const Expr * const, LoopEntryPrep *>, TR::Region &> NullTestPrepMapAlloc;
     typedef std::map<const Expr *, LoopEntryPrep *, std::less<const Expr *>, NullTestPrepMapAlloc> NullTestPrepMap;
 
-    typedef TR::typed_allocator<std::pair<TR::Node * const, LoopEntryPrep *>, TR::Region &> NodePrepMapAlloc;
-    typedef std::map<TR::Node *, LoopEntryPrep *, std::less<TR::Node *>, NodePrepMapAlloc> NodePrepMap;
+    typedef TR::typed_allocator<std::pair<TR::Node * const, LoopImprovement *>, TR::Region &> NodeImprovementMapAlloc;
+    typedef std::map<TR::Node *, LoopImprovement *, std::less<TR::Node *>, NodeImprovementMapAlloc> NodeImprovementMap;
 
     typedef TR::typed_allocator<std::pair<const Expr * const, PrivTemp>, TR::Region &> PrivTempMapAlloc;
     typedef std::map<const Expr *, PrivTemp, std::less<const Expr *>, PrivTempMapAlloc> PrivTempMap;
@@ -691,12 +719,12 @@ protected:
         NullTestPrepMap _nullTestPreps;
 
         /**
-         * \brief Map from \c BNDCHKwithSpineCheck node to bound check LoopEntryPrep.
+         * \brief Map from \c BNDCHKwithSpineCheck node to bound check LoopImprovement.
          *
-         * This allows the LoopEntryPrep for spine check removal to depend on the
-         * one for bound check removal.
+         * This allows the LoopImprovement for spine check removal to depend on the
+         * same preps as the one for bound check removal.
          */
-        NodePrepMap _boundCheckPrepsWithSpineChecks;
+        NodeImprovementMap _boundCheckImprovementsWithSpineChecks;
 
         /// Check and branch nodes that will definitely be removed.
         TR::NodeChecklist _definitelyRemovableNodes;
@@ -793,8 +821,9 @@ protected:
     public:
         TR_ALLOC(TR_Memory::LoopTransformer)
 
-        RemoveBoundCheck(TR_LoopVersioner *versioner, LoopEntryPrep *prep, TR::TreeTop *boundCheckTree)
-            : LoopImprovement(versioner, prep)
+        RemoveBoundCheck(TR_LoopVersioner *versioner, const TR::list<LoopEntryPrep *, TR::Region &> &preps,
+            TR::TreeTop *boundCheckTree)
+            : LoopImprovement(versioner, preps)
             , _boundCheckTree(boundCheckTree)
         {}
 
@@ -808,8 +837,9 @@ protected:
     public:
         TR_ALLOC(TR_Memory::LoopTransformer)
 
-        RemoveSpineCheck(TR_LoopVersioner *versioner, LoopEntryPrep *prep, TR::TreeTop *spineCheckTree)
-            : LoopImprovement(versioner, prep)
+        RemoveSpineCheck(TR_LoopVersioner *versioner, const TR::list<LoopEntryPrep *, TR::Region &> &preps,
+            TR::TreeTop *spineCheckTree)
+            : LoopImprovement(versioner, preps)
             , _spineCheckTree(spineCheckTree)
         {}
 
@@ -883,9 +913,9 @@ protected:
     public:
         TR_ALLOC(TR_Memory::LoopTransformer)
 
-        FoldConditional(TR_LoopVersioner *versioner, LoopEntryPrep *prep, TR::Node *conditionalNode, bool reverseBranch,
-            bool original)
-            : LoopImprovement(versioner, prep)
+        FoldConditional(TR_LoopVersioner *versioner, const TR::list<LoopEntryPrep *, TR::Region &> &preps,
+            TR::Node *conditionalNode, bool reverseBranch, bool original)
+            : LoopImprovement(versioner, preps)
             , _conditionalNode(conditionalNode)
             , _reverseBranch(reverseBranch)
             , _original(original)
@@ -898,6 +928,8 @@ protected:
         const bool _reverseBranch;
         const bool _original;
     };
+
+    void foldConditional(TR::Node *conditionalNode, bool reverseBranch, bool original);
 
     bool shouldOnlySpecializeLoops() { return _onlySpecializingLoops; }
 
@@ -1017,7 +1049,7 @@ protected:
 
     void buildNullCheckComparisonsTree(List<TR::Node> *, List<TR::TreeTop> *);
     void buildBoundCheckComparisonsTree(List<TR::TreeTop> *, List<TR::TreeTop> *, bool);
-    void createRemoveBoundCheck(TR::TreeTop *, LoopEntryPrep *, List<TR::TreeTop> *);
+    void createRemoveBoundCheck(TR::TreeTop *, const TR::list<LoopEntryPrep *, TR::Region &> &, List<TR::TreeTop> *);
     void buildSpineCheckComparisonsTree(List<TR::TreeTop> *);
     void buildDivCheckComparisonsTree(List<TR::TreeTop> *);
     void buildAwrtbariComparisonsTree(List<TR::TreeTop> *);
@@ -1071,11 +1103,11 @@ protected:
     void emitPrep(LoopEntryPrep *prep, List<TR::Node> *comparisonTrees);
     void unsafelyEmitAllTests(const TR::list<LoopEntryPrep *, TR::Region &> &, List<TR::Node> *);
     void setAndIncChildren(TR::Node *node, int n, TR::Node **children);
-    void nodeWillBeRemovedIfPossible(TR::Node *node, LoopEntryPrep *prep);
+    void nodeWillBeRemovedIfPossible(TR::Node *node, LoopImprovement *improvement);
 
-    LoopEntryPrep *createLoopEntryPrep(LoopEntryPrep::Kind, TR::Node *, TR::NodeChecklist * = NULL,
-        LoopEntryPrep * = NULL);
-    LoopEntryPrep *createChainedLoopEntryPrep(LoopEntryPrep::Kind, TR::Node *, LoopEntryPrep *);
+    LoopEntryPrep *createLoopEntryPrep(LoopEntryPrep::Kind, TR::Node *, TR::NodeChecklist * = NULL);
+    void addLoopEntryPrep(TR::list<LoopEntryPrep *, TR::Region &> &, LoopEntryPrep::Kind, TR::Node *);
+    bool prepsOk(const TR::list<LoopEntryPrep *, TR::Region &> &);
     void visitSubtree(TR::Node *node, TR::NodeChecklist *visited);
 
     TR_BitVector *_seenDefinedSymbolReferences;

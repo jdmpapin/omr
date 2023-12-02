@@ -31,8 +31,15 @@
 namespace TR {
 template<class T, class Alloc = TR::Allocator> class list : public std::list<T, TR::typed_allocator<T, Alloc> > {
 public:
+    typedef typename std::list<T, TR::typed_allocator<T, Alloc> >::size_type size_type;
+    typedef TR::typed_allocator<T, Alloc> allocator_type;
+
     list(TR::typed_allocator<T, Alloc> ta)
         : std::list<T, TR::typed_allocator<T, Alloc> >(ta)
+    {}
+
+    list(size_type count, const T &value = T(), const allocator_type &alloc = allocator_type())
+        : std::list<T, TR::typed_allocator<T, Alloc> >(count, value, alloc)
     {}
 
 #if defined(_LIBCPP_VERSION) && _LIBCPP_VERSION < 4000

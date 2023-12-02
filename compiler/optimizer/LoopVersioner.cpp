@@ -3515,9 +3515,10 @@ void TR_LoopVersioner::versionNaturalLoop(TR_RegionStructure *whileLoop, List<TR
             LoopEntryPrep *prep = createLoopEntryPrep(LoopEntryPrep::TEST, nextComparisonNode);
 
             if (prep != NULL) {
-                nodeWillBeRemovedIfPossible(_asyncCheckTree->getNode(), prep);
-                _curLoop->_loopImprovements.push_back(
-                    new (_curLoop->_memRegion) RemoveAsyncCheck(this, prep, _asyncCheckTree));
+                LoopImprovement *improvement = new (_curLoop->_memRegion) RemoveAsyncCheck(this, prep, _asyncCheckTree);
+
+                nodeWillBeRemovedIfPossible(_asyncCheckTree->getNode(), improvement);
+                _curLoop->_loopImprovements.push_back(improvement);
             }
         }
     }
@@ -3676,8 +3677,10 @@ void TR_LoopVersioner::versionNaturalLoop(TR_RegionStructure *whileLoop, List<TR
                 continue;
             }
 
-            nodeWillBeRemovedIfPossible(check, prep);
-            _curLoop->_loopImprovements.push_back(new (_curLoop->_memRegion) RemoveNullCheck(this, prep, check));
+            LoopImprovement *improvement = new (_curLoop->_memRegion) RemoveNullCheck(this, prep, check);
+
+            nodeWillBeRemovedIfPossible(check, improvement);
+            _curLoop->_loopImprovements.push_back(improvement);
         }
     }
 
@@ -3913,8 +3916,7 @@ void TR_LoopVersioner::versionNaturalLoop(TR_RegionStructure *whileLoop, List<TR
             comparisonTrees.add(guard);
 
             bool reverseBranch = false, origLoop = true;
-            FoldConditional fold(this, NULL, tt->getNode(), reverseBranch, origLoop);
-            fold.improveLoop();
+            foldConditional(tt->getNode(), reverseBranch, origLoop);
         }
     }
 
@@ -3937,8 +3939,7 @@ void TR_LoopVersioner::versionNaturalLoop(TR_RegionStructure *whileLoop, List<TR
         ListIterator<TR::TreeTop> guardIt(&osrGuards);
         for (TR::TreeTop *tt = guardIt.getCurrent(); tt; tt = guardIt.getNext()) {
             bool reverseBranch = false, origLoop = true;
-            FoldConditional fold(this, NULL, tt->getNode(), reverseBranch, origLoop);
-            fold.improveLoop();
+            foldConditional(tt->getNode(), reverseBranch, origLoop);
         }
     }
 
@@ -3946,16 +3947,20 @@ void TR_LoopVersioner::versionNaturalLoop(TR_RegionStructure *whileLoop, List<TR
         buildAwrtbariComparisonsTree(awrtbariTrees);
 
     // For each loop improvement that is still possible, emit its loop entry
-    // prep and transform the loop. NB. These improvements are mandatory now.
+    // preps and transform the loop. NB. These improvements are mandatory now.
     auto improvementsBegin = _curLoop->_loopImprovements.begin();
     auto improvementsEnd = _curLoop->_loopImprovements.end();
     for (auto it = improvementsBegin; it != improvementsEnd; ++it) {
         LoopImprovement *improvement = *it;
-        LoopEntryPrep *prep = improvement->_prep;
-        if ((!prep->_requiresPrivatization || _curLoop->_privatizationOK)
-            && (!prep->_expr->mergedWithHCRGuard() || _curLoop->_hcrGuardVersioningOK)
-            && (!prep->_expr->mergedWithOSRGuard() || _curLoop->_osrGuardVersioningOK)) {
-            emitPrep(prep, &comparisonTrees);
+        if ((!improvement->_requiresPrivatization || _curLoop->_privatizationOK)
+            && (!improvement->_requiresHCRGuardVersioning || _curLoop->_hcrGuardVersioningOK)
+            && (!improvement->_requiresOSRGuardVersioning || _curLoop->_osrGuardVersioningOK)) {
+            const auto &preps = improvement->_preps;
+            for (auto pit = preps.begin(), end = preps.end(); pit != end; pit++) {
+                LoopEntryPrep *prep = *pit;
+                emitPrep(prep, &comparisonTrees);
+            }
+
             improvement->improveLoop();
         }
     }
@@ -4569,9 +4574,9 @@ void TR_LoopVersioner::buildNullCheckComparisonsTree(List<TR::Node> *nullChecked
             LoopEntryPrep *prep = createLoopEntryPrep(LoopEntryPrep::TEST, nextComparisonNode);
             if (prep != NULL) {
                 TR::Node *checkNode = nextTree->getData()->getNode();
-                nodeWillBeRemovedIfPossible(checkNode, prep);
-                _curLoop->_loopImprovements.push_back(
-                    new (_curLoop->_memRegion) RemoveNullCheck(this, prep, checkNode));
+                LoopImprovement *improvement = new (_curLoop->_memRegion) RemoveNullCheck(this, prep, checkNode);
+                nodeWillBeRemovedIfPossible(checkNode, improvement);
+                _curLoop->_loopImprovements.push_back(improvement);
             }
         }
     }
@@ -4675,9 +4680,10 @@ void TR_LoopVersioner::buildDivCheckComparisonsTree(List<TR::TreeTop> *divCheckT
 
             LoopEntryPrep *prep = createLoopEntryPrep(LoopEntryPrep::TEST, ifNode);
             if (prep != NULL) {
-                nodeWillBeRemovedIfPossible(divCheckNode, prep);
-                _curLoop->_loopImprovements.push_back(
-                    new (_curLoop->_memRegion) RemoveDivCheck(this, prep, divCheckNode));
+                LoopImprovement *improvement = new (_curLoop->_memRegion) RemoveDivCheck(this, prep, divCheckNode);
+
+                nodeWillBeRemovedIfPossible(divCheckNode, improvement);
+                _curLoop->_loopImprovements.push_back(improvement);
             }
         }
 
@@ -4717,9 +4723,10 @@ void TR_LoopVersioner::buildCheckCastComparisonsTree(List<TR::TreeTop> *checkCas
 
         LoopEntryPrep *prep = createLoopEntryPrep(LoopEntryPrep::TEST, ificmpeqNode);
         if (prep != NULL) {
-            nodeWillBeRemovedIfPossible(checkCastNode, prep);
-            _curLoop->_loopImprovements.push_back(
-                new (_curLoop->_memRegion) RemoveCheckCast(this, prep, checkCastTree));
+            LoopImprovement *improvement = new (_curLoop->_memRegion) RemoveCheckCast(this, prep, checkCastTree);
+
+            nodeWillBeRemovedIfPossible(checkCastNode, improvement);
+            _curLoop->_loopImprovements.push_back(improvement);
         }
 
         nextTree = nextTree->getNextElement();
@@ -4787,9 +4794,11 @@ void TR_LoopVersioner::buildArrayStoreCheckComparisonsTree(List<TR::TreeTop> *ar
 
         LoopEntryPrep *prep = createLoopEntryPrep(LoopEntryPrep::TEST, ificmpeqNode);
         if (prep != NULL) {
-            nodeWillBeRemovedIfPossible(arrayStoreCheckNode, prep);
-            _curLoop->_loopImprovements.push_back(
-                new (_curLoop->_memRegion) RemoveArrayStoreCheck(this, prep, arrayStoreCheckTree));
+            LoopImprovement *improvement
+                = new (_curLoop->_memRegion) RemoveArrayStoreCheck(this, prep, arrayStoreCheckTree);
+
+            nodeWillBeRemovedIfPossible(arrayStoreCheckNode, improvement);
+            _curLoop->_loopImprovements.push_back(improvement);
         }
 
         nextTree = nextTree->getNextElement();
@@ -5065,8 +5074,7 @@ void TR_LoopVersioner::buildConditionalTree(List<TR::TreeTop> *conditionalTrees,
         TR::Node *conditionalNode = conditionalTree->getNode();
         TR::Node *origConditionalNode = conditionalNode;
 
-        LoopEntryPrep *prep = NULL;
-        bool chainPrep = false;
+        TR::list<LoopEntryPrep *, TR::Region &> preps(_curLoop->_memRegion);
 
         if (conditionalNode->isTheVirtualGuardForAGuardedInlinedCall() && !conditionalNode->isOSRGuard()
             && !conditionalNode->isHCRGuard() && !conditionalNode->isDirectMethodGuard()
@@ -5149,8 +5157,7 @@ void TR_LoopVersioner::buildConditionalTree(List<TR::TreeTop> *conditionalTrees,
             }
 
             if (unmentionedReceiver != NULL && requiresPrivatization(unmentionedReceiver)) {
-                chainPrep = true;
-                prep = createLoopEntryPrep(LoopEntryPrep::PRIVATIZE,
+                addLoopEntryPrep(preps, LoopEntryPrep::PRIVATIZE,
                     unmentionedReceiver->duplicateTreeWithCommoning(comp()->allocator()));
             }
         }
@@ -5205,8 +5212,6 @@ void TR_LoopVersioner::buildConditionalTree(List<TR::TreeTop> *conditionalTrees,
                 // The final value is also needed in order to correctly version
                 // unsigned comparisons.
                 if (excond.extremumIsFinalValue || conditionalNode->getOpCode().isUnsigned()) {
-                    chainPrep = true;
-
                     // Ensure that the initial IV value would pass the loop test. If
                     // not, then the loop is likely not to enter a second iteration,
                     // and the number of iterations becomes difficult to predict.
@@ -5218,7 +5223,7 @@ void TR_LoopVersioner::buildConditionalTree(List<TR::TreeTop> *conditionalTrees,
 
                     TR::Node *preLoopTest = TR::Node::createif(exitCmpOp, initialIv, loopLimit, _exitGotoTarget);
 
-                    prep = createLoopEntryPrep(LoopEntryPrep::TEST, preLoopTest);
+                    addLoopEntryPrep(preps, LoopEntryPrep::TEST, preLoopTest);
 
                     // Because isVersionableIfWithExtremum has checked that the loop
                     // test comparison agrees in the expected way with the IV step
@@ -5235,7 +5240,7 @@ void TR_LoopVersioner::buildConditionalTree(List<TR::TreeTop> *conditionalTrees,
                     TR::Node *zero = TR::Node::iconst(conditionalNode, 0);
                     TR::Node *overflowTest = TR::Node::createif(wrongSignCmpOp, range, zero, _exitGotoTarget);
 
-                    prep = createChainedLoopEntryPrep(LoopEntryPrep::TEST, overflowTest, prep);
+                    addLoopEntryPrep(preps, LoopEntryPrep::TEST, overflowTest);
 
                     // Now we can predict the final value of the IV. Really, this is
                     // the most extreme possible final value, since in the presence
@@ -5399,7 +5404,7 @@ void TR_LoopVersioner::buildConditionalTree(List<TR::TreeTop> *conditionalTrees,
                     TR::Node *signTestNode = TR::Node::createif(TR::ificmplt, xorNode,
                         TR::Node::iconst(conditionalNode, 0), _exitGotoTarget);
 
-                    prep = createChainedLoopEntryPrep(LoopEntryPrep::TEST, signTestNode, prep);
+                    addLoopEntryPrep(preps, LoopEntryPrep::TEST, signTestNode);
                 }
             }
 
@@ -5453,32 +5458,31 @@ void TR_LoopVersioner::buildConditionalTree(List<TR::TreeTop> *conditionalTrees,
                     false); // for the outer loop its not a maxloop itr guard anymore!
             }
 
-            if (chainPrep) {
-                prep = createChainedLoopEntryPrep(LoopEntryPrep::TEST, duplicateComparisonNode, prep);
-            } else {
-                TR_ASSERT_FATAL_WITH_NODE(conditionalNode, prep == NULL, "unexpected prereq LoopEntryPrep");
-                prep = createLoopEntryPrep(LoopEntryPrep::TEST, duplicateComparisonNode);
-            }
+            addLoopEntryPrep(preps, LoopEntryPrep::TEST, duplicateComparisonNode);
+            if (prepsOk(preps)) {
+                LoopImprovement *improvement
+                    = new (_curLoop->_memRegion) FoldConditional(this, preps, origConditionalNode, reverseBranch,
+                        /* original = */ true);
 
-            if (prep != NULL) {
-                nodeWillBeRemovedIfPossible(origConditionalNode, prep);
+                nodeWillBeRemovedIfPossible(origConditionalNode, improvement);
                 if (reverseBranch)
                     _curLoop->_takenBranches.add(origConditionalNode);
 
-                _curLoop->_loopImprovements.push_back(
-                    new (_curLoop->_memRegion) FoldConditional(this, prep, origConditionalNode, reverseBranch,
-                        /* original = */ true));
+                _curLoop->_loopImprovements.push_back(improvement);
 
                 // We don't (and generally can't) privatize in the slow loop, so
                 // when the condition requires privatization, it isn't
                 // necessarily invariant in the slow loop.
-                if (changeConditionalToUnconditionalInBothVersions && !prep->_requiresPrivatization) {
+                if (changeConditionalToUnconditionalInBothVersions && !improvement->_requiresPrivatization) {
+                    TR_ASSERT_FATAL_WITH_NODE(origConditionalNode, preps.size() == 1,
+                        "attempt to fold in both loops with multiple preps");
+
                     // This conditional node is outside the hot loop, so
                     // nodeWillBeRemovedIfPossible() is unnecessary, and
                     // _takenBranches is irrelevant.
-                    _curLoop->_loopImprovements.push_back(
-                        new (_curLoop->_memRegion) FoldConditional(this, prep, _duplicateConditionalTree, reverseBranch,
-                            /* original = */ false));
+                    _curLoop->_loopImprovements.push_back(new (_curLoop->_memRegion)
+                            FoldConditional(this, preps, _duplicateConditionalTree, reverseBranch,
+                                /* original = */ false));
 
                     _curLoop->_foldConditionalInDuplicatedLoop = true;
                 }
@@ -5491,33 +5495,38 @@ void TR_LoopVersioner::buildConditionalTree(List<TR::TreeTop> *conditionalTrees,
 
 void TR_LoopVersioner::FoldConditional::improveLoop()
 {
-    dumpOptDetails(comp(), "Folding conditional n%un [%p]\n", _conditionalNode->getGlobalIndex(), _conditionalNode);
+    _versioner->foldConditional(_conditionalNode, _reverseBranch, _original);
+}
 
-    if (_conditionalNode->isTheVirtualGuardForAGuardedInlinedCall()) {
-        TR::Node *callNode = _conditionalNode->getVirtualCallNodeForGuard();
+void TR_LoopVersioner::foldConditional(TR::Node *conditionalNode, bool reverseBranch, bool original)
+{
+    dumpOptDetails(comp(), "Folding conditional n%un [%p]\n", conditionalNode->getGlobalIndex(), conditionalNode);
+
+    if (conditionalNode->isTheVirtualGuardForAGuardedInlinedCall()) {
+        TR::Node *callNode = conditionalNode->getVirtualCallNodeForGuard();
         if (callNode) {
             callNode->resetIsTheVirtualCallNodeForAGuardedInlinedCall();
-            if (_original)
-                _versioner->_guardedCalls.add(callNode);
+            if (original)
+                _guardedCalls.add(callNode);
         }
     }
 
-    TR::Node *constNode = TR::Node::create(_conditionalNode, TR::iconst, 0, 0);
+    TR::Node *constNode = TR::Node::create(conditionalNode, TR::iconst, 0, 0);
 
-    _conditionalNode->getFirstChild()->recursivelyDecReferenceCount();
-    _conditionalNode->setChild(0, constNode);
+    conditionalNode->getFirstChild()->recursivelyDecReferenceCount();
+    conditionalNode->setChild(0, constNode);
     constNode->incReferenceCount();
 
-    _conditionalNode->getSecondChild()->recursivelyDecReferenceCount();
+    conditionalNode->getSecondChild()->recursivelyDecReferenceCount();
 
-    if (!_reverseBranch)
-        constNode = TR::Node::create(_conditionalNode, TR::iconst, 0, 1);
+    if (!reverseBranch)
+        constNode = TR::Node::create(conditionalNode, TR::iconst, 0, 1);
 
-    _conditionalNode->setChild(1, constNode);
+    conditionalNode->setChild(1, constNode);
     constNode->incReferenceCount();
 
-    TR::Node::recreate(_conditionalNode, _original ? TR::ificmpeq : TR::ificmpne);
-    _conditionalNode->setVirtualGuardInfo(NULL, comp());
+    TR::Node::recreate(conditionalNode, original ? TR::ificmpeq : TR::ificmpne);
+    conditionalNode->setVirtualGuardInfo(NULL, comp());
 }
 
 void TR_LoopVersioner::copyOnWriteNode(TR::Node *original, TR::Node **current)
@@ -5654,32 +5663,35 @@ void TR_LoopVersioner::buildSpineCheckComparisonsTree(List<TR::TreeTop> *spineCh
             TR::Node *nextComparisonNode = TR::Node::createif(TR::ificmpne, contigArrayLength,
                 TR::Node::create(spineCheckNode, TR::iconst, 0, 0), _exitGotoTarget);
 
-            // In case of BNDCHKwithSpineCHK, make this prep depend on the
-            // one for removing the bound check. Otherwise we could fail to
+            // In case of BNDCHKwithSpineCHK, make this improvement depend on the
+            // prep for removing the bound check. Otherwise we could fail to
             // remove the bound check, but "succeed" in removing the spine check,
             // and the spine check transformation would find an unexpected tree.
-            LoopEntryPrep *prep = NULL;
+            TR::list<LoopEntryPrep *, TR::Region &> preps(_curLoop->_memRegion);
             TR::ILOpCodes op = spineCheckNode->getOpCodeValue();
-            if (op == TR::SpineCHK) {
-                prep = createLoopEntryPrep(LoopEntryPrep::TEST, nextComparisonNode);
-            } else {
+            if (op != TR::SpineCHK) {
                 TR_ASSERT_FATAL(op == TR::BNDCHKwithSpineCHK, "expected either SpineCHK or BNDCHKwithSpineCHK, got %s",
                     TR::ILOpCode(op).getName());
 
-                auto prereqEntry = _curLoop->_boundCheckPrepsWithSpineChecks.find(spineCheckNode);
+                auto prereqEntry = _curLoop->_boundCheckImprovementsWithSpineChecks.find(spineCheckNode);
 
-                TR_ASSERT_FATAL(prereqEntry != _curLoop->_boundCheckPrepsWithSpineChecks.end(),
+                TR_ASSERT_FATAL(prereqEntry != _curLoop->_boundCheckImprovementsWithSpineChecks.end(),
                     "missing prep for removal of bound check from BNDCHKwithSpineCHK n%un [%p]",
                     spineCheckNode->getGlobalIndex(), spineCheckNode);
 
-                LoopEntryPrep *prereq = prereqEntry->second;
-                prep = createChainedLoopEntryPrep(LoopEntryPrep::TEST, nextComparisonNode, prereq);
+                const TR::list<LoopEntryPrep *, TR::Region &> &prereqs = prereqEntry->second->_preps;
+
+                for (auto it = prereqs.begin(), end = prereqs.end(); it != end; it++)
+                    preps.push_back(*it);
             }
 
-            if (prep != NULL) {
-                nodeWillBeRemovedIfPossible(spineCheckNode, prep);
-                _curLoop->_loopImprovements.push_back(
-                    new (_curLoop->_memRegion) RemoveSpineCheck(this, prep, nextTree->getData()));
+            addLoopEntryPrep(preps, LoopEntryPrep::TEST, nextComparisonNode);
+            if (prepsOk(preps)) {
+                LoopImprovement *improvement
+                    = new (_curLoop->_memRegion) RemoveSpineCheck(this, preps, nextTree->getData());
+
+                nodeWillBeRemovedIfPossible(spineCheckNode, improvement);
+                _curLoop->_loopImprovements.push_back(improvement);
             }
         }
 
@@ -5878,7 +5890,8 @@ void TR_LoopVersioner::buildBoundCheckComparisonsTree(List<TR::TreeTop> *boundCh
             if (comp()->requiresSpineChecks())
                 findAndReplaceContigArrayLen(NULL, nextComparisonNode, comp()->incVisitCount());
 
-            LoopEntryPrep *prep = createLoopEntryPrep(LoopEntryPrep::TEST, nextComparisonNode);
+            TR::list<LoopEntryPrep *, TR::Region &> preps(_curLoop->_memRegion);
+            addLoopEntryPrep(preps, LoopEntryPrep::TEST, nextComparisonNode);
 
             if (boundCheckNode->getOpCodeValue() == TR::BNDCHK
                 || boundCheckNode->getOpCodeValue() == TR::BNDCHKwithSpineCHK)
@@ -5894,10 +5907,8 @@ void TR_LoopVersioner::buildBoundCheckComparisonsTree(List<TR::TreeTop> *boundCh
             if (comp()->requiresSpineChecks())
                 findAndReplaceContigArrayLen(NULL, nextComparisonNode, comp()->incVisitCount());
 
-            prep = createChainedLoopEntryPrep(LoopEntryPrep::TEST, nextComparisonNode, prep);
-
-            if (prep != NULL)
-                createRemoveBoundCheck(boundCheckTree, prep, spineCheckTrees);
+            addLoopEntryPrep(preps, LoopEntryPrep::TEST, nextComparisonNode);
+            createRemoveBoundCheck(boundCheckTree, preps, spineCheckTrees);
         } else {
             bool isIndexChildMultiplied = false;
             bool indVarOccursAsSecondChildOfSub = false;
@@ -6087,8 +6098,6 @@ void TR_LoopVersioner::buildBoundCheckComparisonsTree(List<TR::TreeTop> *boundCh
                 }
             }
 
-            LoopEntryPrep *prep = NULL;
-
             bool complexButPredictableForm = true;
             if (!isAddition)
                 complexButPredictableForm = false;
@@ -6227,8 +6236,9 @@ void TR_LoopVersioner::buildBoundCheckComparisonsTree(List<TR::TreeTop> *boundCh
             if (comp()->requiresSpineChecks())
                 findAndReplaceContigArrayLen(NULL, nextComparisonNode, comp()->incVisitCount());
 
-            prep = createLoopEntryPrep(LoopEntryPrep::TEST, nextComparisonNode);
-            dumpOptDetails(comp(), "1: Prep %p has been created for testing if exceed bounds\n", prep);
+            TR::list<LoopEntryPrep *, TR::Region &> preps(_curLoop->_memRegion);
+            addLoopEntryPrep(preps, LoopEntryPrep::TEST, nextComparisonNode);
+            dumpOptDetails(comp(), "1: Prep %p has been created for testing if exceed bounds\n", preps.back());
 
             TR::Node *loopLimit = NULL;
             if (isLoopDrivingInductionVariable || isDerivedInductionVariable)
@@ -6452,9 +6462,9 @@ void TR_LoopVersioner::buildBoundCheckComparisonsTree(List<TR::TreeTop> *boundCh
                     if (comp()->requiresSpineChecks())
                         findAndReplaceContigArrayLen(NULL, overflowComparisonNode, comp()->incVisitCount());
 
-                    prep = createChainedLoopEntryPrep(LoopEntryPrep::TEST, overflowComparisonNode, prep);
+                    addLoopEntryPrep(preps, LoopEntryPrep::TEST, overflowComparisonNode);
 
-                    dumpOptDetails(comp(), "Prep %p has been created for testing if exceed bounds\n", prep);
+                    dumpOptDetails(comp(), "Prep %p has been created for testing if exceed bounds\n", preps.back());
                 }
 
                 loopLimit = maxValue;
@@ -6487,8 +6497,7 @@ void TR_LoopVersioner::buildBoundCheckComparisonsTree(List<TR::TreeTop> *boundCh
                 if (comp()->requiresSpineChecks())
                     findAndReplaceContigArrayLen(NULL, nextComparisonNode, comp()->incVisitCount());
 
-                prep = createChainedLoopEntryPrep(LoopEntryPrep::TEST, nextComparisonNode, prep);
-
+                addLoopEntryPrep(preps, LoopEntryPrep::TEST, nextComparisonNode);
                 nextComparisonNode = TR::Node::createif(TR::ifiucmpgt, correctCheckNode,
                     arrayLengthNode->duplicateTree(), _exitGotoTarget);
                 logprintf(trace(), log, "Special Induction variable added in each iter -> Creating %p (%s)\n",
@@ -6528,9 +6537,8 @@ void TR_LoopVersioner::buildBoundCheckComparisonsTree(List<TR::TreeTop> *boundCh
             if (comp()->requiresSpineChecks())
                 findAndReplaceContigArrayLen(NULL, nextComparisonNode, comp()->incVisitCount());
 
-            prep = createChainedLoopEntryPrep(LoopEntryPrep::TEST, nextComparisonNode, prep);
-
-            dumpOptDetails(comp(), "2: Prep %p has been created for testing if exceed bounds\n", prep);
+            addLoopEntryPrep(preps, LoopEntryPrep::TEST, nextComparisonNode);
+            dumpOptDetails(comp(), "2: Prep %p has been created for testing if exceed bounds\n", preps.back());
 
             if (!isSpecialInductionVariable) {
                 TR::Node *firstChild = boundCheckNode->getChild(indexChildIndex)->duplicateTree();
@@ -6593,9 +6601,8 @@ void TR_LoopVersioner::buildBoundCheckComparisonsTree(List<TR::TreeTop> *boundCh
                     if (comp()->requiresSpineChecks())
                         findAndReplaceContigArrayLen(NULL, nextComparisonNode, comp()->incVisitCount());
 
-                    prep = createChainedLoopEntryPrep(LoopEntryPrep::TEST, nextComparisonNode, prep);
-
-                    dumpOptDetails(comp(), "3: Prep %p has been created for testing if exceed bounds\n", prep);
+                    addLoopEntryPrep(preps, LoopEntryPrep::TEST, nextComparisonNode);
+                    dumpOptDetails(comp(), "3: Prep %p has been created for testing if exceed bounds\n", preps.back());
                 } else {
                     // creating an OverFlow check
                     TR::Node *duplicateMulNode = mulNode->duplicateTree();
@@ -6620,7 +6627,7 @@ void TR_LoopVersioner::buildBoundCheckComparisonsTree(List<TR::TreeTop> *boundCh
                     if (comp()->requiresSpineChecks())
                         findAndReplaceContigArrayLen(NULL, nextComparisonNode, comp()->incVisitCount());
 
-                    prep = createChainedLoopEntryPrep(LoopEntryPrep::TEST, nextComparisonNode, prep);
+                    addLoopEntryPrep(preps, LoopEntryPrep::TEST, nextComparisonNode);
 
                     logprintf(trace(), log, "Induction variable added in each iter -> Creating %p (%s)\n",
                         nextComparisonNode, nextComparisonNode->getOpCode().getName());
@@ -6632,8 +6639,7 @@ void TR_LoopVersioner::buildBoundCheckComparisonsTree(List<TR::TreeTop> *boundCh
                     if (comp()->requiresSpineChecks())
                         findAndReplaceContigArrayLen(NULL, nextComparisonNode, comp()->incVisitCount());
 
-                    prep = createChainedLoopEntryPrep(LoopEntryPrep::TEST, nextComparisonNode, prep);
-
+                    addLoopEntryPrep(preps, LoopEntryPrep::TEST, nextComparisonNode);
                     logprintf(trace(), log, "Induction variable added in each iter -> Creating %p (%s)\n",
                         nextComparisonNode, nextComparisonNode->getOpCode().getName());
 
@@ -6643,32 +6649,36 @@ void TR_LoopVersioner::buildBoundCheckComparisonsTree(List<TR::TreeTop> *boundCh
                     if (comp()->requiresSpineChecks())
                         findAndReplaceContigArrayLen(NULL, nextComparisonNode, comp()->incVisitCount());
 
-                    prep = createChainedLoopEntryPrep(LoopEntryPrep::TEST, nextComparisonNode, prep);
+                    addLoopEntryPrep(preps, LoopEntryPrep::TEST, nextComparisonNode);
                 }
             }
 
-            if (prep != NULL)
-                createRemoveBoundCheck(boundCheckTree, prep, spineCheckTrees);
+            createRemoveBoundCheck(boundCheckTree, preps, spineCheckTrees);
         }
         nextTree = nextTree->getNextElement();
     }
 }
 
-void TR_LoopVersioner::createRemoveBoundCheck(TR::TreeTop *boundCheckTree, LoopEntryPrep *prep,
-    List<TR::TreeTop> *spineCheckTrees)
+void TR_LoopVersioner::createRemoveBoundCheck(TR::TreeTop *boundCheckTree,
+    const TR::list<LoopEntryPrep *, TR::Region &> &preps, List<TR::TreeTop> *spineCheckTrees)
 {
-    _curLoop->_loopImprovements.push_back(new (_curLoop->_memRegion) RemoveBoundCheck(this, prep, boundCheckTree));
+    if (!prepsOk(preps))
+        return;
+
+    LoopImprovement *improvement = new (_curLoop->_memRegion) RemoveBoundCheck(this, preps, boundCheckTree);
+
+    _curLoop->_loopImprovements.push_back(improvement);
 
     TR::Node *boundCheckNode = boundCheckTree->getNode();
     TR::ILOpCodes op = boundCheckNode->getOpCodeValue();
     if (op == TR::BNDCHK || op == TR::ArrayCopyBNDCHK) {
-        // Bound check only, which if prep is allowed will be completely removed.
+        // Bound check only, which if preps are allowed will be completely removed.
         //
         // Note that the condition for BNDCHK is stronger than the one for
         // ArrayCopyBNDCHK. It's safe to remove an ArrayCopyBNDCHK based on
         // versioning tests that would guarantee BNDCHK, though such tests may be
         // more conservative than necessary.
-        nodeWillBeRemovedIfPossible(boundCheckNode, prep);
+        nodeWillBeRemovedIfPossible(boundCheckNode, improvement);
     } else {
         TR_ASSERT_FATAL(op == TR::BNDCHKwithSpineCHK,
             "expected BNDCHK, ArrayCopyBNDCHK, or BNDCHKwithSpineCHK, but got %s", TR::ILOpCode(op).getName());
@@ -6681,14 +6691,15 @@ void TR_LoopVersioner::createRemoveBoundCheck(TR::TreeTop *boundCheckTree, LoopE
         spineCheckTrees->add(boundCheckTree);
 
         // The spine check should only be removed if the bound check is
-        // successfully removed first. Remember this prep so that the prep for
-        // spine check removal can depend on it.
-        auto insertResult = _curLoop->_boundCheckPrepsWithSpineChecks.insert(std::make_pair(boundCheckNode, prep));
+        // successfully removed first. Remember this improvement so that the one
+        // for spine check removal can depend on the same preps.
+        auto insertResult
+            = _curLoop->_boundCheckImprovementsWithSpineChecks.insert(std::make_pair(boundCheckNode, improvement));
 
         bool insertSucceeded = insertResult.second;
-        NodePrepMap::iterator entryPreventingInsertion = insertResult.first;
-        TR_ASSERT_FATAL(insertSucceeded, "multiple preps %p and %p for removing bound check n%un [%p]",
-            entryPreventingInsertion->second, prep, boundCheckNode->getGlobalIndex(), boundCheckNode);
+        auto entryPreventingInsertion = insertResult.first;
+        TR_ASSERT_FATAL(insertSucceeded, "multiple improvements %p and %p for removing bound check n%un [%p]",
+            entryPreventingInsertion->second, improvement, boundCheckNode->getGlobalIndex(), boundCheckNode);
     }
 }
 
@@ -8500,21 +8511,56 @@ void TR_LoopVersioner::setAndIncChildren(TR::Node *node, int n, TR::Node **child
  *
  * \see LoopBodySearch
  */
-void TR_LoopVersioner::nodeWillBeRemovedIfPossible(TR::Node *node, LoopEntryPrep *prep)
+void TR_LoopVersioner::nodeWillBeRemovedIfPossible(TR::Node *node, LoopImprovement *improvement)
 {
     TR::NodeChecklist *removableWithPriv = &_curLoop->_optimisticallyRemovableNodes;
     TR::NodeChecklist *removableWithoutPriv = &_curLoop->_definitelyRemovableNodes;
-    if (prep->_expr->mergedWithHCRGuard()) {
+    if (improvement->_requiresHCRGuardVersioning) {
         removableWithPriv = &_curLoop->_guardsRemovableWithPrivAndHCR;
         removableWithoutPriv = &_curLoop->_guardsRemovableWithHCR;
-    } else if (prep->_expr->mergedWithOSRGuard()) {
+    } else if (improvement->_requiresOSRGuardVersioning) {
         removableWithPriv = &_curLoop->_guardsRemovableWithPrivAndOSR;
         removableWithoutPriv = &_curLoop->_guardsRemovableWithOSR;
     }
 
     removableWithPriv->add(node);
-    if (!prep->_requiresPrivatization)
+    if (!improvement->_requiresPrivatization)
         removableWithoutPriv->add(node);
+}
+
+bool TR_LoopVersioner::LoopImprovement::initRequiresPrivatization()
+{
+    for (auto it = _preps.begin(), end = _preps.end(); it != end; it++) {
+        if ((*it)->_requiresPrivatization)
+            return true;
+    }
+
+    return false;
+}
+
+bool TR_LoopVersioner::LoopImprovement::initRequiresHCRGuardVersioning()
+{
+    for (auto it = _preps.begin(), end = _preps.end(); it != end; it++) {
+        if ((*it)->_expr->mergedWithHCRGuard())
+            return true;
+    }
+
+    return false;
+}
+
+bool TR_LoopVersioner::LoopImprovement::initRequiresOSRGuardVersioning()
+{
+    for (auto it = _preps.begin(), end = _preps.end(); it != end; it++) {
+        if ((*it)->_expr->mergedWithOSRGuard())
+            return true;
+    }
+
+    return false;
+}
+
+void TR_LoopVersioner::LoopImprovement::assertHasPreps()
+{
+    TR_ASSERT_FATAL(!_preps.empty(), "unconditional LoopImprovement");
 }
 
 /**
@@ -8594,13 +8640,11 @@ bool TR_LoopVersioner::Expr::operator<(const Expr &rhs) const
  * \param kind The kind of LoopEntryPrep to create.
  * \param node The node to be converted into the Expr of the LoopEntryPrep.
  * \param visited The visited set. Do not specify outside of addLoopEntryPrepDep()
- * \param prev A previous preparation to depend on. Do not specify outside of
- * createChainedLoopEntryPrep().
  *
  * \return the (new or existing) LoopEntryPrep, or null on failure
  */
 TR_LoopVersioner::LoopEntryPrep *TR_LoopVersioner::createLoopEntryPrep(LoopEntryPrep::Kind kind, TR::Node *node,
-    TR::NodeChecklist *visited, LoopEntryPrep *prev)
+    TR::NodeChecklist *visited)
 {
     OMR::Logger *log = comp()->log();
     bool optDetails = trace() || comp()->getOption(TR_TraceOptDetails);
@@ -8616,11 +8660,7 @@ TR_LoopVersioner::LoopEntryPrep *TR_LoopVersioner::createLoopEntryPrep(LoopEntry
     // descendants make sense.
     if (optDetails) {
         const char *kindName = kind == LoopEntryPrep::PRIVATIZE ? "PRIVATIZE" : "TEST";
-        if (prev == NULL)
-            dumpOptDetails(comp(), "Creating %s prep for tree:\n", kindName);
-        else
-            dumpOptDetails(comp(), "Creating %s prep for tree with prev=%p:\n", kindName, prev);
-
+        dumpOptDetails(comp(), "Creating %s prep for tree:\n", kindName);
         if (visited == NULL)
             comp()->getDebug()->clearNodeChecklist();
 
@@ -8633,7 +8673,7 @@ TR_LoopVersioner::LoopEntryPrep *TR_LoopVersioner::createLoopEntryPrep(LoopEntry
     if (expr == NULL)
         return NULL;
 
-    PrepKey key(kind, expr, prev);
+    PrepKey key(kind, expr);
     auto existing = _curLoop->_prepTable.find(key);
     if (existing != _curLoop->_prepTable.end()) {
         if (visited != NULL) {
@@ -8657,9 +8697,6 @@ TR_LoopVersioner::LoopEntryPrep *TR_LoopVersioner::createLoopEntryPrep(LoopEntry
     bool canPrivatizeRootNode = !isPrivatization;
     if (isPrivatization)
         _curLoop->_privatizationsRequested = true;
-
-    if (prev != NULL)
-        prep->_deps.push_back(prev);
 
     if (visited != NULL) {
         ok = depsForLoopEntryPrep(node, &prep->_deps, visited, canPrivatizeRootNode);
@@ -8712,38 +8749,24 @@ TR_LoopVersioner::LoopEntryPrep *TR_LoopVersioner::createLoopEntryPrep(LoopEntry
     return prep;
 }
 
-/**
- * \brief Create a LoopEntryPrep that depends on \p prev.
- *
- * This can be used to create a series of multiple preparations all required
- * for a single transformation, e.g.
- *
- *     LoopEntryPrep *prep = createLoopEntryPrep(LoopEntryPrep::TEST, test0);
- *     prep = createChainedLoopEntryPrep(LoopEntryPrep::TEST, test1, prep);
- *     prep = createChainedLoopEntryPrep(LoopEntryPrep::TEST, test2, prep);
- *     if (prep != NULL) {
- *         // success
- *     }
- *
- * This method fails when \p prev is null, so that LoopEntryPrep creation
- * failure cascades, and callers need only check the final result.
- *
- * \param kind The kind of LoopEntryPrep to create.
- * \param node The node to be converted into the Expr of the LoopEntryPrep.
- * \param prev The previous preparation to depend on. If null, no new
- * preparation is created.
- *
- * \return the created LoopEntryPrep, or null on failure
- *
- * \see createLoopEntryPrep()
- */
-TR_LoopVersioner::LoopEntryPrep *TR_LoopVersioner::createChainedLoopEntryPrep(LoopEntryPrep::Kind kind, TR::Node *node,
-    LoopEntryPrep *prev)
+void TR_LoopVersioner::addLoopEntryPrep(TR::list<LoopEntryPrep *, TR::Region &> &preps, LoopEntryPrep::Kind kind,
+    TR::Node *node)
 {
-    if (prev == NULL)
-        return NULL;
+    preps.push_back(createLoopEntryPrep(kind, node));
+}
 
-    return createLoopEntryPrep(kind, node, NULL, prev);
+bool TR_LoopVersioner::prepsOk(const TR::list<LoopEntryPrep *, TR::Region &> &preps)
+{
+    auto begin = preps.begin();
+    auto end = preps.end();
+    TR_ASSERT_FATAL(begin != end, "no preps");
+
+    for (auto it = begin; it != end; it++) {
+        if (*it == NULL)
+            return false;
+    }
+
+    return true;
 }
 
 bool TR_LoopVersioner::PrepKey::operator<(const PrepKey &rhs) const
@@ -8759,12 +8782,6 @@ bool TR_LoopVersioner::PrepKey::operator<(const PrepKey &rhs) const
     if (ltExpr(lhs._expr, rhs._expr))
         return true;
     else if (ltExpr(rhs._expr, lhs._expr))
-        return false;
-
-    std::less<LoopEntryPrep *> ltPrep;
-    if (ltPrep(lhs._prev, rhs._prev))
-        return true;
-    else if (ltPrep(rhs._prev, lhs._prev))
         return false;
 
     return false;
@@ -8796,7 +8813,7 @@ TR_LoopVersioner::CurLoop::CurLoop(TR::Compilation *comp, TR::Region &memRegion,
     , _nodeToExpr(std::less<TR::Node *>(), memRegion)
     , _prepTable(std::less<PrepKey>(), memRegion)
     , _nullTestPreps(std::less<const Expr *>(), memRegion)
-    , _boundCheckPrepsWithSpineChecks(std::less<TR::Node *>(), memRegion)
+    , _boundCheckImprovementsWithSpineChecks(std::less<TR::Node *>(), memRegion)
     , _definitelyRemovableNodes(comp)
     , _optimisticallyRemovableNodes(comp)
     , _guardsRemovableWithHCR(comp)
