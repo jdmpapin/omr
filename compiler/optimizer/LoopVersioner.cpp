@@ -114,7 +114,6 @@ const char *TR_LoopSpecializer::optDetailString() const throw() { return "O^O LO
 
 TR_LoopVersioner::TR_LoopVersioner(TR::OptimizationManager *manager, bool onlySpecialize, bool refineAliases)
     : TR_LoopTransformer(manager)
-    , _versionableInductionVariables(trMemory())
     , _specialVersionableInductionVariables(trMemory())
     , _derivedVersionableInductionVariables(trMemory())
     ,
@@ -234,7 +233,7 @@ int32_t TR_LoopVersioner::performWithoutDominators()
     _duplicateConditionalTree = NULL;
     _currentNaturalLoop = NULL;
 
-    _versionableInductionVariables.deleteAll();
+    _versionablePIV = -1;
     _specialVersionableInductionVariables.deleteAll();
     _derivedVersionableInductionVariables.deleteAll();
     ////_virtualGuardPairs.deleteAll();
@@ -420,7 +419,7 @@ int32_t TR_LoopVersioner::performWithoutDominators()
         // Initialize induction variable information
         //
         _numberOfTreesInLoop = 0;
-        _versionableInductionVariables.deleteAll();
+        _versionablePIV = -1;
         _specialVersionableInductionVariables.deleteAll();
         _derivedVersionableInductionVariables.deleteAll();
 
@@ -594,10 +593,8 @@ int32_t TR_LoopVersioner::performWithoutDominators()
                 refineArrayAliases(naturalLoop);
 
             TR_BitVector *inductionVars = new (trStackMemory()) TR_BitVector(symRefCount, trMemory(), stackAlloc);
-            ListElement<int32_t> *versionableInductionVar = _versionableInductionVariables.getListHead();
-            while (versionableInductionVar) {
-                TR::SymbolReference *inductionVar
-                    = comp()->getSymRefTab()->getSymRef(*(versionableInductionVar->getData()));
+            if (_versionablePIV >= 0) {
+                TR::SymbolReference *inductionVar = comp()->getSymRefTab()->getSymRef(_versionablePIV);
                 inductionVars->set(inductionVar->getReferenceNumber());
                 TR::RegisterCandidate *inductionCandidate
                     = comp()->getGlobalRegisterCandidates()->findOrCreate(inductionVar);
@@ -605,7 +602,6 @@ int32_t TR_LoopVersioner::performWithoutDominators()
                 // OPT_DETAILS_LOOP_VERSIONER, inductionCandidate->getSymbolReference()->getReferenceNumber(),
                 // naturalLoop->getNumber());
                 inductionCandidate->addAllBlocksInStructure(naturalLoop, comp(), trace() ? "auto" : NULL);
-                versionableInductionVar = versionableInductionVar->getNextElement();
             }
 
             TR_InductionVariable *v;
@@ -1193,11 +1189,7 @@ bool TR_LoopVersioner::isVersionableIfWithExtremum(TR::TreeTop *ifTree, Extremum
     excond.ivLoad = inner;
     excond.iv = inner->getSymbolReference();
     int32_t symRefNum = excond.iv->getReferenceNumber();
-    auto *usableIV = _versionableInductionVariables.getListHead();
-    while (usableIV != NULL && *usableIV->getData() != symRefNum)
-        usableIV = usableIV->getNextElement();
-
-    if (usableIV == NULL)
+    if (symRefNum != _versionablePIV)
         return false;
 
     // The conditional branch is in a suitable form. Now check all additional
@@ -1305,7 +1297,7 @@ bool TR_LoopVersioner::isVersionableIfWithExtremum(TR::TreeTop *ifTree, Extremum
         "Conditional n%un [%p] is versionable based on an extremum of child %d: "
         "n%un [%p], derived from IV #%d\n",
         ifNode->getGlobalIndex(), ifNode, excond.varyingChildIndex, varyingChild->getGlobalIndex(), varyingChild,
-        *usableIV->getData());
+        symRefNum);
 
     *out = excond;
     return true;
@@ -1827,20 +1819,14 @@ bool TR_LoopVersioner::detectInvariantBoundChecks(List<TR::TreeTop> *boundCheckT
                 while (indexSymRef && changedIndexSymRef) {
                     changedIndexSymRef = false;
                     int32_t symRefNum = indexSymRef->getReferenceNumber();
-                    ListElement<int32_t> *versionableInductionVar = _versionableInductionVariables.getListHead();
-                    while (versionableInductionVar) {
-                        // dumpOptDetails(comp(), "Versionable induction var %d\n",
-                        // *(versionableInductionVar->getData()));
-                        if (symRefNum == *(versionableInductionVar->getData())) {
-                            isInductionVariable = true;
-                            isLoopDrivingInductionVariable = true;
-                            break;
-                        }
-                        versionableInductionVar = versionableInductionVar->getNextElement();
+                    if (symRefNum == _versionablePIV) {
+                        isInductionVariable = true;
+                        isLoopDrivingInductionVariable = true;
                     }
 
                     if (!isInductionVariable) {
-                        versionableInductionVar = _specialVersionableInductionVariables.getListHead();
+                        ListElement<int32_t> *versionableInductionVar
+                            = _specialVersionableInductionVariables.getListHead();
                         while (versionableInductionVar) {
                             if (symRefNum == *(versionableInductionVar->getData())) {
                                 isInductionVariable = true;
@@ -1851,8 +1837,9 @@ bool TR_LoopVersioner::detectInvariantBoundChecks(List<TR::TreeTop> *boundCheckT
                         }
                     }
 
-                    if (!isInductionVariable && !_versionableInductionVariables.isEmpty()) {
-                        versionableInductionVar = _derivedVersionableInductionVariables.getListHead();
+                    if (!isInductionVariable && _versionablePIV >= 0) {
+                        ListElement<int32_t> *versionableInductionVar
+                            = _derivedVersionableInductionVariables.getListHead();
                         while (versionableInductionVar) {
                             if (symRefNum == *(versionableInductionVar->getData())) {
                                 isDerivedInductionVariable = true;
@@ -2343,12 +2330,9 @@ bool TR_LoopVersioner::canPredictIters(TR_RegionStructure *whileLoop,
         }
 
         if (firstChildSymRef) {
-            int32_t loopDrivingInductionVar = -1;
-            if (!_versionableInductionVariables.isEmpty())
-                loopDrivingInductionVar = *(_versionableInductionVariables.getListHead()->getData());
-            if (firstChildSymRef->getReferenceNumber() == loopDrivingInductionVar) {
+            if (firstChildSymRef->getReferenceNumber() == _versionablePIV) {
                 bool isLoopDrivingAddition = false;
-                if (_additionInfo->get(loopDrivingInductionVar))
+                if (_additionInfo->get(_versionablePIV))
                     isLoopDrivingAddition = true;
 
                 if ((isLoopDrivingAddition && isIncreasing) || (!isLoopDrivingAddition && !isIncreasing))
@@ -5597,22 +5581,19 @@ bool TR_LoopVersioner::ivLoadSeesUpdatedValue(TR::Node *ivLoad, TR::TreeTop *occ
     TR_ASSERT_FATAL_WITH_NODE(ivLoad, foundOccurrence, "expected node to occur beneath n%un [%p]",
         occurrenceTree->getNode()->getGlobalIndex(), occurrenceTree->getNode());
 
-    List<int32_t> *ivLists[] = { &_versionableInductionVariables, &_derivedVersionableInductionVariables };
-
     int32_t ivNum = iv->getReferenceNumber();
-    bool isIV = false;
-    for (size_t i = 0; i < sizeof(ivLists) / sizeof(ivLists[0]) && !isIV; i++) {
-        List<int32_t> *ivList = ivLists[i];
-        auto *elem = ivList->getListHead();
+    if (ivNum != _versionablePIV) {
+        bool isIV = false;
+        auto *elem = _derivedVersionableInductionVariables.getListHead();
         for (; elem != NULL; elem = elem->getNextElement()) {
             if (*elem->getData() == ivNum) {
                 isIV = true;
                 break;
             }
         }
-    }
 
-    TR_ASSERT_FATAL_WITH_NODE(ivLoad, isIV, "expected a primary or derived IV");
+        TR_ASSERT_FATAL_WITH_NODE(ivLoad, isIV, "expected a primary or derived IV");
+    }
 
     TR::TreeTop *ivUpdateTree = _storeTrees[ivNum];
     TR::Block *ivUpdateBlock = ivUpdateTree->getEnclosingBlock();
@@ -5989,26 +5970,22 @@ void TR_LoopVersioner::buildBoundCheckComparisonsTree(List<TR::TreeTop> *boundCh
             while (indexSymRef && changedIndexSymRef) {
                 changedIndexSymRef = false;
                 int32_t indexSymRefNum = indexSymRef->getReferenceNumber();
-                ListElement<int32_t> *versionableInductionVar = _versionableInductionVariables.getListHead();
                 bool foundInductionVariable = false;
-                while (versionableInductionVar) {
-                    loopDrivingInductionVariable = *(versionableInductionVar->getData());
+                if (_versionablePIV >= 0) {
+                    loopDrivingInductionVariable = _versionablePIV;
                     if (_additionInfo->get(loopDrivingInductionVariable))
                         isLoopDrivingAddition = true;
 
-                    if (indexSymRefNum == *(versionableInductionVar->getData())) {
+                    if (indexSymRefNum == _versionablePIV) {
                         if (_additionInfo->get(indexSymRefNum))
                             isAddition = true;
                         foundInductionVariable = true;
                         isLoopDrivingInductionVariable = true;
-                        break;
                     }
-
-                    versionableInductionVar = versionableInductionVar->getNextElement();
                 }
 
                 if (!foundInductionVariable) {
-                    versionableInductionVar = _specialVersionableInductionVariables.getListHead();
+                    ListElement<int32_t> *versionableInductionVar = _specialVersionableInductionVariables.getListHead();
                     while (versionableInductionVar) {
                         if (indexSymRefNum == *(versionableInductionVar->getData())) {
                             isSpecialInductionVariable = true;
@@ -6022,7 +5999,7 @@ void TR_LoopVersioner::buildBoundCheckComparisonsTree(List<TR::TreeTop> *boundCh
                 }
 
                 if (!foundInductionVariable) {
-                    versionableInductionVar = _derivedVersionableInductionVariables.getListHead();
+                    ListElement<int32_t> *versionableInductionVar = _derivedVersionableInductionVariables.getListHead();
                     while (versionableInductionVar) {
                         if (indexSymRefNum == *(versionableInductionVar->getData())) {
                             isDerivedInductionVariable = true;
@@ -7596,7 +7573,10 @@ int32_t TR_LoopVersioner::detectCanonicalizedPredictableLoops(TR_Structure *loop
 
                         {
                             versionableInductionVariable = _derivedVersionableInductionVariables.popHead();
-                            _versionableInductionVariables.add(versionableInductionVariable);
+                            TR_ASSERT_FATAL(_versionablePIV == -1, "two PIVs in loop %d: #%d and #%d",
+                                loopStructure->getNumber(), _versionablePIV, *versionableInductionVariable);
+
+                            _versionablePIV = *versionableInductionVariable;
 
                             if (_requiresAdditionalCheckForIncrement)
                                 flushDerivedInductionVariables = true;

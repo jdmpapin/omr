@@ -1115,8 +1115,8 @@ protected:
     TR::Node *_nullCheckReference, *_conditionalTree, *_duplicateConditionalTree;
     TR_RegionStructure *_currentNaturalLoop;
 
-    List<int32_t> _versionableInductionVariables, _specialVersionableInductionVariables,
-        _derivedVersionableInductionVariables;
+    int32_t _versionablePIV;
+    List<int32_t> _specialVersionableInductionVariables, _derivedVersionableInductionVariables;
     ////List<VirtualGuardPair> _virtualGuardPairs;
     TR_LinkHead<VirtualGuardInfo> _virtualGuardInfo;
 
