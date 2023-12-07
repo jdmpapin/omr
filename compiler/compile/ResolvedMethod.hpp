@@ -261,7 +261,6 @@ public:
         int32_t cpIndex, bool ignoreReResolve = true);
 
     virtual bool virtualMethodIsOverridden();
-    virtual void setVirtualMethodIsOverridden();
     virtual void *addressContainingIsOverriddenBit();
     virtual int32_t virtualCallSelector();
 

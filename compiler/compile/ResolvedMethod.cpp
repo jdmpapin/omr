@@ -629,8 +629,6 @@ bool TR_ResolvedMethod::virtualMethodIsOverridden()
     return false;
 }
 
-void TR_ResolvedMethod::setVirtualMethodIsOverridden() { TR_UNIMPLEMENTED(); }
-
 void *TR_ResolvedMethod::addressContainingIsOverriddenBit()
 {
     TR_UNIMPLEMENTED();
