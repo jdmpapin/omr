@@ -4635,6 +4635,11 @@ bool TR_InlinerBase::inlineCallTarget2(TR_CallStack *callStack, TR_CallTarget *c
     // If InnerPreexistence added inner assumptions on this method -- and this method is being inlined
     // as a non-virtual - add a dummy virtual guard around this
     //
+    extern bool jdmpHackGuardsEnabled();
+    if (jdmpHackGuardsEnabled()) {
+        TR_ASSERT_FATAL(!innerPrexInfo->hasInnerAssumptions(), "unexpected inner assumptions");
+    }
+
     if (innerPrexInfo->hasInnerAssumptions() && guard->_kind == TR_NoGuard) {
         logprintf(trace, log,
             "%sIPREX virtualize the non-virtual call %s because of inner preexistence for inner calls\n", OPT_DETAILS,
@@ -4709,6 +4714,73 @@ bool TR_InlinerBase::inlineCallTarget2(TR_CallStack *callStack, TR_CallTarget *c
     }
 
     comp()->setCurrentBlock(blockContainingTheCall);
+
+    if (comp()->getHCRMode() == TR::osr && jdmpHackGuardsEnabled()) {
+        bool replaceGuardWithOSR = false;
+        switch (guard->_kind) {
+            case TR_NoGuard:
+            case TR_ProfiledGuard:
+            case TR_AbstractGuard: // TODO
+                replaceGuardWithOSR = false;
+                break;
+
+            case TR_HCRGuard:
+            case TR_NonoverriddenGuard:
+            case TR_HierarchyGuard:
+            case TR_MutableCallSiteTargetGuard:
+                replaceGuardWithOSR = true;
+                break;
+
+            default:
+                TR_ASSERT_FATAL(false, "unexpected guard kind %d", (int)guard->_kind);
+        }
+
+        if (replaceGuardWithOSR) {
+            TR::Node *fearPoint = TR::Node::createOSRFearPointHelperCall(callNode);
+            fearPoint = TR::Node::create(callNode, TR::treetop, 1, fearPoint);
+            callNodeTreeTop->insertBefore(TR::TreeTop::create(comp(), fearPoint));
+
+            TR_ResolvedMethod *resolvedMethod = calleeSymbol->getResolvedMethod();
+            if (!getPolicy()->skipHCRGuardForCallee(resolvedMethod))
+                comp()->addClassForOSRRedefinition(resolvedMethod->classOfMethod());
+
+            const char *which = "<unknown>";
+            if (guard->_type == TR_VftTest
+                && (guard->_kind == TR_NonoverriddenGuard || guard->_kind == TR_HierarchyGuard)) {
+                comp()->addClassForOSROnExtend(calltarget->_receiverClass);
+                which = "extend";
+            } else if (guard->_kind == TR_NonoverriddenGuard) {
+                TR_ASSERT_FATAL(guard->_type == TR_NonoverriddenTest,
+                    "nonoverridden guard should have VFT test or nonoverridden test");
+                comp()->addMethodForOSROnOverride(
+                    callNode->getSymbol()->getResolvedMethodSymbol()->getResolvedMethod());
+                which = "override";
+            } else if (guard->_kind == TR_HierarchyGuard) {
+                TR_ASSERT_FATAL(guard->_type = TR_MethodTest, "hierarchy guard should have VFT test or method test");
+                comp()->addMethodForOSROnHierarchyOverride(calltarget->_receiverClass, callNode->getSymbolReference());
+                which = "hierarchy";
+            } else if (guard->_kind == TR_MutableCallSiteTargetGuard) {
+                comp()->addMutableCallSiteForOSR(guard->_mutableCallSiteObject, guard->_mutableCallSiteEpoch);
+                which = "mcs";
+            } else {
+                TR_ASSERT_FATAL(guard->_kind == TR_HCRGuard, "unexpected guard kind %d", (int)guard->_kind);
+
+                // nothing to do
+                which = "hcr";
+            }
+
+            bool jdmpTrace = comp()->getOption(TR_TraceOptDetails) || tracer()->heuristicLevel(); // XXX
+            logprintf(jdmpTrace, comp()->log(), "jdmp osrRemovedGuard/%s/(%s)/%s\n", which, comp()->signature(),
+                comp()->getHotnessName(comp()->getMethodHotness()));
+
+            TR::DebugCounter::incStaticDebugCounter(comp(),
+                TR::DebugCounter::debugCounterName(comp(), "osrRemovedGuard/%s/(%s)/%s", which, comp()->signature(),
+                    comp()->getHotnessName(comp()->getMethodHotness())));
+
+            guard->_kind = TR_NoGuard;
+            guard->_type = TR_DummyTest;
+        }
+    }
 
     TR_TransformInlinedFunction *tif
         = getUtil()->getTransformInlinedFunction(callerSymbol, calleeSymbol, blockContainingTheCall, callNodeTreeTop,
