@@ -489,6 +489,13 @@ MM_Collector::garbageCollect(MM_EnvironmentBase* env, MM_MemorySubSpace* calling
 	/* ensure that we aren't trying to collect while in a NoGC allocation */
 	Assert_MM_false(env->_isInNoGCAllocationCall);
 
+	/* There may be slots within JIT bodies (JIT const refs), and GC
+	 * threads will write to them when their referents move. This is an
+	 * application thread requesting GC, but it might temporarily act as the
+	 * main GC thread, so temporarily allow writing.
+	 */
+	omrthread_jit_write_protect_disable();
+
 	/* First do any pre-collection initialization of the collector*/
 	setupForGC(env);
 
@@ -517,6 +524,8 @@ MM_Collector::garbageCollect(MM_EnvironmentBase* env, MM_MemorySubSpace* calling
 	env->_cycleState = NULL;
 
 	env->popVMstate(vmState);
+
+	omrthread_jit_write_protect_enable();
 
 	return postCollectAllocationResult;
 }

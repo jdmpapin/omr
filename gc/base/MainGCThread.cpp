@@ -253,6 +253,12 @@ MM_MainGCThread::mainThreadEntryPoint()
 		/* TODO: call plain env->initializeGCThread() once downstream projects are ready (subclass Env::init calls base Env::init)  */
 		env->MM_EnvironmentBase::initializeGCThread();
 
+		/* There may be slots within JIT bodies (JIT const refs), and GC
+		 * threads will write to them when their referents move. Since GC
+		 * threads never run JIT code, just allow writing indefinitely.
+		 */
+		omrthread_jit_write_protect_disable();
+
 		env->setThreadType(GC_MAIN_THREAD);
 
 		/* Begin running the thread */
