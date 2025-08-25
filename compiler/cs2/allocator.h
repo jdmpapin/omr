@@ -33,6 +33,9 @@
 #include <memory.h>
 #include "cs2/cs2.h"
 #include "env/TypedAllocator.hpp"
+#include "infra/Assert.hpp"
+
+extern void checkHackFailAlloc();
 
 namespace CS2 {
 
@@ -70,6 +73,8 @@ private:
             if (n)
                 n->prev = this;
         }
+
+        bool has_space_in_freelist() { return freelist != NULL; }
 
         void *allocate(uint32_t index)
         {
@@ -215,6 +220,8 @@ public:
 
     void *allocate(size_t size)
     {
+        checkHackFailAlloc();
+
         uint32_t ix = Segment::segment_index(size);
         if (ix == 0) {
             return base_allocator::allocate(size);
@@ -230,6 +237,19 @@ public:
         }
         segments[ix] = new_segment(segments[ix]);
         return segments[ix]->allocate(ix);
+    }
+
+    void ensure_next_alloc_requires_new_segment(size_t size)
+    {
+        uint32_t ix = Segment::segment_index(size);
+        TR_ASSERT_FATAL(ix != 0, "index must be small enough to be allocated by Segment!");
+
+        for (Segment *s = segments[ix]; s != NULL; s = s->next_segment()) {
+            while (s->has_space_in_freelist() || !s->is_full(ix)) {
+                void *to_leak = s->allocate(ix);
+                TR_ASSERT_FATAL(to_leak != NULL, "allocation should have succeeded");
+            }
+        }
     }
 
     void deallocate(void *pointer, size_t size)
@@ -308,6 +328,8 @@ public:
     {
         return !(operator==(left, right));
     }
+
+    void ensure_next_alloc_requires_new_segment(size_t size) { base.ensure_next_alloc_requires_new_segment(size); }
 };
 
 template<size_t segmentsize = 65536, class base_allocator = ::CS2::malloc_allocator>

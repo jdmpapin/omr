@@ -36,6 +36,8 @@
 #include "infra/Assert.hpp"
 #include "infra/BitVector.hpp"
 
+extern void setupProvoke2();
+
 template<AliasSetInterface _AliasSetInterface> class TR_AliasSetInterface {
 public:
     TR_AliasSetInterface(TR::SymbolReference *symRef, bool isDirectCall = false, bool includeGCSafePoint = false)
@@ -75,7 +77,25 @@ public:
         LexicalTimer t("getAliasesAndUnionWith", comp->phaseTimer());
         TR::SparseBitVector tmp(comp->allocator());
         getAliasesWithClear(tmp);
-        return aliases.Or(tmp);
+
+        if (aliases.IsZero() && !tmp.IsZero()) {
+            static const char * const provokeStr = feGetEnv("TR_provokeGetAliasesAndUnionWith");
+            if (provokeStr != NULL) {
+                if (!strcmp(provokeStr, "1")) {
+                    comp->_hackFailAlloc = 1;
+                } else if (!strcmp(provokeStr, "2")) {
+                    setupProvoke2();
+                } else {
+                    TR_ASSERT_FATAL(false, "bad TR_provokeGetAliasesAndUnionWith");
+                }
+
+                fprintf(stderr, "expect segfault while destroying SparseBitVector %p\n", &aliases);
+            }
+        }
+
+        bool result = aliases.Or(tmp);
+        comp->_hackFailAlloc = 0;
+        return result;
     }
 
     bool getAliasesAndUnionWith(TR_BitVector &aliases)

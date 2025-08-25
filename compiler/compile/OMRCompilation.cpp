@@ -193,6 +193,7 @@ OMR::Compilation::Compilation(int32_t id, OMR_VMThread *omrVMThread, TR_FrontEnd
     , _trMemory(m)
     , _fe(fe)
     , _ilGenRequest(ilGenRequest)
+    , _hackFailAlloc(0)
     , _currentOptIndex(0)
     , _lastBegunOptIndex(0)
     , _lastPerformedOptIndex(0)
@@ -446,6 +447,17 @@ OMR::Compilation::Compilation(int32_t id, OMR_VMThread *omrVMThread, TR_FrontEnd
 }
 
 OMR::Compilation::~Compilation() throw() {}
+
+void checkHackFailAlloc()
+{
+    TR::Compilation *comp = TR::comp();
+    if (comp != NULL && comp->_hackFailAlloc != 0) {
+        comp->_hackFailAlloc--;
+        if (comp->_hackFailAlloc == 0) {
+            throw std::bad_alloc();
+        }
+    }
+}
 
 TR::KnownObjectTable *OMR::Compilation::getOrCreateKnownObjectTable()
 {
@@ -2451,6 +2463,39 @@ Compilation &operator<<(Compilation &comp, const ::TR_ByteCodeInfo &bcInfo)
     return comp;
 }
 } // namespace TR
+
+void setupProvoke2()
+{
+    TR::Compilation *comp = TR::comp();
+
+    // heap_allocator uses 64k segments. Make an allocation that size (which goes directly via
+    // TRMemoryAllocator) and set up the memory for the allocation to be reused as a Segment later.
+    // Right after the segment, the first thing we'll allocate is a single ASparseBitVector::Segment.
+    // Fill in values that will cause a crash when the sparse bit vector segment is left uninitialized.
+    size_t heapSegmentSize = 65536;
+    char *segmentMem = (char *)comp->allocator().allocate(heapSegmentSize);
+    char *p = segmentMem + 32; // sizeof(heap_allocator::Segment). Allocation will start here.
+    *(void **)p = (void *)(uintptr_t)-1; // fSegment, memory is inaccessible
+    *(uint16_t *)(p + 8) = (uint16_t)0x4000; // fSize, too big for heap_allocator, not TRMemoryAllocator
+    *(uint16_t *)(p + 10) = (uint16_t)0xabab; // fHighBits (irrelevant)
+    *(uint32_t *)(p + 12) = (uint32_t)0xdeadbeef; // fNumValues (irrelevant)
+
+    // Free so that segmentMem will be at the start of the 64k free list in TRMemoryAllocator.
+    comp->allocator().deallocate(segmentMem, heapSegmentSize);
+
+    // Allocate enough so that the next 16-byte allocation will require a new heap_allocator::Segment.
+    // 16 is the size of ASparseBitVector::Segment.
+    comp->allocator().ensure_next_alloc_requires_new_segment(16);
+
+    // Allow the first allocation. It will allocate a sparse bit vector segment array of length one.
+    // It will succeed by creating a new segment, for which the memory will have been segmentMem, and
+    // allocating the first available 16 bytes, which are at p.
+    //
+    // Fail the second allocation so that the segment will be uninitialized and will still contain the
+    // values written above. We will segfault trying to write to address -1.
+    //
+    comp->_hackFailAlloc = 2;
+}
 
 #define SAVE_COMPILATION_PHASE_NOT_IMPLEMENTED (0xB0FF0)
 
