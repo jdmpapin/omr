@@ -108,7 +108,24 @@ private:
 
         bool is_empty() { return alloc == freed; }
 
+#if 0
+        static bool print_segment_index_table()
+        {
+            for (uint32_t i = 16; i < 256; i += 16) {
+                fprintf(stderr, "jdmp segment_index(%u) => %u\n", i, segment_index_impl(i));
+            }
+
+            return true;
+        }
+#endif
+
         static uint32_t segment_index(size_t size)
+        {
+            // static bool printed = print_segment_index_table();
+            return segment_index_impl(size);
+        }
+
+        static uint32_t segment_index_impl(size_t size)
         {
             if (size <= sizeof(void *))
                 return 1;

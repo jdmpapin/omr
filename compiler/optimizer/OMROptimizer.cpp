@@ -1019,10 +1019,50 @@ TR_ValueNumberInfo *OMR::Optimizer::createValueNumberInfo(bool requiresGlobals, 
     return valueNumberInfo;
 }
 
+__thread bool hack_provokeDoubleFree = false;
+
 void OMR::Optimizer::optimize()
 {
     TR::Compilation::CompilationPhaseScope mainCompilationPhaseScope(comp());
     OMR::Logger *log = comp()->log();
+
+    static const char * const provoke = feGetEnv("TR_provokeSparseBitVectorDoubleFree");
+    if (provoke != NULL) {
+        TR::Allocator alloc = comp()->allocator();
+        alloc.allocate(sizeof(size_t)); // prevent segment from becoming empty
+        try {
+            TR::SparseBitVector bv(alloc);
+            bv[1 << 16] = true;
+            bv[2 << 16] = true;
+            bv[3 << 16] = true;
+            if (!strcmp(provoke, "bitref")) {
+                hack_provokeDoubleFree = true;
+                bv[0] = true;
+            } else if (!strcmp(provoke, "addsegment")) {
+                TR::SparseBitVector other(alloc);
+                other[0] = true;
+                hack_provokeDoubleFree = true;
+                bv.Or(other);
+            } else if (!strcmp(provoke, "removesegment")) {
+                setHackFailAlloc();
+                bv[1 << 16] = false;
+            } else {
+                TR_ASSERT_FATAL(false, "TR_provokeSparseBitVectorDoubleFree: invalid value: %s", provoke);
+            }
+        } catch (const std::bad_alloc &e) {
+            comp()->_hackFailAlloc = 0;
+            int n = 32;
+            void **newAllocs = new (comp()->region()) void *[n];
+            for (int i = 0; i < n; i++) {
+                newAllocs[i] = alloc.allocate(sizeof(size_t));
+                for (int j = 0; j < i; j++) {
+                    TR_ASSERT_FATAL(newAllocs[j] != newAllocs[i], "MEMORY ALLOCATOR CORRUPTION FROM DOUBLE FREE");
+                }
+            }
+
+            fprintf(stderr, "failed to catch the freelist problem\n");
+        }
+    }
 
     if (isIlGenOpt()) {
         const OptimizationStrategy *opt = _strategy;

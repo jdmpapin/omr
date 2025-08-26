@@ -34,6 +34,9 @@
 #define reallocate(x, y, z) reallocate(x, y, z, __FILE__, __LINE__)
 #endif
 
+extern __thread bool hack_provokeDoubleFree;
+extern void setHackFailAlloc();
+
 namespace CS2 {
 /***************************************************************************
  * This is the definition of the ASparseBitVector class.
@@ -1289,6 +1292,9 @@ inline bool ASparseBitVector<Allocator>::AddSegmentInner(SparseBitIndex highBits
         }
         base = (Segment *)Allocator::reallocate((n + 1) * sizeof(Segment), base, n * sizeof(Segment));
         memmove(&base[i + 1], &base[i], (n - i) * sizeof(Segment));
+        if (hack_provokeDoubleFree) {
+            setHackFailAlloc();
+        }
     } else {
         base = (Segment *)Allocator::allocate((n + 1) * sizeof(Segment));
     }

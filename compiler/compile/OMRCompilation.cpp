@@ -459,6 +459,14 @@ void checkHackFailAlloc()
     }
 }
 
+void setHackFailAlloc()
+{
+    TR::Compilation *comp = TR::comp();
+    if (comp != NULL) {
+        comp->_hackFailAlloc = 1;
+    }
+}
+
 TR::KnownObjectTable *OMR::Compilation::getOrCreateKnownObjectTable()
 {
     _knownObjectTable = NULL;
