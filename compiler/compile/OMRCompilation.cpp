@@ -194,6 +194,7 @@ OMR::Compilation::Compilation(int32_t id, OMR_VMThread *omrVMThread, TR_FrontEnd
     , _fe(fe)
     , _ilGenRequest(ilGenRequest)
     , _hackFailAlloc(0)
+    , _hackFailRegionAlloc(0)
     , _currentOptIndex(0)
     , _lastBegunOptIndex(0)
     , _lastPerformedOptIndex(0)
@@ -2443,6 +2444,8 @@ TR_BitVector *BitVectorPool::get()
         TR_BitVector(_comp->getNodeCount() /*an estimate*/, _comp->trMemory(), heapAlloc, growable);
     return newBitVector;
 }
+
+bool BitVectorPool::canReleaseWithoutAllocating() { return _pool.size() < _pool.internalSize(); }
 
 void BitVectorPool::release(TR_BitVector *v)
 {

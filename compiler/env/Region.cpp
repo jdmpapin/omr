@@ -25,6 +25,8 @@
 #include "infra/ReferenceWrapper.hpp"
 #include "env/TRMemory.hpp"
 
+#include "compile/Compilation.hpp"
+
 namespace TR {
 
 Region::Region(TR::SegmentProvider &segmentProvider, TR::RawAllocator rawAllocator)
@@ -67,6 +69,14 @@ Region::~Region() throw()
 
 void *Region::allocate(size_t const size, void *hint)
 {
+    TR::Compilation *comp = TR::comp();
+    if (comp != NULL && comp->_hackFailRegionAlloc != 0) {
+        comp->_hackFailRegionAlloc--;
+        if (comp->_hackFailRegionAlloc == 0) {
+            throw std::bad_alloc();
+        }
+    }
+
     size_t const roundedSize = (size + 15) & (~15);
     if (_currentSegment.get().remaining() >= roundedSize) {
         _bytesAllocated += roundedSize;

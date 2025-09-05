@@ -1078,6 +1078,25 @@ void OMR::Optimizer::optimize()
             comp()->dumpMethodTrees(log, "Pre IlGenOpt Trees", getMethodSymbol());
     }
 
+    static const char * const provoke2 = feGetEnv("TR_provokeChecklist");
+    if (provoke2 != NULL) {
+        TR::NodeChecklist nodes(comp());
+        auto &bvp = comp()->getBitVectorPool();
+        while (bvp.canReleaseWithoutAllocating()) {
+            bvp.release(new (comp()->trHeapMemory()) TR_BitVector(1, comp()->trMemory(), heapAlloc, growable));
+        }
+
+        fprintf(stderr, "jdmp provoking std::terminate() from destructor of NodeChecklist %p\n", &nodes);
+        comp()->_hackFailRegionAlloc = 1;
+        if (!strcmp(provoke2, "1")) {
+            throw std::bad_alloc(); // nodes will be destroyed during unwinding
+        } else if (!strcmp(provoke2, "2")) {
+            // nodes will be destroyed normally
+        } else {
+            TR_ASSERT_FATAL(false, "bad TR_provokeChecklist=%s", provoke2);
+        }
+    }
+
     LexicalTimer t("optimize", comp()->signature(), comp()->phaseTimer());
     TR::LexicalMemProfiler mp("optimize", comp()->signature(), comp()->phaseMemProfiler());
     TR::StackMemoryRegion stackMemoryRegion(*trMemory());

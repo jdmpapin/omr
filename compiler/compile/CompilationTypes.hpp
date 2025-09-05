@@ -200,6 +200,7 @@ class BitVectorPool {
 
 public:
     BitVectorPool(TR::Compilation *c);
+    bool canReleaseWithoutAllocating();
     TR_BitVector *get();
     void release(TR_BitVector *v);
 };

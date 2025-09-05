@@ -1389,6 +1389,7 @@ protected:
 
 public:
     uint32_t _hackFailAlloc; // 0: disabled, 1: fail first alloc, 2: fail second alloc, etc.
+    uint32_t _hackFailRegionAlloc; // 0: disabled, 1: fail first alloc, 2: fail second alloc, etc.
 
 protected:
     int16_t _currentOptIndex;
