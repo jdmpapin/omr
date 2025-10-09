@@ -78,12 +78,6 @@ dispatcher_thread_proc2(OMRPortLibrary* portLib, void *info)
 	/* Enviroment initialization specific for GC threads (after worker ID is set) */
 	env->initializeGCThread();
 
-	/* There may be slots within JIT bodies (JIT const refs), and GC
-	 * threads will write to them when their referents move. Since GC
-	 * threads never run JIT code, just allow writing indefinitely.
-	 */
-	omrthread_jit_write_protect_disable();
-
 	/* Signal that the thread was created succesfully */
 	workerInfo->workerFlags = WORKER_INFO_FLAG_OK;
 
